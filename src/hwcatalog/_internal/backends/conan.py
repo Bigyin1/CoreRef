@@ -10,7 +10,6 @@ from tempfile import TemporaryDirectory
 
 import networkx as nx
 
-from ...api.capabilities import CONAN_CAPABILITIES
 from ...api.errors import (
     BackendUnavailable,
     IdentityConflict,
@@ -74,7 +73,7 @@ class ConanReader:
 
 class ConanGraph(CatalogGraph):
     def __init__(self, backend: ConanBackend) -> None:
-        super().__init__(backend._read, CONAN_CAPABILITIES)
+        super().__init__(backend._read)
         self.backend = backend
 
     def dependency_closure(self, ref: Ref) -> GraphResult:
@@ -106,8 +105,6 @@ class ConanBackend:
     Recipes are trusted executable Conan code. Version one only accepts the
     canonical format emitted by ``write_recipe``. No binary packages are needed.
     """
-
-    capabilities = CONAN_CAPABILITIES
 
     def __init__(
         self,
@@ -179,7 +176,6 @@ class ConanBackend:
         return GraphResult(
             tuple(sorted(records.values(), key=lambda record: record.ref.identity)),
             _graph_dependencies(graph, records),
-            consistency="live",
         )
 
     def _load_graph(self, ref: Ref) -> tuple[NativeGraph, dict[Ref, Record]]:

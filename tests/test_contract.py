@@ -26,7 +26,7 @@ def test_get_many_preserves_order_duplicates_and_missing(catalog: Catalog) -> No
     assert catalog.search() == (first, second)
 
 
-def test_publication_is_immutable_and_conflicts_are_atomic(catalog: Catalog) -> None:
+def test_publication_is_immutable_and_conflicts_preserve_records(catalog: Catalog) -> None:
     original, new = release("existing"), release("new")
     catalog.publish((original,))
     with pytest.raises(IdentityConflict):
@@ -95,7 +95,6 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
     assert catalog.graph.consumers(shared.ref, SearchQuery(name="right")) == (right,)
     assert not catalog.graph.dependencies(root.ref, SearchQuery(name="absent"))
     assert catalog.graph.dependency_closure(shared.ref).records == (shared,)
-    assert graph.consistency == "snapshot"
 
 
 def test_closure_is_stable_when_new_consumers_are_published(catalog: Catalog) -> None:

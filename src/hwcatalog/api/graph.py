@@ -7,7 +7,6 @@ import networkx as nx
 
 from .._internal.graph import GraphReader
 from .._internal.validation import normalize_query, normalize_ref
-from .capabilities import SNAPSHOT_CAPABILITIES, BackendCapabilities
 from .models.graph import Dependency, GraphResult
 from .models.query import SearchQuery
 from .models.records import Record, Ref
@@ -16,13 +15,8 @@ from .models.records import Record, Ref
 class CatalogGraph:
     """Query dependency graphs; the owning Catalog closes the backend."""
 
-    def __init__(
-        self,
-        read: Callable[[], AbstractContextManager[GraphReader]],
-        capabilities: BackendCapabilities = SNAPSHOT_CAPABILITIES,
-    ) -> None:
+    def __init__(self, read: Callable[[], AbstractContextManager[GraphReader]]) -> None:
         self._read = read
-        self._capabilities = capabilities
 
     def dependencies(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
         """Return immediate dependencies in deterministic identity order."""
@@ -80,7 +74,6 @@ class CatalogGraph:
                     key=lambda edge: edge.to_json(),
                 )
             ),
-            consistency=self._capabilities.consistency,
         )
 
 

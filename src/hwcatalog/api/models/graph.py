@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Self
 
 import networkx as nx
 
@@ -37,11 +37,10 @@ class Dependency:
 class GraphResult:
     records: tuple[Record, ...]
     dependencies: tuple[Dependency, ...]
-    consistency: Literal["snapshot", "live"] = "snapshot"
 
     def to_networkx(self) -> _RefGraph:
         """Export a detached directed graph with frozen record and dependency attributes."""
-        graph: nx.DiGraph[Ref] = nx.DiGraph(consistency=self.consistency)
+        graph: nx.DiGraph[Ref] = nx.DiGraph()
         graph.add_nodes_from((record.ref, {"record": record}) for record in self.records)
         graph.add_edges_from(
             (edge.source, edge.target, {"dependency": edge}) for edge in self.dependencies

@@ -1,9 +1,8 @@
-"""Storage operations used by Catalog; backends own their read transactions."""
+"""Storage operations used by Catalog."""
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from .capabilities import BackendCapabilities
     from .graph import CatalogGraph
     from .models.graph import Dependency
     from .models.query import SearchQuery
@@ -25,7 +24,6 @@ class Backend(Protocol):
     """
 
     graph: CatalogGraph
-    capabilities: BackendCapabilities
 
     def get_many(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
         """Preserve input order and duplicates; raise NotFound if any reference is absent."""

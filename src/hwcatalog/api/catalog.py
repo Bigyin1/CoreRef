@@ -15,7 +15,6 @@ class Catalog:
     def __init__(self, backend: Backend) -> None:
         self._backend = backend
         self.graph = backend.graph
-        self.capabilities = backend.capabilities
 
     def __enter__(self) -> Catalog:
         return self
@@ -41,11 +40,11 @@ class Catalog:
     def publish(
         self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
     ) -> None:
-        """Save new records and outgoing dependencies; capabilities describe atomicity."""
+        """Save new records and their outgoing dependencies."""
         self._backend.publish(records, dependencies=dependencies)
 
     def search(self, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
-        """Return all matching records in deterministic order; see backend capabilities."""
+        """Return all matching records in deterministic identity order."""
         query = normalize_query(query)
         return self._backend.search(query)
 

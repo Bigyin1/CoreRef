@@ -33,9 +33,7 @@ def main() -> None:
             print(to_conan_reference(result.ref))
             print(result.to_json())
             graph = catalog.graph.dependency_closure(result.ref)
-            print(
-                f"{len(graph.records)} nodes, {len(graph.dependencies)} edges, {graph.consistency}"
-            )
+            print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
             native = backend.load_graph(result.ref)
             for package in native.root.conanfile.dependencies.host.topological_sort.values():
                 print(f"native dependency: {package.ref}")

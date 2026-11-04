@@ -36,10 +36,8 @@ SearchQuery задаёт необязательные точные фильтр�
 Dependencies и consumers возвращают непосредственно tuple[Record, ...],
 отсортированный по identity. Промежуточной структуры соседней привязки нет.
 
-GraphResult содержит records, dependencies и consistency. Корень входит в records;
-записи сортируются по identity, зависимости — по каноническому JSON. Consistency —
-snapshot для Memory и live для Conan. Lockfile фиксирует зависимости, но не создаёт
-общую транзакцию remote.
+GraphResult содержит records и dependencies. Корень входит в records;
+записи сортируются по identity, зависимости — по каноническому JSON.
 
 To_networkx() создаёт независимый nx.DiGraph с ключами Ref. Атрибут вершины record
 содержит Record, атрибут ребра dependency — Dependency. Изменение экспортированного

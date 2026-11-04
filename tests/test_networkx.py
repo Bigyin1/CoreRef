@@ -10,11 +10,11 @@ from tests.helpers import graph_json, release
 
 
 def test_empty_graph_and_isolated_record() -> None:
-    empty = GraphResult((), (), consistency="live").to_networkx()
+    empty = GraphResult((), ()).to_networkx()
     assert isinstance(empty, nx.DiGraph)
     assert not empty.is_multigraph()
     assert empty.number_of_nodes() == empty.number_of_edges() == 0
-    assert empty.graph["consistency"] == "live"
+    assert empty.graph == {}
     record = release("isolated")
     graph = GraphResult((record,), ()).to_networkx()
     assert tuple(graph.nodes) == (record.ref,)
@@ -47,10 +47,10 @@ def test_export_is_detached_and_payloads_stay_frozen() -> None:
         graph.nodes[source.ref]["record"].payload["changed"] = True
     graph.nodes[source.ref]["record"] = replace(source, payload={"changed": True})
     graph.edges[result.ref, source.ref]["dependency"] = Dependency(source.ref, result.ref)
-    graph.graph["consistency"] = "local edits"
+    graph.graph["annotation"] = "local edits"
     graph.remove_node(result.ref)
     assert graph_json(snapshot) == before
     fresh = snapshot.to_networkx()
     assert fresh.nodes[source.ref]["record"] is source
     assert fresh.edges[result.ref, source.ref]["dependency"] is edge
-    assert fresh.graph["consistency"] == "snapshot"
+    assert fresh.graph == {}

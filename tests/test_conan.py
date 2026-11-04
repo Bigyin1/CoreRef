@@ -83,8 +83,6 @@ def test_conan_round_trip_search_and_root_lockfile(conan_backend: ConanBackend) 
         catalog.get(be.ref),
     )
     assert not catalog.get_many(())
-    assert catalog.capabilities.lockfiles
-    assert not catalog.capabilities.atomic_publish
     for query in (
         SearchQuery(kind="rtl"),
         SearchQuery(version="1.0"),
@@ -95,7 +93,6 @@ def test_conan_round_trip_search_and_root_lockfile(conan_backend: ConanBackend) 
     assert not catalog.search(SearchQuery(name="missing"))
     assert not catalog.search(SearchQuery(name=""))
     expected = catalog.graph.dependency_closure(be.ref)
-    assert expected.consistency == "live"
     assert expected.dependencies == (edge,)
     assert len(expected.to_networkx()) == 2
     assert catalog.graph.dependencies(be.ref)[0] == stored

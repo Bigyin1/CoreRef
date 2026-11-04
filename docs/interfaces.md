@@ -15,7 +15,7 @@ Catalog владеет бэкендом и поддерживает контек
 | close() | Освобождает ресурсы бэкенда |
 
 Publish не обновляет существующие записи. Издатели одной идентичности координируются
-приложением. Атомарность определяется catalog.capabilities.atomic_publish.
+приложением.
 
 Find_dependents сначала фильтрует кандидатов по SearchQuery, затем проверяет их
 зависимости. Промежуточные узлы могут быть любыми. При transitive=False учитывается
@@ -48,17 +48,14 @@ ConanBackend.load_graph(ref) возвращает настоящий объек�
 аннотацией; объект во время выполнения принадлежит Conan. Метод специфичен для
 ConanBackend. Подробности: [нативный граф](conan.md#нативный-граф-из-обычного-python-скрипта).
 
-## Гарантии и ошибки
-
-Catalog.capabilities содержит atomic_publish, consistency и lockfiles. Memory даёт
-атомарную публикацию и snapshot; Conan — последовательную публикацию и live, lockfiles=True.
+## Ошибки
 
 Ошибки: NotFound, IdentityConflict, InvalidPublication, DependencyCycle,
 VersionConflict, InvalidPackage, BackendUnavailable, PartialPublicationError.
 Последняя содержит published и uncertain для восстановления после неопределённого
 результата записи. Автоматических повторов или rollback удалённой публикации нет.
 
-Backend — Protocol с graph, capabilities, get_many, search, publish и close.
+Backend — Protocol с graph, get_many, search, publish и close.
 JSONSerializable — Protocol с методом to_json() -> str; наследование не требуется.
 
 ## Внешние ресурсы

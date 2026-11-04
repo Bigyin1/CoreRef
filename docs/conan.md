@@ -18,13 +18,6 @@ Ref с namespace=soc1, name=cpu, kind=lib-lef, version=4.0 соответств�
 Неподходящие координаты отклоняются без переименования.
 Функции `to_conan_reference`, `from_conan_reference` находятся в `hwcatalog.backends.conan`.
 
-| Гарантия | Memory | Conan |
-|---|---|---|
-| Атомарная публикация batch | Да | Нет |
-| Согласованность чтения | snapshot | live |
-| Встроенные lockfiles | Нет | Да |
-
-Гарантии доступны через catalog.capabilities: atomic_publish, consistency, lockfiles.
 Оба бэкенда предоставляют один API Record/Dependency без типов связей и направлений.
 Dependencies и consumers возвращают tuple[Record, ...]; dependency_closure(ref)
 возвращает GraphResult с полем dependencies. Для представлений используется
@@ -135,9 +128,6 @@ Lockfile фиксирует версии и recipe revisions зависимос�
 нативного direct_host; транзитивные зависимости не превращаются в непосредственные.
 Lockfile не устраняет несовместимые требования: такие графы вызывают VersionConflict.
 Разрешение зависимостей принадлежит Conan; в публичном API каталога отдельного резолвера нет.
-
-Consistency=live отражает отсутствие общей транзакции между индексом remote и загрузками.
-Lockfile при этом закрепляет зависимости выбранного корня.
 
 Find_dependents сначала преобразует незаданные координаты кандидатов в wildcard Conan list,
 проверяет точные координаты и затем загружает граф каждого кандидата с его lockfile.

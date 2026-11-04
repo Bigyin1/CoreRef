@@ -1,10 +1,9 @@
-"""In-memory reference backend with atomic publication and snapshot reads."""
+"""In-memory reference storage for records and exact dependencies."""
 
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from ...api.capabilities import SNAPSHOT_CAPABILITIES
 from ...api.errors import NotFound
 from ...api.graph import CatalogGraph
 from ...api.models.graph import Dependency
@@ -47,8 +46,6 @@ class MemoryReader:
 
 
 class MemoryBackend:
-    capabilities = SNAPSHOT_CAPABILITIES
-
     def __init__(self) -> None:
         self._records: dict[Ref, Record] = {}
         self._dependencies: tuple[Dependency, ...] = ()
