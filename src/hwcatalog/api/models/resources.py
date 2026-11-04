@@ -21,6 +21,14 @@ class MaterializedResource:
     path: Path
 
 
+@dataclass(frozen=True)
+class MaterializedPackage:
+    """Artifact directory and optional SCM checkout, owned by the backend cache."""
+
+    path: Path
+    source_path: Path | None = None
+
+
 class Resource(ABC):
     """Common materialization contract for resource descriptors."""
 
@@ -158,4 +166,10 @@ class LocatedResource(Resource):
             raise MaterializationError("Resource path is not available locally") from exc
 
 
-__all__ = ["GitResource", "LocatedResource", "MaterializedResource", "Resource"]
+__all__ = [
+    "GitResource",
+    "LocatedResource",
+    "MaterializedPackage",
+    "MaterializedResource",
+    "Resource",
+]

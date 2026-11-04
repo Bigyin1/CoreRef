@@ -12,7 +12,7 @@ Catalog владеет бэкендом и поддерживает контек
 | search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по identity |
 | publish(records, *, dependencies=()) | Публикует новые Record и исходящие Dependency |
 | publish_file(path) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
-| materialize(ref) | MaterializedResource(path) с каталогами source/ и artifacts/ |
+| materialize(ref, *, with_sources=False) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
 | find_dependents(ref, *, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
 | close() | Освобождает ресурсы бэкенда |
 

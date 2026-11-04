@@ -19,7 +19,8 @@ _TOKEN = re.compile(r"[a-z0-9_-]+\Z")
 _VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
-_CONTENT_FORMAT: Literal[2] = 2
+_CONTENT_FORMAT: Literal[3] = 3
+_LEGACY_CONTENT_FORMAT = 2
 
 
 def to_conan_reference(ref: Ref) -> str:
@@ -66,7 +67,7 @@ def search_pattern(query: SearchQuery) -> str | None:
 
 class RecipeMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    format: Literal[1, 2] = 1
+    format: Literal[1, 2, 3] = 1
     has_source: bool = False
     requires: tuple[str, ...] = ()
 
@@ -79,7 +80,7 @@ class Lockfile(BaseModel):
     config_requires: tuple[str, ...] = ()
 
 
-def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, content: bool = False) -> str:
+def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, format_version: int = 1) -> str:
     name, version = to_conan_reference(ref).split("/")
     text = (
         "from conan import ConanFile\n\n\n"
@@ -90,8 +91,8 @@ def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, content: bool = Fal
         '    exports = "record.json", "hwcatalog.json", "conan.lock"\n'
         f"    requires = {requirements!r}\n"
     )
-    if content:
-        text += _CONTENT_METHODS
+    if format_version != 1:
+        text += _CONTENT_METHODS if format_version == _LEGACY_CONTENT_FORMAT else _SCM_METHODS
     return text
 
 
@@ -121,6 +122,32 @@ _CONTENT_METHODS = """
         if self.conan_data and "scm" in self.conan_data:
             copy(self, "*", src=os.path.join(self.source_folder, "checkout"),
                  dst=os.path.join(self.package_folder, "source"), excludes=(".git", ".git/*"))
+"""
+
+
+_SCM_METHODS = """
+    exports_sources = "artifacts/*"
+
+    def export(self):
+        from pathlib import Path
+        from conan.tools.scm import Git
+        marker = Path(self.recipe_folder) / "source-path.txt"
+        if marker.is_file():
+            Git(self, marker.read_text()).coordinates_to_conandata(repository=True)
+
+    def source(self):
+        import os
+        from conan.tools.scm import Git
+        if self.conan_data and "scm" in self.conan_data:
+            checkout = os.path.join(self.source_folder, "source")
+            os.makedirs(checkout, exist_ok=True)
+            Git(self, checkout).checkout_from_conandata_coordinates()
+
+    def package(self):
+        import os
+        from conan.tools.files import copy
+        copy(self, "*", src=os.path.join(self.source_folder, "artifacts"),
+             dst=os.path.join(self.package_folder, "artifacts"))
 """
 
 
@@ -154,7 +181,9 @@ def write_recipe(
         has_source=bool(record.source or source_path),
     )
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "conanfile.py").write_text(_recipe_text(record.ref, requirements, content=content))
+    (directory / "conanfile.py").write_text(
+        _recipe_text(record.ref, requirements, format_version=metadata.format)
+    )
     (directory / "record.json").write_text(replace(record, source=None).to_json())
     (directory / "hwcatalog.json").write_text(metadata.model_dump_json())
     if source_path is not None:
@@ -201,9 +230,7 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata,
         for dependency in metadata.requires:
             if to_conan_reference(from_conan_reference(dependency)) != dependency:
                 raise ValueError("Requirements must use exact versions without revisions")
-        recipe = _recipe_text(
-            record.ref, metadata.requires, content=metadata.format == _CONTENT_FORMAT
-        )
+        recipe = _recipe_text(record.ref, metadata.requires, format_version=metadata.format)
         if (directory / "conanfile.py").read_text() != recipe:
             raise ValueError("Only canonical catalog recipes are supported")
         _validate_lockfile(lockfile, expected, metadata)

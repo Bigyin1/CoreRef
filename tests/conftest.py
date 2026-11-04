@@ -1,9 +1,11 @@
 """In-memory instances provide the isolated dependency API contract."""
 
 from collections.abc import Callable, Iterator
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from dulwich import porcelain
 from dulwich.objects import Blob, Commit, ObjectID, Tree
 from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
@@ -55,3 +57,19 @@ def checkout(tmp_path: Path) -> Path:
         repo.refs.set_symbolic_ref(GitRef(b"HEAD"), GitRef(b"refs/heads/main"))
         repo.get_worktree().reset_index(tree.id)
     return path
+
+
+@pytest.fixture
+def git_origin(checkout: Path, tmp_path: Path) -> Path:
+    """A separate authoritative Git remote, standing in for GitLab in local tests."""
+    remote = tmp_path / "gitlab-origin.git"
+    with porcelain.clone(str(checkout), remote, bare=True, errstream=BytesIO()):
+        pass
+    with Repo(checkout) as repo:
+        config = repo.get_config()
+        config.set((b"remote", b"origin"), b"url", str(remote).encode())
+        config.write_to_path()
+        branches, _ = repo.refs.follow(GitRef(b"HEAD"))
+        branch = branches[-1].removeprefix(b"refs/heads/")
+        repo.refs[GitRef(b"refs/remotes/origin/" + branch)] = repo.head()
+    return remote

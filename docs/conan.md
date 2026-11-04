@@ -28,16 +28,15 @@
 без `..`. JSON не принимает дополнительные поля или списки источников.
 
 ```python
-from pathlib import Path
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.backends.conan import ConanBackend
 
-with Catalog(ConanBackend(Path("/absolute/path/to/conan-home"))) as catalog:
+with Catalog(ConanBackend()) as catalog:
     record = catalog.publish_file("package.json")
     print(record.source, record.files)
-    content = catalog.materialize(record.ref).path
-    print(content / "source")
-    print(content / "artifacts" / "timing/cpu.lib")
+    package = catalog.materialize(record.ref, with_sources=True)
+    print(package.source_path)  # SCM checkout in Conan's source cache
+    print(package.path / "artifacts" / "timing/cpu.lib")
 ```
 
 `publish_file()` возвращает сохранённый `Record`. Каталог автоматически создаёт
@@ -73,12 +72,25 @@ with Catalog(ConanBackend(Path("/absolute/path/to/conan-home"))) as catalog:
 штатным SCM-механизмом. `Record.source` возвращает `GitResource` из этих координат.
 Второй Git source модель не допускает.
 
-При создании пакета исходники копируются в `source/`, без `.git`; обычные файлы —
-в `artifacts/`. Сервер получает готовый пакет, поэтому `materialize()` не требует
-доступа к исходному Git или файлам издателя. Для захвата SCM и создания пакета
-с Git source нужен установленный Git. Conan по своим правилам может запретить
-загрузку рецепта с локальным SCM URL, если commit ещё не доступен в remote.
-См. [SCM capture в Conan](https://docs.conan.io/2/examples/tools/scm/git/capture_scm/git_capture_scm.html).
+Исходный код остаётся в GitLab (или другом Git remote). В Conan хранится его
+SCM — URL и точный commit. Публикация выполняется через `export-pkg`: Git-исходники
+в бинарный пакет не копируются и для заранее заданных координат не скачиваются.
+Обычные файлы из `files` сохраняются в пакете под `artifacts/`.
+
+`materialize(ref)` устанавливает артефакты и возвращает `MaterializedPackage.path`.
+Чтобы дополнительно получить код, вызовите `materialize(ref, with_sources=True)`.
+Адаптер передаёт scoped-конфигурацию `tools.build:download_source=True` команде
+Conan install; Conan выполняет `source()` и checkout точного commit. Путь к нему
+возвращается отдельно в `MaterializedPackage.source_path`. При чтении артефактов
+без этого флага `source_path` равен `None`.
+
+Источники должны быть доступны из GitLab при первом получении в новом cache;
+готовый Conan binary исходного кода не содержит. Уже полученный checkout использует
+source cache Conan. Права Git/SSH и GitLab настраиваются обычными средствами Git.
+При захвате SCM из локального пути нужны чистый checkout и установленный Git.
+Conan может запретить upload с локальным SCM URL, если commit не доступен в remote.
+См. [принудительное получение source в Conan](https://docs.conan.io/2/reference/conanfile/methods/source.html#forced-retrieval-of-sources)
+и [SCM capture](https://docs.conan.io/2/examples/tools/scm/git/capture_scm/git_capture_scm.html).
 
 `LocatedResource` сохраняет прежний смысл: внешний локальный или смонтированный
 NFS-путь. Такой ресурс не загружается в Conan автоматически. Дополнительные
@@ -87,10 +99,13 @@ NFS-путь. Такой ресурс не загружается в Conan ав�
 ## Граф и remote
 
 ```python
-backend = ConanBackend(Path("/absolute/path/to/conan-home"), remote="catalog", timeout=60)
+backend = ConanBackend(remote="catalog", timeout=60)
 ```
 
-Remote и аутентификация настраиваются обычными средствами Conan в этом home.
+Без аргумента `home` используется стандартный cache Conan (обычно `~/.conan2`).
+Путь выбирает `ConanAPI().home_folder`, с учётом `CONAN_HOME` и `.conanrc`.
+Явное `ConanBackend(Path("/tmp/test-cache"))` остаётся доступным для изоляции тестов.
+Remote и аутентификация настраиваются обычными средствами Conan в выбранном home.
 Адаптер читает и публикует в один remote; локальные конфликтующие revisions не
 подменяют удалённую идентичность. Настройки процесса `CONAN_HOME` и cwd после
 операций сохраняются. Timeout ограничивает отдельный HTTP-запрос, а не полное
@@ -108,13 +123,15 @@ Conan cache save/restore. Публикация не транзакционная
 содержит `published` и `uncertain`. Автоматического rollback или retry нет.
 Копирование home и архивов может быть дорогим для больших пакетов.
 
-Старые канонические рецепты первой версии остаются читаемыми. Для источников
-и файлов используется вторая версия внутреннего формата. Внешний CI использует
+Канонические рецепты первой и второй версий остаются читаемыми. Новые рецепты
+с SCM/файлами используют третью версию: `package()` копирует только артефакты,
+а `source()` получает Git отдельно. Исторические бинарные пакеты не переписываются. Внешний CI использует
 тот же `catalog.publish_file()`, без написания рецепта Conan. Ручные рецепты
 не являются поддерживаемым входным форматом.
 
 `MemoryBackend` поддерживает тот же JSON и хранит файлы во временном каталоге
 до `close()`. Для локального Git source он фиксирует HEAD и локальный путь через
 `GitResource`; проверка чистоты и выбор remote URL относятся к Conan-адаптеру.
-Git-операции Memory требуют extra `git`. `materialize()` для записи без файлов
+Git-операции Memory требуют extra `git` и выполняются только при `with_sources=True`.
+Публикация SCM не сохраняет снимок исходников. `materialize()` для записи без файлов
 и source вызывает `MaterializationError`.

@@ -10,7 +10,6 @@ API описывает записи и точные зависимости па�
 Тип представления задаётся полем Ref.kind; типизации рёбер нет.
 
 ```python
-from pathlib import Path
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
@@ -19,7 +18,7 @@ from hwcatalog.backends.conan import ConanBackend
 
 rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"))
 macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.lib"]})
-with Catalog(ConanBackend(Path("/absolute/path/to/conan-home"))) as catalog:
+with Catalog(ConanBackend()) as catalog:
     catalog.publish((rtl, macro), dependencies=(Dependency(macro.ref, rtl.ref),))
     inputs = catalog.graph.dependencies(macro.ref)  # tuple[Record, ...]
     implementations = catalog.find_dependents(
@@ -42,15 +41,16 @@ make integration  # собственный временный Conan server
 Публикация файлов и Git-исходников:
 
 ```python
-with Catalog(ConanBackend(Path("/absolute/path/to/conan-home"))) as catalog:
+with Catalog(ConanBackend()) as catalog:
     record = catalog.publish_file("package.json")
-    content = catalog.materialize(record.ref).path
+    package = catalog.materialize(record.ref, with_sources=True)
 ```
 
 JSON описывает один пакет: `ref`, `payload`, `dependencies`, необязательный один
 `source` и карту `files`. Git-координаты фиксируются SCM-механизмом Conan и хранятся
-в `conandata.yml`. Файлы и исходники упаковываются в Conan; `LocatedResource`
-остаётся внешним путём. Пример полного описания — [в документации](docs/conan.md).
+в `conandata.yml`. В Conan упаковываются обычные файлы; Git-код остаётся в GitLab.
+Опция `with_sources=True` получает его штатным `source()` Conan и возвращает
+отдельный `package.source_path`. `LocatedResource` остаётся внешним путём. Пример полного описания — [в документации](docs/conan.md).
 
 Conan-рецепты и нативный граф создаются внутри адаптера. Все команды выполняются
 через Conan Python API; нативные dependencies и топологический порядок используются

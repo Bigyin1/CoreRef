@@ -365,3 +365,39 @@ def test_native_graph_rejects_an_unlocked_transitive_dependency(
     lock_path.write_text(json.dumps(lock))
     with pytest.raises(InvalidPackage):
         conan_backend._load_graph(root.ref)
+
+
+def test_default_cache_uses_conan_home_and_stays_bound_to_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "native-home"
+    monkeypatch.setenv("CONAN_HOME", str(home))
+    backend = ConanBackend()
+    assert backend._client.home == home.resolve()
+    other = tmp_path / "later-home"
+    monkeypatch.setenv("CONAN_HOME", str(other))
+    with Catalog(backend) as catalog:
+        catalog.publish((record(),))
+        assert catalog.get(record().ref).ref == record().ref
+    assert not other.exists()
+
+
+def test_default_cache_uses_native_conanrc_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONAN_HOME", raising=False)
+    (tmp_path / ".conanrc").write_text("conan_home=./configured-home\n")
+    backend = ConanBackend()
+    assert backend._client.home == (tmp_path / "configured-home").resolve()
+    backend.close()
+
+
+def test_invalid_default_cache_is_a_domain_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CONAN_HOME", "relative-path")
+    with pytest.raises(BackendUnavailable, match="default home"):
+        ConanBackend()

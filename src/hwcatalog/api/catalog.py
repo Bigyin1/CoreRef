@@ -7,7 +7,7 @@ from .._internal.validation import normalize_query, normalize_ref
 from .models.graph import Dependency
 from .models.query import SearchQuery
 from .models.records import Record, Ref
-from .models.resources import MaterializedResource
+from .models.resources import MaterializedPackage
 from .protocols import Backend
 
 
@@ -49,9 +49,9 @@ class Catalog:
         """Publish one package described by JSON; paths are relative to this file."""
         return self._backend.publish_file(Path(path))
 
-    def materialize(self, ref: Ref) -> MaterializedResource:
-        """Return locally available package content (source/ and artifacts/)."""
-        return self._backend.materialize(normalize_ref(ref))
+    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+        """Install artifacts and optionally fetch SCM sources into the backend cache."""
+        return self._backend.materialize(normalize_ref(ref), with_sources=with_sources)
 
     def search(self, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
         """Return all matching records in deterministic identity order."""

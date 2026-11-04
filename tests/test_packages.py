@@ -12,6 +12,7 @@ from dulwich.repo import Repo
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
     BackendUnavailable,
+    CatalogError,
     IdentityConflict,
     InvalidPackage,
     InvalidPublication,
@@ -77,10 +78,15 @@ def test_local_source_is_captured_once_outside_payload(
         assert record.source.resolved_commit == repository.head().decode()
     assert record.payload == {"tool": "synthesis"}
     assert packages.get(record.ref) == record
+    artifacts = packages.materialize(record.ref)
+    assert artifacts.source_path is None
+    assert not (artifacts.path / "source").exists()
+    fetched = packages.materialize(record.ref, with_sources=True)
+    assert fetched.source_path is not None
+    assert (fetched.source_path / "cpu.sv").read_text() == "module cpu; endmodule\n"
+    assert not fetched.source_path.is_relative_to(fetched.path)
     shutil.rmtree(checkout)
-    content = packages.materialize(record.ref).path
-    assert (content / "source/cpu.sv").read_text() == "module cpu; endmodule\n"
-    assert not (content / "source/.git").exists()
+    assert packages.materialize(record.ref, with_sources=True).source_path == fetched.source_path
     assert Record.from_json(record.to_json()) == record
 
 
@@ -95,7 +101,9 @@ def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path)
         assert "source" not in json.loads((folder / "record.json").read_text())
         assert "scm" in (folder / "conandata.yml").read_text()
         assert str(checkout) not in (folder / "conanfile.py").read_text()
-        assert (catalog.materialize(record.ref).path / "source/cpu.sv").is_file()
+        fetched = catalog.materialize(record.ref, with_sources=True)
+        assert fetched.source_path is not None
+        assert (fetched.source_path / "cpu.sv").is_file()
         with pytest.raises(IdentityConflict):
             catalog.publish_file(description(tmp_path, source=asdict(source)))
         (folder / "conandata.yml").write_text("scm: {commit: nope}")
@@ -161,7 +169,7 @@ def test_missing_content_and_record(packages: Catalog) -> None:
         packages.materialize(record.ref)
 
 
-def test_record_source_is_also_snapshotted_at_publication(
+def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
     packages: Catalog, checkout: Path
 ) -> None:
     source = GitResource.from_repository(checkout, repository_url=str(checkout))
@@ -169,4 +177,28 @@ def test_record_source_is_also_snapshotted_at_publication(
     packages.publish((record,))
     shutil.rmtree(checkout)
     assert packages.get(record.ref) == record
-    assert (packages.materialize(record.ref).path / "source/cpu.sv").is_file()
+    result = packages.materialize(record.ref)
+    assert result.source_path is None
+    assert not (result.path / "source").exists()
+    with pytest.raises(CatalogError):
+        packages.materialize(record.ref, with_sources=True)
+
+
+def test_publishing_pinned_scm_does_not_contact_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    def reject(*args: object, **kwargs: object) -> object:
+        raise AssertionError("SCM publication must not clone or check out Git")
+
+    monkeypatch.setattr(subprocess, "run", reject)
+    monkeypatch.setattr(subprocess, "Popen", reject)
+    source = GitResource("https://gitlab.example.invalid/rtl/cpu.git", "v1", "a" * 40)
+    record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
+    with Catalog(ConanBackend(tmp_path / "home")) as catalog:
+        catalog.publish((record,))
+        assert catalog.get(record.ref) == record
+        package = catalog.materialize(record.ref)
+        assert package.source_path is None
+        assert not (package.path / "source").exists()

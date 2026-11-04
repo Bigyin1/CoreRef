@@ -32,6 +32,19 @@ class _Commands(Protocol):
 class _API(Protocol):
     command: _Commands
 
+    @property
+    def home_folder(self) -> str: ...
+
+
+def _resolve_home(home: Path | None) -> Path:
+    if home is not None:
+        return home.expanduser().resolve()
+    try:
+        with _API_LOCK:
+            return Path(cast(_API, ConanAPI()).home_folder).resolve()
+    except (ConanException, OSError) as error:
+        raise BackendUnavailable(f"Conan could not resolve its default home: {error}") from error
+
 
 class RecipeRevisions(BaseModel):
     revisions: dict[str, object] = Field(default_factory=dict)
@@ -42,8 +55,8 @@ class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
 
 
 class ConanClient:
-    def __init__(self, home: Path, remote: str | None, timeout: float) -> None:
-        self.home = home.resolve()
+    def __init__(self, home: Path | None, remote: str | None, timeout: float) -> None:
+        self.home = _resolve_home(home)
         self.home.mkdir(parents=True, exist_ok=True)
         self.remote = remote
         self.timeout = timeout
@@ -152,19 +165,25 @@ class ConanClient:
         result = cast(Mapping[str, object], self.run("export", str(directory), "--no-remote"))
         return cast(NativeReference, result["reference"]).repr_notime()
 
-    def create(self, directory: Path) -> None:
+    def export_package(self, directory: Path) -> None:
         self.run(
-            "create",
+            "export-pkg",
             str(directory),
             "--test-folder=",
-            "--build=missing",
+            "--skip-binaries",
             "--lockfile",
             str(directory / "conan.lock"),
             *self.profile_args,
             *self.source_args,
         )
 
-    def install(self, reference: str, lockfile: Path, output: Path) -> NativeGraph:
+    def install(
+        self, reference: str, lockfile: Path, output: Path, *, with_sources: bool = False
+    ) -> NativeGraph:
+        source_args: tuple[str, ...] = ()
+        if with_sources:
+            logical = reference.split("#", 1)[0]
+            source_args = ("--conf:host", f"{logical}:tools.build:download_source=True")
         result = cast(
             Mapping[str, object],
             self.run(
@@ -174,6 +193,7 @@ class ConanClient:
                 "--lockfile",
                 str(lockfile),
                 "--build=never",
+                *source_args,
                 "--output-folder",
                 str(output),
                 *self.profile_args,

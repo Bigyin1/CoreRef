@@ -24,7 +24,7 @@ from ...api.graph import CatalogGraph
 from ...api.models.graph import Dependency, GraphResult
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
-from ...api.models.resources import MaterializedResource
+from ...api.models.resources import MaterializedPackage
 from ..manifest import Manifest, read_manifest
 from ..validation import (
     normalize_dependency,
@@ -113,7 +113,7 @@ class ConanBackend:
 
     def __init__(
         self,
-        home: Path,
+        home: Path | None = None,
         *,
         remote: str | None = None,
         timeout: float = 60,
@@ -272,10 +272,10 @@ class ConanBackend:
         _, metadata, _ = read_recipe(exported, ref)
         if metadata.has_source:
             shutil.copyfile(exported / "conandata.yml", directory / "conandata.yml")
-        # The first export captured SCM. Reuse those coordinates during create().
+        # The first export captured SCM. Reuse those coordinates during binary export.
         (directory / "source-path.txt").unlink(missing_ok=True)
         stage.graph(directory)
-        stage.create(directory)
+        stage.export_package(directory)
         archive = directory / "package.tgz"
         stage.run("cache", "save", f"{pinned}:*", "--file", str(archive))
         return PreparedRecipe(ref, directory, pinned, archive)
@@ -305,11 +305,11 @@ class ConanBackend:
                 raise PartialPublicationError(tuple(published), recipe.record_ref) from exc
             published.append(recipe.record_ref)
 
-    def materialize(self, ref: Ref) -> MaterializedResource:
-        """Install the data package; source access is only needed during creation."""
+    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+        """Install artifacts and optionally run Conan source retrieval for this package."""
         with self._read():
             pinned, directory = self._locate(normalize_ref(ref))
-            record, _, locked = read_recipe(directory, ref)
+            record, metadata, locked = read_recipe(directory, ref)
             if not record.source and not record.files:
                 raise MaterializationError("Package has no stored source or artifacts")
             self._load_graph(ref)
@@ -320,11 +320,19 @@ class ConanBackend:
                         version="0.5", requires=tuple(sorted({*lock_references(locked), pinned}))
                     ).model_dump_json()
                 )
-                result = self._client.install(pinned, lock, Path(temporary))
+                result = self._client.install(
+                    pinned, lock, Path(temporary), with_sources=with_sources
+                )
                 package = result.root.conanfile.dependencies.host[to_conan_reference(ref)]
                 if package.package_folder is None:
                     raise MaterializationError("Conan did not install the data package")
-                return MaterializedResource(Path(package.package_folder))
+                source_path = None
+                if with_sources and record.source is not None:
+                    if package.folders.source_folder is None:
+                        raise MaterializationError("Conan did not provide the SCM source folder")
+                    subfolder = "checkout" if metadata.format in (1, 2) else "source"
+                    source_path = Path(package.folders.source_folder) / subfolder
+                return MaterializedPackage(Path(package.package_folder), source_path)
 
 
 def _validate_coordinates(

@@ -43,6 +43,11 @@ class NativeDependencies(Protocol):
     def __getitem__(self, name: str) -> NativePackage: ...
 
 
+class NativeFolders(Protocol):
+    @property
+    def source_folder(self) -> str | None: ...
+
+
 class NativePackage(Protocol):
     @property
     def ref(self) -> NativeReference: ...
@@ -52,6 +57,9 @@ class NativePackage(Protocol):
 
     @property
     def package_folder(self) -> str | None: ...
+
+    @property
+    def folders(self) -> NativeFolders: ...
 
     @property
     def dependencies(self) -> NativeDependencies: ...

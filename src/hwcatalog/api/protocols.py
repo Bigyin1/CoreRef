@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from .models.graph import Dependency
     from .models.query import SearchQuery
     from .models.records import Record, Ref
-    from .models.resources import MaterializedResource
+    from .models.resources import MaterializedPackage
 
 
 @runtime_checkable
@@ -48,8 +48,8 @@ class Backend(Protocol):
         """Publish a single-package JSON document with optional source and files."""
         ...
 
-    def materialize(self, ref: Ref) -> MaterializedResource:
-        """Provide the package's local content directory."""
+    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+        """Provide artifacts; source_path is populated only when sources are requested."""
         ...
 
     def close(self) -> None:

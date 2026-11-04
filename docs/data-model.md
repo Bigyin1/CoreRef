@@ -50,4 +50,6 @@ GitResource описывает точный Git-коммит; LocatedResource �
 к внешнему файлу или каталогу. Их materialize() возвращает MaterializedResource(path).
 Git source пакета задаётся полем source; в Conan его координаты хранятся в conandata.yml.
 LocatedResource может храниться в payload и не загружается в Conan автоматически.
-Catalog.materialize(ref) устанавливает содержимое пакета с source/ и artifacts/.
+Catalog.materialize(ref) возвращает MaterializedPackage: path указывает на артефакты,
+а source_path — на отдельный SCM checkout, если передан with_sources=True.
+Git-код не копируется в новые Conan binaries; source() получает его из GitLab.

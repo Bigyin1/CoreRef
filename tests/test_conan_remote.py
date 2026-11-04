@@ -130,8 +130,8 @@ def test_remote_round_trip_external_ci_and_cache_independence(
         catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))
 
 
-def test_remote_stores_source_and_artifacts_without_git_or_original_files(
-    remote_backend: ConanBackend, tmp_path: Path, checkout: Path
+def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
+    remote_backend: ConanBackend, tmp_path: Path, checkout: Path, git_origin: Path
 ) -> None:
     # The isolated test server deliberately accepts a local SCM URL.
     (remote_backend._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
@@ -160,8 +160,21 @@ def test_remote_stores_source_and_artifacts_without_git_or_original_files(
     shutil.copyfile(remote_backend._client.home / "remotes.json", home / "remotes.json")
     with Catalog(ConanBackend(home, remote="catalog")) as reader:
         assert reader.get(published.ref) == published
-        content = reader.materialize(published.ref).path
-        assert (content / "source/cpu.sv").read_text() == "module cpu; endmodule\n"
-        assert (content / "artifacts/cpu.lib").read_text() == "library(cpu) {}"
-        assert not (content / "source/.git").exists()
-        assert reader.materialize(published.ref).path == content
+        installed = reader.materialize(published.ref)
+        assert installed.source_path is None
+        assert not (installed.path / "source").exists()
+        assert (installed.path / "artifacts/cpu.lib").read_text() == "library(cpu) {}"
+        assert published.source is not None
+        assert published.source.repository_url == str(git_origin)
+        offline = git_origin.with_name("offline-origin.git")
+        git_origin.rename(offline)
+        try:
+            with pytest.raises(BackendUnavailable):
+                reader.materialize(published.ref, with_sources=True)
+        finally:
+            offline.rename(git_origin)
+        fetched = reader.materialize(published.ref, with_sources=True)
+        assert fetched.path == installed.path
+        assert fetched.source_path is not None
+        assert (fetched.source_path / "cpu.sv").read_text() == "module cpu; endmodule\n"
+        assert not fetched.source_path.is_relative_to(fetched.path)
