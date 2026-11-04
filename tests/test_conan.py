@@ -155,7 +155,15 @@ def test_native_conan_diamond_conflict_is_a_domain_error(conan_backend: ConanBac
     )
     with pytest.raises(VersionConflict):
         conan_backend.publish((root, left, right, first, second), dependencies=edges)
-    assert not conan_backend.search(SearchQuery())
+    # Preparation uses the normal cache and does not roll back completed packages.
+    assert {record.ref for record in conan_backend.search(SearchQuery())} == {
+        left.ref,
+        right.ref,
+        first.ref,
+        second.ref,
+    }
+    with pytest.raises(NotFound):
+        conan_backend.get_many((root.ref,))
 
 
 def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: Path) -> None:

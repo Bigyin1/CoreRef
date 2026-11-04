@@ -51,7 +51,6 @@ class PreparedRecipe:
     record_ref: Ref
     directory: Path
     reference: str
-    archive: Path
 
 
 class ConanReader:
@@ -235,10 +234,6 @@ class ConanBackend:
         dependencies: tuple[Dependency, ...],
         manifest: Manifest | None,
     ) -> tuple[PreparedRecipe, ...]:
-        # Validate every graph in a private cache before exposing any new records.
-        stage_home = temporary / "home"
-        shutil.copytree(self._client.home, stage_home)
-        stage = ConanClient(stage_home, self._client.remote, self._client.timeout)
         order: nx.DiGraph[Ref] = nx.DiGraph()
         order.add_nodes_from(record.ref for record in records)
         new_refs = {record.ref for record in records}
@@ -260,25 +255,22 @@ class ConanBackend:
                 files=manifest.files if manifest else None,
             )
             self._seed_lockfile(directory, targets, prepared)
-            prepared[ref] = self._build_recipe(stage, directory, ref)
+            prepared[ref] = self._build_recipe(directory, ref)
         return tuple(prepared.values())
 
-    @staticmethod
-    def _build_recipe(stage: ConanClient, directory: Path, ref: Ref) -> PreparedRecipe:
-        stage.graph(directory)
-        stage.create_lockfile(directory, seed=directory / "conan.lock")
-        pinned = stage.export(directory)
-        exported = stage.cache_path(pinned, download=False)
+    def _build_recipe(self, directory: Path, ref: Ref) -> PreparedRecipe:
+        self._client.graph(directory)
+        self._client.create_lockfile(directory, seed=directory / "conan.lock")
+        pinned = self._client.export(directory)
+        exported = self._client.cache_path(pinned, download=False)
         _, metadata, _ = read_recipe(exported, ref)
         if metadata.has_source:
             shutil.copyfile(exported / "conandata.yml", directory / "conandata.yml")
         # The first export captured SCM. Reuse those coordinates during binary export.
         (directory / "source-path.txt").unlink(missing_ok=True)
-        stage.graph(directory)
-        stage.export_package(directory)
-        archive = directory / "package.tgz"
-        stage.run("cache", "save", f"{pinned}:*", "--file", str(archive))
-        return PreparedRecipe(ref, directory, pinned, archive)
+        self._client.graph(directory)
+        self._client.export_package(directory)
+        return PreparedRecipe(ref, directory, pinned)
 
     def _seed_lockfile(
         self, directory: Path, targets: tuple[Ref, ...], prepared: dict[Ref, PreparedRecipe]
@@ -299,7 +291,6 @@ class ConanBackend:
         published: list[Ref] = []
         for recipe in prepared:
             try:
-                self._client.run("cache", "restore", str(recipe.archive))
                 self._client.upload(recipe.reference)
             except (BackendUnavailable, InvalidPackage) as exc:
                 raise PartialPublicationError(tuple(published), recipe.record_ref) from exc
