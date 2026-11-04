@@ -13,22 +13,17 @@ Ref с namespace=soc1, name=cpu, kind=lib-lef, version=4.0 соответств�
 Неподходящие координаты отклоняются без переименования.
 Функции `to_conan_reference`, `from_conan_reference` находятся в `hwcatalog.backends.conan`.
 
-| Возможность | Memory / Memgraph | Conan |
+| Гарантия | Memory | Conan |
 |---|---|---|
-| Record, чтение, поиск, публикация | Да | Да |
-| REQUIRES, зависимости и consumers | Да | Да |
-| find_dependents с фильтром кандидатов | Да | Да, проверяет графы кандидатов |
-| Остальные виды связей | Да | UnsupportedOperation |
-| Alias, ordinal, metadata связи | Да | UnsupportedOperation |
-| resolve_versions=True | Рёбра совместимости | UnsupportedOperation |
-| Lockfiles | Нет | В каждом рецепте |
 | Атомарная публикация batch | Да | Нет |
 | Согласованность чтения | snapshot | live |
+| Встроенные lockfiles | Нет | Да |
 
-Гарантии доступны через `catalog.capabilities`: relation_kinds, relation_attributes,
-version_resolution, atomic_publish, consistency, lockfiles.
-`implementations()` ищет явные IMPLEMENTS и не поддерживается Conan.
-Для представлений используется find_dependents с нужными координатами кандидатов.
+Гарантии доступны через catalog.capabilities: atomic_publish, consistency, lockfiles.
+Оба бэкенда предоставляют один API Record/Dependency без типов связей и направлений.
+Dependencies и consumers возвращают tuple[Record, ...]; dependency_closure(ref)
+возвращает GraphResult с полем dependencies. Для представлений используется
+find_dependents с фильтрами кандидатов по координатам.
 
 ## Хранилище
 
@@ -101,7 +96,7 @@ Lockfile фиксирует версии и recipe revisions зависимос�
 и автоматическое пересоздание при чтении не применяются. Из JSON берутся только прямые
 рёбра; транзитивные записи Conan не превращаются в непосредственные зависимости.
 Lockfile не устраняет несовместимые требования: такие графы вызывают VersionConflict.
-Резолвер hwcatalog и BACKWARD_COMPATIBLE_WITH в этом бэкенде не участвуют.
+Разрешение зависимостей принадлежит Conan; в публичном API каталога отдельного резолвера нет.
 
 Consistency=live отражает отсутствие общей транзакции между индексом remote и загрузками.
 Lockfile при этом закрепляет зависимости выбранного корня.

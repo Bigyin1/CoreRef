@@ -3,9 +3,8 @@
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.enums import RelationKind
 from hwcatalog.api.errors import NotFound
-from hwcatalog.api.models.graph import Relation
+from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 
@@ -18,11 +17,11 @@ def test_candidate_search_uses_arbitrary_paths_and_exact_versions(catalog: Catal
     wrong = Record(Ref("cpu", "5.0", "lib-lef", "soc"))
     unrelated = Record(Ref("cpu", "6.0", "lib-lef", "soc"))
     edges = (
-        Relation(middle.ref, rtl.ref, RelationKind.REQUIRES),
-        Relation(macro.ref, middle.ref, RelationKind.REQUIRES),
-        Relation(wrong.ref, other.ref, RelationKind.REQUIRES),
+        Dependency(middle.ref, rtl.ref),
+        Dependency(macro.ref, middle.ref),
+        Dependency(wrong.ref, other.ref),
     )
-    catalog.publish((rtl, other, middle, macro, wrong, unrelated), relations=edges)
+    catalog.publish((rtl, other, middle, macro, wrong, unrelated), dependencies=edges)
     query = SearchQuery(namespace="soc", name="cpu", kind="lib-lef")
     assert catalog.find_dependents(rtl.ref, candidates=query) == (macro,)
     assert not catalog.find_dependents(rtl.ref, candidates=query, transitive=False)
@@ -33,16 +32,16 @@ def test_candidate_search_uses_arbitrary_paths_and_exact_versions(catalog: Catal
         catalog.find_dependents(Ref("missing", "1.0", "rtl", "soc"), candidates=query)
 
 
-def test_exact_closure_is_the_default(catalog: Catalog) -> None:
+def test_exact_closure_preserves_published_versions(catalog: Catalog) -> None:
     root, first, second = (
         Record(Ref(name, version, "rtl", "soc"))
         for name, version in (("top", "1.0"), ("cpu", "1.0"), ("cpu", "2.0"))
     )
     catalog.publish(
         (root, first, second),
-        relations=(
-            Relation(root.ref, first.ref, RelationKind.REQUIRES),
-            Relation(root.ref, second.ref, RelationKind.REQUIRES),
+        dependencies=(
+            Dependency(root.ref, first.ref),
+            Dependency(root.ref, second.ref),
         ),
     )
     assert {record.ref for record in catalog.graph.dependency_closure(root.ref).records} == {

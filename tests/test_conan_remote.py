@@ -14,9 +14,8 @@ from urllib.request import urlopen
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.enums import RelationKind
 from hwcatalog.api.errors import BackendUnavailable, IdentityConflict
-from hwcatalog.api.models.graph import Relation
+from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend, write_recipe
@@ -91,7 +90,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"), {"source": "cpu.sv"})
     be = Record(Ref("cpu", "4.0", "lib-lef", "soc"), {"source": "cpu.lib"})
     catalog = Catalog(remote_backend)
-    catalog.publish((be, rtl), relations=(Relation(be.ref, rtl.ref, RelationKind.REQUIRES),))
+    catalog.publish((be, rtl), dependencies=(Dependency(be.ref, rtl.ref),))
     assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))[0].ref == be.ref
     with pytest.raises(IdentityConflict):
         catalog.publish((rtl,))
@@ -102,9 +101,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     remote_backend._cli.create_lockfile(rogue)
     remote_backend._cli.export(rogue)
     another_be = Record(Ref("cpu", "5.0", "lib-lef", "soc"))
-    catalog.publish(
-        (another_be,), relations=(Relation(another_be.ref, rtl.ref, RelationKind.REQUIRES),)
-    )
+    catalog.publish((another_be,), dependencies=(Dependency(another_be.ref, rtl.ref),))
     assert {r.ref for r in catalog.graph.dependency_closure(another_be.ref).records} == {
         another_be.ref,
         rtl.ref,

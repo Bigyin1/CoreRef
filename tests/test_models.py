@@ -4,15 +4,12 @@ import json
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError, dataclass, replace
 from enum import StrEnum
-from typing import cast
 
 import pytest
 
-from hwcatalog._internal.validation import normalize_record, normalize_relation
+from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.enums import RelationKind
 from hwcatalog.api.errors import IdentityConflict, InvalidPublication
-from hwcatalog.api.models.graph import Relation
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.api.protocols import JSONSerializable
 from hwcatalog.api.types import JSON
@@ -126,30 +123,6 @@ def test_kind_is_required() -> None:
 def test_namespace_is_required() -> None:
     with pytest.raises(TypeError):
         Ref("core", "1", "artifact")  # type: ignore[call-arg]
-
-
-@pytest.mark.parametrize("kind", ["unknown", 12])
-def test_invalid_relation_kind(kind: str | int) -> None:
-    with pytest.raises(InvalidPublication):
-        normalize_relation(
-            Relation(
-                Ref("a", "1", "release", "demo"),
-                Ref("b", "1", "release", "demo"),
-                cast("RelationKind", kind),
-            )
-        )
-
-
-@pytest.mark.parametrize("ordinal", [True, -1, "1"])
-def test_relation_bindings_remain_structural(ordinal: bool | int | str) -> None:
-    edge = Relation(
-        Ref("a", "1", "release", "demo"),
-        Ref("b", "1", "release", "demo"),
-        RelationKind.REQUIRES,
-        ordinal=cast("int", ordinal),
-    )
-    with pytest.raises(InvalidPublication):
-        normalize_relation(edge)
 
 
 def test_empty_batch(catalog: Catalog) -> None:

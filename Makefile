@@ -1,4 +1,4 @@
-.PHONY: install check unit integration conan-integration build lab
+.PHONY: install check unit integration build
 
 install:
 	uv sync --frozen
@@ -9,16 +9,10 @@ check:
 	uv run --frozen mypy
 
 unit:
-	uv run --frozen pytest -m 'not integration and not conan_remote'
+	uv run --frozen pytest -m 'not conan_remote'
 
 integration:
-	uv run --frozen pytest --backend=memgraph -m 'not conan and not conan_remote'
-
-conan-integration:
 	uv run --frozen pytest -m conan_remote
 
 build:
 	uv build
-
-lab:
-	docker compose -p hwcatalog-demo --profile lab up -d --wait

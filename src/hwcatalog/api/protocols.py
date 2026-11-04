@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from .capabilities import BackendCapabilities
     from .graph import CatalogGraph
-    from .models.graph import Relation
+    from .models.graph import Dependency
     from .models.query import SearchQuery
     from .models.records import Record, Ref
 
@@ -35,8 +35,10 @@ class Backend(Protocol):
         """Return all exact AND-matches in deterministic identity order; an empty tuple if none."""
         ...
 
-    def publish(self, records: tuple[Record, ...], *, relations: tuple[Relation, ...] = ()) -> None:
-        """Save a batch of new records and relations; existing refs raise IdentityConflict.
+    def publish(
+        self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
+    ) -> None:
+        """Save a batch of new records and dependencies; existing refs raise IdentityConflict.
 
         There is no publication tracking or retry guarantee in the PoC API.
         """

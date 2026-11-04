@@ -1,1 +1,1 @@
-"""Bundled adapters; import a backend explicitly from memory or memgraph."""
+"""Bundled Conan and in-memory adapters; import a backend explicitly."""

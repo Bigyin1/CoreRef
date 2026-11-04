@@ -34,10 +34,6 @@ class BackendUnavailable(CatalogError):
     """The storage could not complete an operation."""
 
 
-class UnsupportedOperation(CatalogError):
-    """The backend cannot provide the requested operation or relation semantics."""
-
-
 class InvalidPackage(CatalogError):
     """A stored Conan recipe violates the catalog package format."""
 
@@ -70,6 +66,5 @@ __all__ = [
     "MaterializationError",
     "NotFound",
     "PartialPublicationError",
-    "UnsupportedOperation",
     "VersionConflict",
 ]

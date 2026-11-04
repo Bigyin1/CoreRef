@@ -1,74 +1,51 @@
 # hwcatalog-conan
 
-Отдельный экспериментальный проект на основе hwcatalog, коммит `3dba7e2`.
-Имя дистрибутива — `hwcatalog-conan`, импорты сохранены: `hwcatalog`.
+Экспериментальный каталог hardware-проектов на Conan 2.34. Отдельный проект создан
+на основе hwcatalog, коммит `3dba7e2`; имя дистрибутива — hwcatalog-conan,
+Python-импорты — `hwcatalog`.
 
-Узлы хранятся как Conan-рецепты с Record и собственным `conan.lock`.
-Формат имени — `namespace.name.kind/version`, например `soc1.cpu.lib-lef/4.0`.
-Поиск представлений выбирает кандидатов по имени и проверяет их зависимость
-от точной версии RTL; промежуточные узлы могут быть любыми.
+API описывает записи и точные зависимости пакетов. Узел хранится как рецепт Conan
+с JSON-содержимым и собственным `conan.lock`. Имя имеет формат
+`namespace.name.kind/version`, например `soc1.cpu.lib-lef/4.0`.
+Тип представления задаётся полем Ref.kind; типизации рёбер нет.
 
 ```python
 from pathlib import Path
 from hwcatalog.api.catalog import Catalog
+from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
-from hwcatalog.api.models.records import Ref
+from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
 
+rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"))
+macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.lib"]})
 with Catalog(ConanBackend(Path("/absolute/path/to/conan-home"))) as catalog:
-    rtl = Ref("cpu", "2.3", "rtl", "soc1")
+    catalog.publish((rtl, macro), dependencies=(Dependency(macro.ref, rtl.ref),))
+    inputs = catalog.graph.dependencies(macro.ref)  # tuple[Record, ...]
     implementations = catalog.find_dependents(
-        rtl,
+        rtl.ref,
         candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"),
     )
+    graph = catalog.graph.dependency_closure(macro.ref)
+    print(graph.dependencies)
 ```
 
-Требуются Python 3.15, uv и Conan 2.34. Окружение разработки включает Conan:
+Устанавливается через Python 3.15 и uv. Dev-окружение включает Conan и тестовый сервер:
 
 ```sh
 uv sync --frozen
 uv run python examples/conan_macro.py
 make check unit build
-make integration        # изолированный Memgraph через Docker
-make conan-integration  # временный локальный Conan server
+make integration  # собственный временный Conan server
 ```
 
-Пример публикует RTL, промежуточный узел и LIB/LEF в одноразовый локальный кэш.
-API сохранён с добавлением find_dependents и capabilities. Изменение поведения:
-`dependency_closure()` возвращает точный граф по умолчанию; резолвер Memory/Memgraph
-включается через `resolve_versions=True`. Conan использует lockfile корня.
+MemoryBackend — простой эталон для тестирования того же API в памяти.
+Конфликты зависимостей Conan обрабатываются штатными механизмами и lockfiles.
+Файлы ресурсов остаются во внешних хранилищах; Python-хелперы Git/файловых ресурсов сохранены.
 
-Обратный поиск проверяет граф каждого кандидата. Подготовка публикации копирует
-Conan home во временный кэш для проверки всего batch. Эти ограничения существенны
-для оценки пригодности Conan на больших данных. Поддерживается только канонический
-формат рецепта без settings/options; файлы ресурсов остаются внешними.
+Поиск зависимых записей проверяет граф каждого кандидата, а подготовка публикации
+копирует Conan home для проверки batch. Эти ограничения требуют оценки на реальных данных.
 
-Подробности: [Conan, lockfiles, внешний CI и ограничения](docs/conan.md).
-
-## Унаследованный полный API
-
-Python-библиотека для каталога версионированных hardware-проектов, запусков flow
-и связей между ними. Каталог хранит граф и пользовательские данные; файлы ресурсов
-остаются во внешних хранилищах.
-
-Основные возможности:
-
-- Единая модель записей с точными координатами: namespace, имя, версия и вид объекта.
-- Произвольный JSON или пользовательский сериализуемый объект в содержимом записи.
-- Публикация неизменяемых записей и связей, чтение и поиск по общим полям.
-- Прямой и обратный поиск зависимостей, поиск реализаций и происхождения результатов flow.
-- Разрешение версий по явно объявленной обратной совместимости со стабильным
-  результатом для фиксированного корня.
-- Экспорт графа в NetworkX с сохранением параллельных связей.
-- Хранение в Memgraph, памяти или Conan с ограниченным набором возможностей.
-- Материализация Git-ресурсов в кэш и ссылки на файловые ресурсы по абсолютному пути.
-
-Проект находится на стадии proof of concept. Требуется Python 3.15.
-
-Документация:
-
-- [Варианты использования](docs/use-cases.md)
-- [Структуры данных](docs/data-model.md)
-- [Интерфейсы и операции](docs/interfaces.md)
-- [Архитектурные решения и ограничения](docs/decisions.md)
-- [Разработка и локальное окружение](docs/development.md)
+Документация: [API](docs/interfaces.md), [модели](docs/data-model.md),
+[Conan и внешний CI](docs/conan.md), [сценарии](docs/use-cases.md),
+[решения и ограничения](docs/decisions.md), [разработка](docs/development.md).

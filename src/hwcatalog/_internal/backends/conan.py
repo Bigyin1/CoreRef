@@ -11,25 +11,23 @@ from tempfile import TemporaryDirectory
 import networkx as nx
 
 from ...api.capabilities import CONAN_CAPABILITIES
-from ...api.enums import Direction, RelationKind
 from ...api.errors import (
     BackendUnavailable,
     IdentityConflict,
     InvalidPackage,
     NotFound,
     PartialPublicationError,
-    UnsupportedOperation,
     VersionConflict,
 )
 from ...api.graph import CatalogGraph
-from ...api.models.graph import GraphResult, Neighbor, Relation
+from ...api.models.graph import Dependency, GraphResult
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
 from ..validation import (
+    normalize_dependency,
     normalize_query,
     normalize_record,
     normalize_ref,
-    normalize_relation,
     validate,
 )
 from .conan_cli import ConanCLI, GraphData
@@ -61,28 +59,14 @@ class ConanReader:
     def search(self, query: SearchQuery) -> tuple[Record, ...]:
         return self.backend.search(query)
 
-    def neighbors(
-        self, ref: Ref, kind: RelationKind, direction: Direction, filters: SearchQuery
-    ) -> tuple[Neighbor, ...]:
-        if kind != RelationKind.REQUIRES:
-            raise UnsupportedOperation(f"Conan does not support {kind.value}")
-        self.backend.get_many((ref,))
-        if direction == Direction.OUTGOING:
-            graph = self.backend._closure(ref)
-            records = {record.ref: record for record in graph.records}
-            return tuple(
-                Neighbor(edge, records[edge.target])
-                for edge in graph.relations
-                if edge.source == ref and filters.matches(records[edge.target])
-            )
-        result: list[Neighbor] = []
-        for candidate in self.search(filters):
-            result.extend(
-                Neighbor(edge, candidate)
-                for edge in self.backend._closure(candidate.ref).relations
-                if edge.source == candidate.ref and edge.target == ref
-            )
-        return tuple(sorted(result, key=lambda neighbor: neighbor.relation.to_json()))
+    def dependencies(self, ref: Ref, filters: SearchQuery) -> tuple[Record, ...]:
+        graph = self.backend._closure(ref)
+        targets = {edge.target for edge in graph.dependencies if edge.source == ref}
+        records = (r for r in graph.records if r.ref in targets and filters.matches(r))
+        return tuple(sorted(records, key=lambda record: record.ref.identity))
+
+    def consumers(self, ref: Ref, filters: SearchQuery) -> tuple[Record, ...]:
+        return self.backend.graph.find_dependents(ref, candidates=filters, transitive=False)
 
 
 class ConanGraph(CatalogGraph):
@@ -90,10 +74,8 @@ class ConanGraph(CatalogGraph):
         super().__init__(backend._read, CONAN_CAPABILITIES)
         self.backend = backend
 
-    def dependency_closure(self, ref: Ref, *, resolve_versions: bool = False) -> GraphResult:
+    def dependency_closure(self, ref: Ref) -> GraphResult:
         """Use Conan's graph with the selected root's exported lockfile."""
-        if resolve_versions:
-            raise UnsupportedOperation("Conan uses lockfiles, not hwcatalog compatibility edges")
         with self.backend._read():
             return self.backend._closure(normalize_ref(ref))
 
@@ -116,7 +98,7 @@ class ConanGraph(CatalogGraph):
 def _depends_on(graph: GraphResult, source: Ref, target: Ref, *, transitive: bool) -> bool:
     if transitive:
         return any(record.ref == target for record in graph.records)
-    return any(edge.source == source and edge.target == target for edge in graph.relations)
+    return any(edge.source == source and edge.target == target for edge in graph.dependencies)
 
 
 class ConanBackend:
@@ -210,50 +192,52 @@ class ConanBackend:
                         f"Locked revision differs from published identity: {node.ref}"
                     )
                 records[node_id] = read_recipe(directory, ref)[0]
-        relations = _graph_relations(graph, records)
+        dependencies = _graph_dependencies(graph, records)
         return GraphResult(
             tuple(
                 sorted({r.ref: r for r in records.values()}.values(), key=lambda r: r.ref.identity)
             ),
-            relations,
+            dependencies,
             consistency="live",
         )
 
-    def publish(self, records: tuple[Record, ...], *, relations: tuple[Relation, ...] = ()) -> None:
+    def publish(
+        self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
+    ) -> None:
         records = tuple(normalize_record(record) for record in records)
-        relations = tuple(normalize_relation(edge) for edge in relations)
-        _validate_supported(records, relations)
+        dependencies = tuple(normalize_dependency(edge) for edge in dependencies)
+        _validate_coordinates(records, dependencies)
         with self._read():
             existing = {from_conan_reference(value) for value in self._cli.index("*.*.*/*#*")}
-            validate(records, relations, existing)
+            validate(records, dependencies, existing)
             new_refs = {record.ref for record in records}
-            external = {edge.target for edge in relations if edge.target not in new_refs}
+            external = {edge.target for edge in dependencies if edge.target not in new_refs}
             for ref in sorted(external, key=lambda ref: ref.identity):
                 self._closure(ref)
             with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:
-                prepared = self._prepare(Path(temporary), records, relations)
+                prepared = self._prepare(Path(temporary), records, dependencies)
                 self._publish_prepared(prepared)
 
     def _prepare(
-        self, temporary: Path, records: tuple[Record, ...], relations: tuple[Relation, ...]
+        self, temporary: Path, records: tuple[Record, ...], dependencies: tuple[Dependency, ...]
     ) -> tuple[PreparedRecipe, ...]:
         # Validate every graph in a private cache before exposing any new records.
         stage_home = temporary / "home"
         shutil.copytree(self._cli.home, stage_home)
         stage = ConanCLI(stage_home, self._cli.executable, self._cli.remote, self._cli.timeout)
-        dependencies: nx.DiGraph[Ref] = nx.DiGraph()
-        dependencies.add_nodes_from(record.ref for record in records)
+        order: nx.DiGraph[Ref] = nx.DiGraph()
+        order.add_nodes_from(record.ref for record in records)
         new_refs = {record.ref for record in records}
-        dependencies.add_edges_from(
-            (edge.target, edge.source) for edge in relations if edge.target in new_refs
+        order.add_edges_from(
+            (edge.target, edge.source) for edge in dependencies if edge.target in new_refs
         )
         by_ref = {record.ref: record for record in records}
         prepared: dict[Ref, PreparedRecipe] = {}
         for index, ref in enumerate(
-            nx.lexicographical_topological_sort(dependencies, key=lambda r: r.identity)
+            nx.lexicographical_topological_sort(order, key=lambda r: r.identity)
         ):
             directory = temporary / f"recipe-{index}"
-            targets = tuple(edge.target for edge in relations if edge.source == ref)
+            targets = tuple(edge.target for edge in dependencies if edge.source == ref)
             write_recipe(directory, by_ref[ref], targets)
             self._seed_lockfile(directory, targets, prepared)
             stage.graph(directory)
@@ -294,29 +278,22 @@ class ConanBackend:
             published.append(recipe.record_ref)
 
 
-def _validate_supported(records: tuple[Record, ...], relations: tuple[Relation, ...]) -> None:
+def _validate_coordinates(
+    records: tuple[Record, ...], dependencies: tuple[Dependency, ...]
+) -> None:
     versions: dict[tuple[Ref, str], Ref] = {}
     for record in records:
         to_conan_reference(record.ref)
-    for edge in relations:
+    for edge in dependencies:
         to_conan_reference(edge.source)
         to_conan_reference(edge.target)
-        if (
-            edge.kind != RelationKind.REQUIRES
-            or edge.alias is not None
-            or edge.ordinal is not None
-            or edge.metadata
-        ):
-            raise UnsupportedOperation(
-                "Conan supports only plain REQUIRES without binding attributes"
-            )
         key = (edge.source, edge.target.family)
         if versions.setdefault(key, edge.target) != edge.target:
             raise VersionConflict("Conan requires one version per direct dependency family")
 
 
-def _graph_relations(graph: GraphData, records: dict[str, Record]) -> tuple[Relation, ...]:
-    result = set()
+def _graph_dependencies(graph: GraphData, records: dict[str, Record]) -> tuple[Dependency, ...]:
+    result: set[Dependency] = set()
     for source, node in graph.nodes.items():
         for target, requirement in node.dependencies.items():
             if requirement.build:
@@ -324,9 +301,5 @@ def _graph_relations(graph: GraphData, records: dict[str, Record]) -> tuple[Rela
             if requirement.direct:
                 if source not in records or target not in records:
                     raise InvalidPackage("Conan graph contains an unknown endpoint")
-                result.add(
-                    Relation(
-                        records[source].ref, records[target].ref, RelationKind.REQUIRES
-                    ).to_json()
-                )
-    return tuple(Relation.from_json(value) for value in sorted(result))
+                result.add(Dependency(records[source].ref, records[target].ref))
+    return tuple(sorted(result, key=lambda edge: edge.to_json()))

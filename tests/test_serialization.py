@@ -4,9 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from hwcatalog._internal.validation import normalize_record, normalize_relation
-from hwcatalog.api.enums import RelationKind
-from hwcatalog.api.models.graph import Relation
+from hwcatalog._internal.validation import normalize_dependency, normalize_record
+from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record
 from hwcatalog.api.types import JSON
 from tests.helpers import content, release, run
@@ -27,11 +26,11 @@ def test_roundtrip_preserves_content_and_nested_immutability() -> None:
         },
     )
     execution = replace(run("run"), payload=resources)
-    edge = Relation(execution.ref, a.ref, RelationKind.USED, metadata={"binding": [1]})
+    edge = Dependency(execution.ref, a.ref)
     original = tuple(normalize_record(record) for record in (a, execution))
-    edge = normalize_relation(edge)
+    edge = normalize_dependency(edge)
     records = tuple(type(record).from_json(record.to_json()) for record in original)
-    relation = Relation.from_json(edge.to_json())
+    relation = Dependency.from_json(edge.to_json())
     assert records == original
     assert tuple(record.to_json() for record in records) == tuple(
         record.to_json() for record in original
@@ -39,12 +38,10 @@ def test_roundtrip_preserves_content_and_nested_immutability() -> None:
     assert relation == edge
     with pytest.raises(TypeError):
         content(records[0])["new"] = True  # type: ignore[index]
-    with pytest.raises(TypeError):
-        relation.metadata["new"] = True  # type: ignore[index]
 
 
 @pytest.mark.parametrize("payload", ["{", "null", "[]", "{}", '[["metadata", {}]]'])
 def test_invalid_envelopes(payload: str) -> None:
-    for model in (Record, Relation):
+    for model in (Record, Dependency):
         with pytest.raises((ValueError, TypeError, KeyError)):
             model.from_json(payload)

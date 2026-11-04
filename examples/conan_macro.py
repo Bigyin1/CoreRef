@@ -4,8 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.enums import RelationKind
-from hwcatalog.api.models.graph import Relation
+from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend, to_conan_reference
@@ -24,9 +23,9 @@ def main() -> None:
     ):
         catalog.publish(
             (rtl, intermediate, macro),
-            relations=(
-                Relation(macro.ref, intermediate.ref, RelationKind.REQUIRES),
-                Relation(intermediate.ref, rtl.ref, RelationKind.REQUIRES),
+            dependencies=(
+                Dependency(macro.ref, intermediate.ref),
+                Dependency(intermediate.ref, rtl.ref),
             ),
         )
         candidates = SearchQuery(namespace="soc1", name="cpu", kind="lib-lef")
@@ -34,7 +33,9 @@ def main() -> None:
             print(to_conan_reference(result.ref))
             print(result.to_json())
             graph = catalog.graph.dependency_closure(result.ref)
-            print(f"{len(graph.records)} nodes, {len(graph.relations)} edges, {graph.consistency}")
+            print(
+                f"{len(graph.records)} nodes, {len(graph.dependencies)} edges, {graph.consistency}"
+            )
 
 
 if __name__ == "__main__":

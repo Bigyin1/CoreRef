@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.enums import Direction, LineageDirection, RelationKind
 from hwcatalog.api.errors import (
     BackendUnavailable,
     IdentityConflict,
@@ -18,10 +17,9 @@ from hwcatalog.api.errors import (
     InvalidPublication,
     NotFound,
     PartialPublicationError,
-    UnsupportedOperation,
     VersionConflict,
 )
-from hwcatalog.api.models.graph import Relation
+from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import (
@@ -73,9 +71,9 @@ def test_reference_round_trip() -> None:
 
 def test_conan_round_trip_search_and_root_lockfile(conan_backend: ConanBackend) -> None:
     rtl, be = record(), record("lib-lef", "4.0")
-    edge = Relation(be.ref, rtl.ref, RelationKind.REQUIRES)
+    edge = Dependency(be.ref, rtl.ref)
     catalog = Catalog(conan_backend)
-    catalog.publish((be, rtl), relations=(edge,))
+    catalog.publish((be, rtl), dependencies=(edge,))
     stored = catalog.get(rtl.ref)
     assert stored.payload == {"files": ("cpu.rtl",)}
     assert catalog.get_many((be.ref, rtl.ref, be.ref)) == (
@@ -97,13 +95,11 @@ def test_conan_round_trip_search_and_root_lockfile(conan_backend: ConanBackend) 
     assert not catalog.search(SearchQuery(name=""))
     expected = catalog.graph.dependency_closure(be.ref)
     assert expected.consistency == "live"
-    assert expected.relations == (edge,)
+    assert expected.dependencies == (edge,)
     assert len(expected.to_networkx()) == 2
-    assert catalog.graph.dependencies(be.ref)[0].record == stored
-    assert catalog.graph.consumers(rtl.ref)[0].record.ref == be.ref
-    assert not catalog.graph.neighbors(
-        be.ref, RelationKind.REQUIRES, filters=SearchQuery(kind="missing")
-    )
+    assert catalog.graph.dependencies(be.ref)[0] == stored
+    assert catalog.graph.consumers(rtl.ref)[0].ref == be.ref
+    assert not catalog.graph.dependencies(be.ref, filters=SearchQuery(kind="missing"))
     _, folder = conan_backend._locate(be.ref)
     lock = json.loads((folder / "conan.lock").read_text())
     assert len(lock["requires"]) == 1
@@ -128,10 +124,10 @@ def test_conan_reverse_search_uses_each_candidates_graph(conan_backend: ConanBac
     catalog = Catalog(conan_backend)
     catalog.publish(
         (be, wrong, mid, rtl, other, unrelated),
-        relations=(
-            Relation(be.ref, mid.ref, RelationKind.REQUIRES),
-            Relation(mid.ref, rtl.ref, RelationKind.REQUIRES),
-            Relation(wrong.ref, other.ref, RelationKind.REQUIRES),
+        dependencies=(
+            Dependency(be.ref, mid.ref),
+            Dependency(mid.ref, rtl.ref),
+            Dependency(wrong.ref, other.ref),
         ),
     )
     query = SearchQuery(namespace="soc", name="cpu", kind="lib-lef")
@@ -141,60 +137,10 @@ def test_conan_reverse_search_uses_each_candidates_graph(conan_backend: ConanBac
         wrong.ref,
     )
     assert not catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="rtl"))
-    incoming = catalog.graph.neighbors(rtl.ref, RelationKind.REQUIRES, Direction.INCOMING)
-    assert tuple(n.record.ref for n in incoming) == (mid.ref,)
+    incoming = catalog.graph.consumers(rtl.ref)
+    assert tuple(n.ref for n in incoming) == (mid.ref,)
     with pytest.raises(NotFound):
         catalog.find_dependents(record(name="absent").ref, candidates=query)
-
-
-@pytest.mark.parametrize(
-    "kind",
-    [
-        RelationKind.IMPLEMENTS,
-        RelationKind.USED,
-        RelationKind.PRODUCED,
-        RelationKind.BACKWARD_COMPATIBLE_WITH,
-    ],
-)
-def test_conan_rejects_unsupported_relations_before_writes(
-    conan_backend: ConanBackend, kind: RelationKind
-) -> None:
-    a, b = record(), record("lib-lef")
-    with pytest.raises(UnsupportedOperation):
-        conan_backend.publish((a, b), relations=(Relation(b.ref, a.ref, kind),))
-    assert not conan_backend.search(SearchQuery())
-
-
-def test_conan_explicitly_rejects_unsupported_queries(conan_backend: ConanBackend) -> None:
-    ref = record().ref
-    with pytest.raises(UnsupportedOperation):
-        conan_backend.graph.implementations(ref)
-    with pytest.raises(UnsupportedOperation):
-        conan_backend.graph.lineage(ref, LineageDirection.UPSTREAM)
-    with pytest.raises(UnsupportedOperation):
-        conan_backend.graph.dependency_closure(ref, resolve_versions=True)
-
-
-@pytest.mark.parametrize("attributes", [{"alias": "input"}, {"ordinal": 0}, {"metadata": {"a": 1}}])
-def test_conan_rejects_binding_attributes(
-    conan_backend: ConanBackend, attributes: dict[str, object]
-) -> None:
-    a, b = record(), record("lib-lef")
-    edge = Relation.from_json(
-        json.dumps(
-            {
-                "source": a.ref.__dict__,
-                "target": b.ref.__dict__,
-                "kind": "REQUIRES",
-                "alias": None,
-                "ordinal": None,
-                "metadata": {},
-                **attributes,
-            }
-        )
-    )
-    with pytest.raises(UnsupportedOperation):
-        conan_backend.publish((a, b), relations=(edge,))
 
 
 def test_conan_preflight_conflict_does_not_publish_any_record(conan_backend: ConanBackend) -> None:
@@ -202,9 +148,9 @@ def test_conan_preflight_conflict_does_not_publish_any_record(conan_backend: Con
     with pytest.raises(VersionConflict):
         conan_backend.publish(
             (root, first, second),
-            relations=(
-                Relation(root.ref, first.ref, RelationKind.REQUIRES),
-                Relation(root.ref, second.ref, RelationKind.REQUIRES),
+            dependencies=(
+                Dependency(root.ref, first.ref),
+                Dependency(root.ref, second.ref),
             ),
         )
     assert not conan_backend.search(SearchQuery())
@@ -215,13 +161,13 @@ def test_native_conan_diamond_conflict_is_a_domain_error(conan_backend: ConanBac
     left, right = record(name="left"), record(name="right")
     first, second = record(), record(version="2.0")
     edges = (
-        Relation(root.ref, left.ref, RelationKind.REQUIRES),
-        Relation(root.ref, right.ref, RelationKind.REQUIRES),
-        Relation(left.ref, first.ref, RelationKind.REQUIRES),
-        Relation(right.ref, second.ref, RelationKind.REQUIRES),
+        Dependency(root.ref, left.ref),
+        Dependency(root.ref, right.ref),
+        Dependency(left.ref, first.ref),
+        Dependency(right.ref, second.ref),
     )
     with pytest.raises(VersionConflict):
-        conan_backend.publish((root, left, right, first, second), relations=edges)
+        conan_backend.publish((root, left, right, first, second), dependencies=edges)
     assert not conan_backend.search(SearchQuery())
 
 
@@ -243,8 +189,8 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
     )
     cli.run("export", str(build), "--no-remote")
     assert conan_backend.get_many((be.ref,))[0].ref == be.ref
-    assert conan_backend.graph.dependency_closure(be.ref).relations == (
-        Relation(be.ref, rtl.ref, RelationKind.REQUIRES),
+    assert conan_backend.graph.dependency_closure(be.ref).dependencies == (
+        Dependency(be.ref, rtl.ref),
     )
 
 
@@ -253,7 +199,7 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
 )
 def test_corrupt_recipe_is_an_error(conan_backend: ConanBackend, damage: str) -> None:
     rtl, be = record(), record("lib-lef")
-    conan_backend.publish((rtl, be), relations=(Relation(be.ref, rtl.ref, RelationKind.REQUIRES),))
+    conan_backend.publish((rtl, be), dependencies=(Dependency(be.ref, rtl.ref),))
     _, folder = conan_backend._locate(be.ref)
     lock = folder / "conan.lock"
     if damage == "missing":

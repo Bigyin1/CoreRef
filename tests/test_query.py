@@ -3,8 +3,7 @@
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.enums import RelationKind
-from hwcatalog.api.models.graph import Relation
+from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from tests.helpers import release, run
@@ -72,9 +71,7 @@ def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
     root = Record(Ref("top", "1", "release", "demo"))
     catalog.publish(
         (*records, root),
-        relations=tuple(
-            Relation(root.ref, record.ref, RelationKind.REQUIRES) for record in records
-        ),
+        dependencies=tuple(Dependency(root.ref, record.ref) for record in records),
     )
     assert len(catalog.graph.dependency_closure(root.ref).records) == 5
     assert {record.ref for record in catalog.search(SearchQuery(name="core", version="1"))} == {
@@ -92,7 +89,7 @@ def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) ->
     root = Record(Ref("top", "1", "package", "demo"))
     catalog.publish(
         (*records, root),
-        relations=tuple(Relation(root.ref, ref, RelationKind.REQUIRES) for ref in refs),
+        dependencies=tuple(Dependency(root.ref, ref) for ref in refs),
     )
     assert len(set(refs)) == len(refs)
     assert len({ref.family for ref in refs}) == len(refs)

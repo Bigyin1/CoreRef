@@ -29,7 +29,7 @@ class Ref:
 
     @property
     def family(self) -> str:
-        """The same coordinates across versions, used for compatibility resolution."""
+        """The same package coordinates across versions."""
         return json.dumps(
             [self.namespace, self.name, self.kind],
             separators=(",", ":"),
