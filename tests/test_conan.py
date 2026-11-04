@@ -1,6 +1,5 @@
 """Behavioral tests against real Conan recipes and its dependency graph evaluator."""
 
-import json
 import os
 import subprocess
 from dataclasses import replace
@@ -59,7 +58,9 @@ def test_reference_round_trip() -> None:
         to_conan_reference(replace(ref, name="a" * 101))
 
 
-def test_conan_round_trip_search_and_root_lockfile(conan_backend: ConanBackend) -> None:
+def test_conan_round_trip_search_and_project_lockfile(
+    conan_backend: ConanBackend, tmp_path: Path
+) -> None:
     rtl, be = record(), record("lib-lef", "4.0")
     edge = Dependency(be.ref, rtl.ref)
     catalog = Catalog(conan_backend)
@@ -88,10 +89,10 @@ def test_conan_round_trip_search_and_root_lockfile(conan_backend: ConanBackend) 
     assert catalog.graph.consumers(rtl.ref)[0].ref == be.ref
     assert not catalog.graph.dependencies(be.ref, filters=SearchQuery(kind="missing"))
     _, folder = conan_backend._locate(be.ref)
-    lock = json.loads((folder / "conan.lock").read_text())
-    assert len(lock["requires"]) == 1
-    assert lock["requires"][0].startswith("soc.cpu.rtl/1.0#")
-    assert not any(value.startswith("soc.cpu.lib-lef/") for value in lock["requires"])
+    assert not (folder / "conan.lock").exists()
+    lockfile = catalog.create_lockfile((be.ref,), tmp_path / "workspace/conan.lock")
+    assert lockfile.is_file()
+    assert catalog.graph.dependency_closure(be.ref, lockfile=lockfile) == expected
     catalog.publish((record(version="2.0"),))
     assert catalog.graph.dependency_closure(be.ref) == expected
     with pytest.raises(IdentityConflict):
@@ -170,7 +171,7 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
     rtl, be = record(), record("lib-lef", "4.0")
     conan_backend.publish((rtl,))
     build = tmp_path / "external-ci"
-    write_recipe(build, be, (rtl.ref,))
+    write_recipe(build, be, (to_conan_reference(rtl.ref),))
     cli = conan_backend._client
     cli.run(
         "lock",
@@ -189,22 +190,13 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
     )
 
 
-@pytest.mark.parametrize(
-    "damage", ["missing", "incomplete", "self-reference", "bad-marker", "noncanonical-recipe"]
-)
+@pytest.mark.parametrize("damage", ["missing", "bad-marker", "noncanonical-recipe"])
 def test_corrupt_recipe_is_an_error(conan_backend: ConanBackend, damage: str) -> None:
     rtl, be = record(), record("lib-lef")
     conan_backend.publish((rtl, be), dependencies=(Dependency(be.ref, rtl.ref),))
     _, folder = conan_backend._locate(be.ref)
-    lock = folder / "conan.lock"
     if damage == "missing":
-        lock.unlink()
-    elif damage == "incomplete":
-        lock.write_text(json.dumps({"version": "0.5", "requires": []}))
-    elif damage == "self-reference":
-        lock.write_text(
-            json.dumps({"version": "0.5", "requires": ["soc.cpu.lib-lef/1.0#" + "a" * 32]})
-        )
+        (folder / "record.json").unlink()
     elif damage == "bad-marker":
         (folder / "hwcatalog.json").write_text('{"format":999}')
     else:
@@ -359,20 +351,25 @@ def test_native_graph_computation_does_not_spawn_a_conan_process(
 
 
 def test_native_graph_rejects_an_unlocked_transitive_dependency(
-    conan_backend: ConanBackend,
+    conan_backend: ConanBackend, tmp_path: Path
 ) -> None:
     root, middle, leaf = (record(name=name) for name in ("root", "middle", "leaf"))
     conan_backend.publish(
         (root, middle, leaf),
         dependencies=(Dependency(root.ref, middle.ref), Dependency(middle.ref, leaf.ref)),
     )
-    _, directory = conan_backend._locate(root.ref)
-    lock_path = directory / "conan.lock"
-    lock = json.loads(lock_path.read_text())
-    lock["requires"] = [value for value in lock["requires"] if "soc.leaf.rtl/" not in value]
-    lock_path.write_text(json.dumps(lock))
+    lock_path = conan_backend.create_lockfile((root.ref,), tmp_path / "project/conan.lock")
+    conan_backend._client.run(
+        "lock",
+        "remove",
+        "--requires=soc.leaf.rtl/*",
+        "--lockfile",
+        str(lock_path),
+        "--lockfile-out",
+        str(lock_path),
+    )
     with pytest.raises(InvalidPackage):
-        conan_backend._load_graph(root.ref)
+        conan_backend._load_graph(root.ref, lockfile=lock_path)
 
 
 def test_default_cache_uses_conan_home_and_stays_bound_to_it(

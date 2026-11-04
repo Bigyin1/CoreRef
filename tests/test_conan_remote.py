@@ -104,7 +104,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
         str(dep.ref) for dep in native.root.conanfile.dependencies.host.topological_sort.values()
     )
     assert native_refs == ("soc.cpu.rtl/1.0",)
-    # A conflicting local-only revision must never leak into a remote publication's lockfile.
+    # A conflicting local-only revision must never enter published requirements.
     rogue = tmp_path / "local-only-revision"
     write_recipe(rogue, Record(rtl.ref, {"local-only": True}))
     remote_backend._client.create_lockfile(rogue)

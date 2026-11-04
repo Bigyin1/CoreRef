@@ -74,8 +74,13 @@ class MemoryBackend:
             return reader.search(query)
 
     def publish(
-        self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
+        self,
+        records: tuple[Record, ...],
+        *,
+        dependencies: tuple[Dependency, ...] = (),
+        lockfile: Path | None = None,
     ) -> None:
+        _require_no_lockfile(lockfile)
         records = tuple(normalize_record(record) for record in records)
         if any(record.files for record in records):
             raise InvalidPublication("Publish stored files using a package JSON document")
@@ -87,7 +92,8 @@ class MemoryBackend:
             self._records.update((record.ref, record) for record in records)
             self._dependencies += dependencies
 
-    def publish_file(self, path: Path) -> Record:
+    def publish_file(self, path: Path, *, lockfile: Path | None = None) -> Record:
+        _require_no_lockfile(lockfile)
         manifest = read_manifest(path)
         record = manifest.record
         if manifest.source_path is not None:
@@ -104,7 +110,13 @@ class MemoryBackend:
             self._dependencies += manifest.dependencies
             return self._records[record.ref]
 
-    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+    def create_lockfile(self, refs: tuple[Ref, ...], path: Path) -> Path:
+        raise InvalidPublication("Project lockfiles require a Conan backend")
+
+    def materialize(
+        self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
+    ) -> MaterializedPackage:
+        _require_no_lockfile(lockfile)
         with self._lock:
             record = self.get_many((ref,))[0]
             directory = self._content_path(ref)
@@ -136,3 +148,8 @@ class MemoryBackend:
 
     def close(self) -> None:
         self._content.cleanup()
+
+
+def _require_no_lockfile(lockfile: Path | None) -> None:
+    if lockfile is not None:
+        raise InvalidPublication("Project lockfiles require a Conan backend")

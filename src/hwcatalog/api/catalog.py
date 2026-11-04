@@ -40,18 +40,30 @@ class Catalog:
         return self._backend.get_many(refs)
 
     def publish(
-        self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
+        self,
+        records: tuple[Record, ...],
+        *,
+        dependencies: tuple[Dependency, ...] = (),
+        lockfile: Path | None = None,
     ) -> None:
         """Save new records and their outgoing dependencies."""
-        self._backend.publish(records, dependencies=dependencies)
+        self._backend.publish(records, dependencies=dependencies, lockfile=lockfile)
 
-    def publish_file(self, path: str | Path) -> Record:
+    def publish_file(self, path: str | Path, *, lockfile: Path | None = None) -> Record:
         """Publish one package described by JSON; paths are relative to this file."""
-        return self._backend.publish_file(Path(path))
+        return self._backend.publish_file(Path(path), lockfile=lockfile)
 
-    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+    def create_lockfile(self, refs: tuple[Ref, ...], path: str | Path) -> Path:
+        """Capture project dependencies in a Conan-managed lockfile at the caller's path."""
+        return self._backend.create_lockfile(refs, Path(path))
+
+    def materialize(
+        self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
+    ) -> MaterializedPackage:
         """Install artifacts and optionally fetch SCM sources into the backend cache."""
-        return self._backend.materialize(normalize_ref(ref), with_sources=with_sources)
+        return self._backend.materialize(
+            normalize_ref(ref), with_sources=with_sources, lockfile=lockfile
+        )
 
     def search(self, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
         """Return all matching records in deterministic identity order."""

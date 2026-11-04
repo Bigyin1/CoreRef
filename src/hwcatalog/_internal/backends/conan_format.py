@@ -1,4 +1,4 @@
-"""Canonical internal recipe formats and exact dependency lockfiles."""
+"""Canonical catalog recipe metadata; lockfile contents belong to Conan."""
 
 import re
 import shutil
@@ -19,7 +19,7 @@ _TOKEN = re.compile(r"[a-z0-9_-]+\Z")
 _VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
-_CONTENT_FORMAT: Literal[3] = 3
+_RECIPE_FORMAT: Literal[4] = 4
 _LEGACY_CONTENT_FORMAT = 2
 
 
@@ -67,28 +67,23 @@ def search_pattern(query: SearchQuery) -> str | None:
 
 class RecipeMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    format: Literal[1, 2, 3] = 1
+    format: Literal[1, 2, 3, 4] = 1
     has_source: bool = False
     requires: tuple[str, ...] = ()
 
 
-class Lockfile(BaseModel):
-    version: Literal["0.5"]
-    requires: tuple[str, ...]
-    build_requires: tuple[str, ...] = ()
-    python_requires: tuple[str, ...] = ()
-    config_requires: tuple[str, ...] = ()
-
-
 def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, format_version: int = 1) -> str:
     name, version = to_conan_reference(ref).split("/")
+    exports = '"record.json", "hwcatalog.json"'
+    if format_version < _RECIPE_FORMAT:
+        exports += ', "conan.lock"'
     text = (
         "from conan import ConanFile\n\n\n"
         "class CatalogRecord(ConanFile):\n"
         f"    name = {name!r}\n"
         f"    version = {version!r}\n"
         '    package_type = "header-library"\n'
-        '    exports = "record.json", "hwcatalog.json", "conan.lock"\n'
+        f"    exports = {exports}\n"
         f"    requires = {requirements!r}\n"
     )
     if format_version != 1:
@@ -166,17 +161,16 @@ class _ConanData(BaseModel):
 def write_recipe(
     directory: Path,
     record: Record,
-    dependencies: tuple[Ref, ...] = (),
+    requirements: tuple[str, ...] = (),
     *,
     source_path: Path | None = None,
     files: dict[str, Path] | None = None,
 ) -> None:
-    """Prepare a canonical recipe; CI must create conan.lock before exporting it."""
+    """Prepare package metadata and requirements; project lockfiles stay external."""
     record = normalize_record(record)
-    requirements = tuple(sorted({to_conan_reference(ref) for ref in dependencies}))
-    content = bool(record.source or source_path or record.files)
+    requirements = tuple(sorted(set(requirements)))
     metadata = RecipeMetadata(
-        format=_CONTENT_FORMAT if content else 1,
+        format=_RECIPE_FORMAT,
         requires=requirements,
         has_source=bool(record.source or source_path),
     )
@@ -205,12 +199,11 @@ def write_recipe(
         shutil.copy2(path, destination)
 
 
-def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata, Lockfile]:
+def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata]:
     """Validate the exported format before allowing Conan to evaluate the recipe."""
     try:
         record = normalize_record(Record.from_json((directory / "record.json").read_text()))
         metadata = RecipeMetadata.model_validate_json((directory / "hwcatalog.json").read_text())
-        lockfile = Lockfile.model_validate_json((directory / "conan.lock").read_text())
         if record.source is not None:
             raise ValueError("Git source must be stored in Conan SCM metadata")
         if metadata.format == 1 and (record.files or metadata.has_source):
@@ -228,13 +221,12 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata,
         if record.ref != expected:
             raise ValueError("Record coordinates disagree with the recipe")
         for dependency in metadata.requires:
-            if to_conan_reference(from_conan_reference(dependency)) != dependency:
-                raise ValueError("Requirements must use exact versions without revisions")
+            if to_conan_reference(from_conan_reference(dependency)) != dependency.split("#", 1)[0]:
+                raise ValueError("Requirements must use canonical exact references")
         recipe = _recipe_text(record.ref, metadata.requires, format_version=metadata.format)
         if (directory / "conanfile.py").read_text() != recipe:
             raise ValueError("Only canonical catalog recipes are supported")
-        _validate_lockfile(lockfile, expected, metadata)
-        return record, metadata, lockfile
+        return record, metadata
     except (
         OSError,
         ValueError,
@@ -245,23 +237,3 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata,
         yaml.YAMLError,
     ) as exc:
         raise InvalidPackage(f"Invalid catalog recipe for {expected.identity}: {exc}") from exc
-
-
-def _validate_lockfile(lockfile: Lockfile, root: Ref, metadata: RecipeMetadata) -> None:
-    if lockfile.build_requires or lockfile.python_requires or lockfile.config_requires:
-        raise ValueError("Only host requirements are supported")
-    locked = set()
-    for value in lockfile.requires:
-        logical, separator, revision = value.partition("#")
-        if not separator or not re.fullmatch(r"[a-f0-9]{32,40}(?:%[0-9.]+)?", revision):
-            raise ValueError("Every locked dependency must include a recipe revision")
-        if from_conan_reference(logical) == root:
-            raise ValueError("Lockfile cannot contain its own root")
-        locked.add(logical)
-    if not set(metadata.requires).issubset(locked):
-        raise ValueError("Lockfile does not cover all direct requirements")
-
-
-def lock_references(lockfile: Lockfile) -> frozenset[str]:
-    """Pinned recipe references without Conan's timestamp suffix."""
-    return frozenset(value.split("%", 1)[0] for value in lockfile.requires)

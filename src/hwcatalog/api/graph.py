@@ -2,11 +2,13 @@
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from pathlib import Path
 
 import networkx as nx
 
 from .._internal.graph import GraphReader
 from .._internal.validation import normalize_query, normalize_ref
+from .errors import InvalidPublication
 from .models.graph import Dependency, GraphResult
 from .models.query import SearchQuery
 from .models.records import Record, Ref
@@ -30,8 +32,10 @@ class CatalogGraph:
         with self._read() as reader:
             return reader.consumers(ref, filters)
 
-    def dependency_closure(self, ref: Ref) -> GraphResult:
+    def dependency_closure(self, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
         """Return the exact dependency graph, including the selected root."""
+        if lockfile is not None:
+            raise InvalidPublication("Project lockfiles require a Conan backend")
         ref = normalize_ref(ref)
         with self._read() as reader:
             return self._traverse(reader, ref)

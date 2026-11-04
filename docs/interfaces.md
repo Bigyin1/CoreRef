@@ -10,9 +10,10 @@ Catalog владеет бэкендом и поддерживает контек
 | get(ref) | Record; NotFound при отсутствии |
 | get_many(refs) | tuple[Record, ...], сохраняет порядок и дубликаты; отсутствие любого Ref — ошибка |
 | search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по identity |
-| publish(records, *, dependencies=()) | Публикует новые Record и исходящие Dependency |
-| publish_file(path) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
-| materialize(ref, *, with_sources=False) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
+| publish(records, *, dependencies=(), lockfile=None) | Публикует новые Record и исходящие Dependency |
+| publish_file(path, *, lockfile=None) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
+| create_lockfile(refs, path) | Создаёт или обновляет lockfile проекта штатными средствами Conan; возвращает Path |
+| materialize(ref, *, with_sources=False, lockfile=None) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
 | find_dependents(ref, *, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
 | close() | Освобождает ресурсы бэкенда |
 
@@ -30,11 +31,12 @@ Find_dependents сначала фильтрует кандидатов по Sear
 |---|---|
 | dependencies(ref, filters=SearchQuery()) | Непосредственные зависимости как tuple[Record, ...] |
 | consumers(ref, filters=SearchQuery()) | Непосредственные потребители как tuple[Record, ...] |
-| dependency_closure(ref) | GraphResult с точным графом, включая корень |
+| dependency_closure(ref, *, lockfile=None) | GraphResult с точным графом, включая корень |
 
 Filters применяются к найденным записям. Отсутствующий корень вызывает NotFound.
-Обход Conan использует встроенный lockfile своего корня; Memory возвращает точный
-сохранённый граф. Разрешение версий hwcatalog из API удалено.
+Обход Conan использует явно переданный lockfile проекта. Новые пакеты не содержат
+собственного lockfile. Memory возвращает точный сохранённый граф и отклоняет явную
+передачу Conan lockfile через `InvalidPublication`. Разрешение версий hwcatalog из API удалено.
 
 Ранее унаследованные RelationKind, Direction, LineageDirection, Relation и Neighbor
 удалены. Теперь публикация принимает dependencies из Dependency(source, target),
@@ -53,7 +55,8 @@ VersionConflict, InvalidPackage, BackendUnavailable, PartialPublicationError.
 Последняя содержит published и uncertain для восстановления после неопределённого
 результата записи. Автоматических повторов или rollback удалённой публикации нет.
 
-Backend — Protocol с graph, get_many, search, publish, publish_file, materialize и close.
+Backend — Protocol с graph, get_many, search, publish, publish_file, create_lockfile,
+materialize и close.
 JSONSerializable — Protocol с методом to_json() -> str; наследование не требуется.
 
 ## Внешние ресурсы

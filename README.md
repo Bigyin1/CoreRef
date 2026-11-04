@@ -5,7 +5,8 @@
 Python-импорты — `hwcatalog`.
 
 API описывает записи и точные зависимости пакетов. Узел хранится как рецепт Conan
-с JSON-содержимым и собственным `conan.lock`. Имя имеет формат
+с JSON-содержимым и точными requirements. `conan.lock` принадлежит использующему
+пакеты проекту: RTL-репозиторию или BE workspace. Имя пакета имеет формат
 `namespace.name.kind/version`, например `soc1.cpu.lib-lef/4.0`.
 Тип представления задаётся полем Ref.kind; типизации рёбер нет.
 
@@ -55,6 +56,17 @@ JSON описывает один пакет: `ref`, `payload`, `dependencies`, �
 Conan-рецепты и нативный граф создаются внутри адаптера. Все команды выполняются
 через Conan Python API; нативные dependencies и топологический порядок используются
 внутри библиотеки. MemoryBackend реализует тот же API для тестирования.
+
+Проектный lockfile создаётся штатной командой Conan и передаётся как непрозрачный файл:
+
+```python
+with Catalog(ConanBackend()) as catalog:
+    lockfile = catalog.create_lockfile((rtl.ref,), "workspace/conan.lock")
+    graph = catalog.graph.dependency_closure(macro.ref, lockfile=lockfile)
+```
+
+Каталог не разбирает JSON lockfile и не задаёт версию его формата. Новые пакеты
+не экспортируют собственный lockfile. Memory не поддерживает Conan lockfiles.
 
 При настроенном remote сервер Conan — источник опубликованных данных, а стандартный
 локальный cache используется для получения рецептов, файлов и подготовки публикации.

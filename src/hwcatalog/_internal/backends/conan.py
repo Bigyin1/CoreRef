@@ -1,4 +1,4 @@
-"""Conan recipe storage with exact root lockfiles and nontransactional publication."""
+"""Conan package storage with project-owned lockfiles and nontransactional publication."""
 
 import shutil
 import threading
@@ -35,9 +35,7 @@ from ..validation import (
 )
 from .conan_client import ConanClient
 from .conan_format import (
-    Lockfile,
     from_conan_reference,
-    lock_references,
     read_recipe,
     search_pattern,
     to_conan_reference,
@@ -49,7 +47,6 @@ from .conan_types import NativeGraph, NativePackage
 @dataclass(frozen=True)
 class PreparedRecipe:
     record_ref: Ref
-    directory: Path
     reference: str
 
 
@@ -80,10 +77,10 @@ class ConanGraph(CatalogGraph):
         super().__init__(backend._read)
         self.backend = backend
 
-    def dependency_closure(self, ref: Ref) -> GraphResult:
-        """Use Conan's graph with the selected root's exported lockfile."""
+    def dependency_closure(self, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
+        """Resolve the selected root with an optional project lockfile."""
         with self.backend._read():
-            return self.backend._closure(normalize_ref(ref))
+            return self.backend._closure(normalize_ref(ref), lockfile=lockfile)
 
     def find_dependents(
         self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
@@ -107,7 +104,7 @@ class ConanBackend:
     """One local cache or one configured remote; callers coordinate other publishers.
 
     Only internally generated recipes are accepted. Package contents use Conan
-    binaries without settings/options; dependency selection uses root lockfiles.
+    binaries without settings/options; lockfiles belong to consuming projects.
     """
 
     def __init__(
@@ -164,28 +161,27 @@ class ConanBackend:
                 sorted((r for r in records if query.matches(r)), key=lambda r: r.ref.identity)
             )
 
-    def _closure(self, ref: Ref) -> GraphResult:
-        graph, records = self._load_graph(ref)
+    def _closure(self, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
+        graph, records = self._load_graph(ref, lockfile=lockfile)
         return GraphResult(
             tuple(sorted(records.values(), key=lambda record: record.ref.identity)),
             _graph_dependencies(graph, records),
         )
 
-    def _load_graph(self, ref: Ref) -> tuple[NativeGraph, dict[Ref, Record]]:
+    def _load_graph(
+        self, ref: Ref, *, lockfile: Path | None = None
+    ) -> tuple[NativeGraph, dict[Ref, Record]]:
         _, directory = self._locate(ref)
-        root, _, lockfile = read_recipe(directory, ref)
-        graph = self._client.graph(directory)
+        root, _ = read_recipe(directory, ref)
+        graph = self._client.graph(directory, lockfile=lockfile)
         root_package = graph.root.conanfile
         if _package_ref(root_package) != ref:
             raise InvalidPackage("Conan graph root differs from the requested reference")
         _validate_package(root_package)
         records = {ref: root}
-        locked = lock_references(lockfile)
         for package in root_package.dependencies.host.topological_sort.values():
             _validate_package(package)
             pinned = package.ref.repr_notime()
-            if pinned not in locked:
-                raise InvalidPackage(f"Dependency is not pinned by root lockfile: {pinned}")
             package_ref = _package_ref(package)
             published, folder = self._locate(package_ref)
             if published != pinned:
@@ -194,15 +190,32 @@ class ConanBackend:
         return graph, records
 
     def publish(
-        self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
+        self,
+        records: tuple[Record, ...],
+        *,
+        dependencies: tuple[Dependency, ...] = (),
+        lockfile: Path | None = None,
     ) -> None:
-        self._publish(records, dependencies)
+        self._publish(records, dependencies, lockfile=lockfile)
 
-    def publish_file(self, path: Path) -> Record:
+    def publish_file(self, path: Path, *, lockfile: Path | None = None) -> Record:
         manifest = read_manifest(path)
         with self._read():
-            self._publish((manifest.record,), manifest.dependencies, manifest=manifest)
+            self._publish(
+                (manifest.record,), manifest.dependencies, manifest=manifest, lockfile=lockfile
+            )
             return self.get_many((manifest.record.ref,))[0]
+
+    def create_lockfile(self, refs: tuple[Ref, ...], path: Path) -> Path:
+        """Write a Conan lockfile owned by an RTL repository or BE workspace."""
+        output = path.expanduser().resolve()
+        with self._read():
+            references = tuple(self._locate(normalize_ref(ref))[0] for ref in dict.fromkeys(refs))
+            output.parent.mkdir(parents=True, exist_ok=True)
+            self._client.create_project_lockfile(
+                references, output, seed=output if output.is_file() else None
+            )
+        return output
 
     def _publish(
         self,
@@ -210,6 +223,7 @@ class ConanBackend:
         dependencies: tuple[Dependency, ...],
         *,
         manifest: Manifest | None = None,
+        lockfile: Path | None = None,
     ) -> None:
         records = tuple(normalize_record(record) for record in records)
         if any(record.files for record in records) and manifest is None:
@@ -224,7 +238,7 @@ class ConanBackend:
             for ref in sorted(external, key=lambda ref: ref.identity):
                 self._closure(ref)
             with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:
-                prepared = self._prepare(Path(temporary), records, dependencies, manifest)
+                prepared = self._prepare(Path(temporary), records, dependencies, manifest, lockfile)
                 self._publish_prepared(prepared)
 
     def _prepare(
@@ -233,6 +247,7 @@ class ConanBackend:
         records: tuple[Record, ...],
         dependencies: tuple[Dependency, ...],
         manifest: Manifest | None,
+        lockfile: Path | None,
     ) -> tuple[PreparedRecipe, ...]:
         order: nx.DiGraph[Ref] = nx.DiGraph()
         order.add_nodes_from(record.ref for record in records)
@@ -247,45 +262,35 @@ class ConanBackend:
         ):
             directory = temporary / f"recipe-{index}"
             targets = tuple(edge.target for edge in dependencies if edge.source == ref)
+            # Pin published revisions while keeping each project's lockfile external.
+            requirements = tuple(
+                prepared[target].reference if target in prepared else self._locate(target)[0]
+                for target in targets
+            )
             write_recipe(
                 directory,
                 by_ref[ref],
-                targets,
+                requirements,
                 source_path=manifest.source_path if manifest else None,
                 files=manifest.files if manifest else None,
             )
-            self._seed_lockfile(directory, targets, prepared)
-            prepared[ref] = self._build_recipe(directory, ref)
+            prepared[ref] = self._build_recipe(directory, ref, lockfile=lockfile)
         return tuple(prepared.values())
 
-    def _build_recipe(self, directory: Path, ref: Ref) -> PreparedRecipe:
-        self._client.graph(directory)
-        self._client.create_lockfile(directory, seed=directory / "conan.lock")
+    def _build_recipe(
+        self, directory: Path, ref: Ref, *, lockfile: Path | None = None
+    ) -> PreparedRecipe:
+        self._client.graph(directory, lockfile=lockfile)
         pinned = self._client.export(directory)
         exported = self._client.cache_path(pinned, download=False)
-        _, metadata, _ = read_recipe(exported, ref)
+        _, metadata = read_recipe(exported, ref)
         if metadata.has_source:
             shutil.copyfile(exported / "conandata.yml", directory / "conandata.yml")
         # The first export captured SCM. Reuse those coordinates during binary export.
         (directory / "source-path.txt").unlink(missing_ok=True)
-        self._client.graph(directory)
-        self._client.export_package(directory)
-        return PreparedRecipe(ref, directory, pinned)
-
-    def _seed_lockfile(
-        self, directory: Path, targets: tuple[Ref, ...], prepared: dict[Ref, PreparedRecipe]
-    ) -> None:
-        locked: set[str] = set()
-        for target in targets:
-            if target in prepared:
-                folder, pinned = prepared[target].directory, prepared[target].reference
-            else:
-                pinned, folder = self._locate(target)
-            _, _, lockfile = read_recipe(folder, target)
-            locked.add(pinned)
-            locked.update(lock_references(lockfile))
-        seed = Lockfile(version="0.5", requires=tuple(sorted(locked)))
-        (directory / "conan.lock").write_text(seed.model_dump_json())
+        self._client.graph(directory, lockfile=lockfile)
+        self._client.export_package(directory, lockfile=lockfile)
+        return PreparedRecipe(ref, pinned)
 
     def _publish_prepared(self, prepared: tuple[PreparedRecipe, ...]) -> None:
         published: list[Ref] = []
@@ -296,21 +301,19 @@ class ConanBackend:
                 raise PartialPublicationError(tuple(published), recipe.record_ref) from exc
             published.append(recipe.record_ref)
 
-    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+    def materialize(
+        self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
+    ) -> MaterializedPackage:
         """Install artifacts and optionally run Conan source retrieval for this package."""
         with self._read():
             pinned, directory = self._locate(normalize_ref(ref))
-            record, metadata, locked = read_recipe(directory, ref)
+            record, metadata = read_recipe(directory, ref)
             if not record.source and not record.files:
                 raise MaterializationError("Package has no stored source or artifacts")
-            self._load_graph(ref)
+            self._load_graph(ref, lockfile=lockfile)
             with TemporaryDirectory(prefix="hwcatalog-conan-install-") as temporary:
                 lock = Path(temporary) / "conan.lock"
-                lock.write_text(
-                    Lockfile(
-                        version="0.5", requires=tuple(sorted({*lock_references(locked), pinned}))
-                    ).model_dump_json()
-                )
+                self._client.create_project_lockfile((pinned,), lock, seed=lockfile)
                 result = self._client.install(
                     pinned, lock, Path(temporary), with_sources=with_sources
                 )

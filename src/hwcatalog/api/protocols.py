@@ -36,7 +36,11 @@ class Backend(Protocol):
         ...
 
     def publish(
-        self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
+        self,
+        records: tuple[Record, ...],
+        *,
+        dependencies: tuple[Dependency, ...] = (),
+        lockfile: Path | None = None,
     ) -> None:
         """Save a batch of new records and dependencies; existing refs raise IdentityConflict.
 
@@ -44,11 +48,17 @@ class Backend(Protocol):
         """
         ...
 
-    def publish_file(self, path: Path) -> Record:
+    def publish_file(self, path: Path, *, lockfile: Path | None = None) -> Record:
         """Publish a single-package JSON document with optional source and files."""
         ...
 
-    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+    def create_lockfile(self, refs: tuple[Ref, ...], path: Path) -> Path:
+        """Write a project lockfile using Conan; Memory does not support this operation."""
+        ...
+
+    def materialize(
+        self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
+    ) -> MaterializedPackage:
         """Provide artifacts; source_path is populated only when sources are requested."""
         ...
 

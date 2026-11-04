@@ -133,7 +133,7 @@ class ConanClient:
             raise BackendUnavailable("Conan returned an invalid cache path")
         return Path(result)
 
-    def graph(self, directory: Path) -> NativeGraph:
+    def graph(self, directory: Path, *, lockfile: Path | None = None) -> NativeGraph:
         result = cast(
             Mapping[str, object],
             self.run(
@@ -141,7 +141,7 @@ class ConanClient:
                 "info",
                 str(directory / "conanfile.py"),
                 "--lockfile",
-                str(directory / "conan.lock"),
+                str(lockfile) if lockfile is not None else "",
                 *self.profile_args,
                 *self.source_args,
             ),
@@ -161,18 +161,32 @@ class ConanClient:
             *self.source_args,
         )
 
+    def create_project_lockfile(
+        self, references: tuple[str, ...], output: Path, *, seed: Path | None = None
+    ) -> None:
+        """Ask Conan to capture a consumer's complete dependency graph."""
+        arguments = ["lock", "create"] if references else ["lock", "add"]
+        if not references:
+            seed = None
+        arguments.extend(f"--requires={reference}" for reference in references)
+        arguments.extend(("--lockfile", str(seed) if seed is not None else ""))
+        arguments.extend(("--lockfile-out", str(output)))
+        if references:
+            arguments.extend(("--lockfile-clean", *self.profile_args, *self.source_args))
+        self.run(*arguments)
+
     def export(self, directory: Path) -> str:
         result = cast(Mapping[str, object], self.run("export", str(directory), "--no-remote"))
         return cast(NativeReference, result["reference"]).repr_notime()
 
-    def export_package(self, directory: Path) -> None:
+    def export_package(self, directory: Path, *, lockfile: Path | None = None) -> None:
         self.run(
             "export-pkg",
             str(directory),
             "--test-folder=",
             "--skip-binaries",
             "--lockfile",
-            str(directory / "conan.lock"),
+            str(lockfile) if lockfile is not None else "",
             *self.profile_args,
             *self.source_args,
         )
