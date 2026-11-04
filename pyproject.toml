@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hwcatalog-conan"
+version = "0.1.0"
+description = "Experimental Conan-backed hardware catalog"
+readme = "README.md"
+requires-python = ">=3.15"
+dependencies = ["neo4j>=6.0,<7", "pydantic>=2.14,<3", "networkx>=3.7,<4", "frozendict>=2.4.7,<3"]
+
+[project.optional-dependencies]
+git = ["dulwich>=1.2.18,<2"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-cov>=6",
+    "ruff>=0.14",
+    "mypy>=1.18",
+    "dulwich>=1.2.18,<2",
+    "types-networkx",
+    "conan>=2.34,<2.35",
+    "conan-server>=2.34,<2.35",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hwcatalog"]
+
+[tool.ruff]
+target-version = "py315"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "C90", "PLR", "RUF", "S", "PERF"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 12
+max-statements = 50
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.15"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires isolated real Memgraph",
+    "restart: restarts owned Compose service",
+    "conan: uses the real Conan CLI in isolated caches",
+    "conan_remote: uses an owned temporary Conan server",
+]
+addopts = "-ra"
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "hwcatalog.api.models.query.SearchQuery",
+]

@@ -1,0 +1,28 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.4"
+      - run: uv sync --frozen
+      - run: make check unit build
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.4"
+      - run: uv sync --frozen
+      - run: uv run --frozen pytest -m 'not integration and not conan_remote' --cov=hwcatalog
+      - run: uv run --frozen pytest --backend=memgraph -m 'not conan and not conan_remote' --cov=hwcatalog --cov-append
+      - run: uv run --frozen pytest -m conan_remote --cov=hwcatalog --cov-append --cov-fail-under=95
