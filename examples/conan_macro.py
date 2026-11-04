@@ -19,7 +19,7 @@ def main() -> None:
     )
     with (
         TemporaryDirectory(prefix="hwcatalog-example-") as directory,
-        Catalog(ConanBackend(Path(directory))) as catalog,
+        Catalog(backend := ConanBackend(Path(directory))) as catalog,
     ):
         catalog.publish(
             (rtl, intermediate, macro),
@@ -36,6 +36,9 @@ def main() -> None:
             print(
                 f"{len(graph.records)} nodes, {len(graph.dependencies)} edges, {graph.consistency}"
             )
+            native = backend.load_graph(result.ref)
+            for package in native.root.conanfile.dependencies.host.topological_sort.values():
+                print(f"native dependency: {package.ref}")
 
 
 if __name__ == "__main__":

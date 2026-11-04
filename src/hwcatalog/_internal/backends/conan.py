@@ -23,6 +23,7 @@ from ...api.graph import CatalogGraph
 from ...api.models.graph import Dependency, GraphResult
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
+from ...backends.conan_types import NativeGraph, NativePackage
 from ..validation import (
     normalize_dependency,
     normalize_query,
@@ -30,7 +31,7 @@ from ..validation import (
     normalize_ref,
     validate,
 )
-from .conan_cli import ConanCLI, GraphData
+from .conan_cli import ConanCLI
 from .conan_format import (
     Lockfile,
     from_conan_reference,
@@ -60,10 +61,12 @@ class ConanReader:
         return self.backend.search(query)
 
     def dependencies(self, ref: Ref, filters: SearchQuery) -> tuple[Record, ...]:
-        graph = self.backend._closure(ref)
-        targets = {edge.target for edge in graph.dependencies if edge.source == ref}
-        records = (r for r in graph.records if r.ref in targets and filters.matches(r))
-        return tuple(sorted(records, key=lambda record: record.ref.identity))
+        graph, records = self.backend._load_graph(ref)
+        packages = graph.root.conanfile.dependencies.direct_host.values()
+        matches = (records[_package_ref(package)] for package in packages)
+        return tuple(
+            sorted((r for r in matches if filters.matches(r)), key=lambda r: r.ref.identity)
+        )
 
     def consumers(self, ref: Ref, filters: SearchQuery) -> tuple[Record, ...]:
         return self.backend.graph.find_dependents(ref, candidates=filters, transitive=False)
@@ -89,16 +92,12 @@ class ConanGraph(CatalogGraph):
             for candidate in reader.search(normalize_query(candidates)):
                 if candidate.ref == ref:
                     continue
-                graph = self.backend._closure(candidate.ref)
-                if _depends_on(graph, candidate.ref, ref, transitive=transitive):
+                graph, _ = self.backend._load_graph(candidate.ref)
+                dependencies = graph.root.conanfile.dependencies
+                packages = dependencies.host if transitive else dependencies.direct_host
+                if any(_package_ref(package) == ref for package in packages.values()):
                     result.append(candidate)
             return tuple(sorted(result, key=lambda record: record.ref.identity))
-
-
-def _depends_on(graph: GraphResult, source: Ref, target: Ref, *, transitive: bool) -> bool:
-    if transitive:
-        return any(record.ref == target for record in graph.records)
-    return any(edge.source == source and edge.target == target for edge in graph.dependencies)
 
 
 class ConanBackend:
@@ -165,41 +164,45 @@ class ConanBackend:
                 sorted((r for r in records if query.matches(r)), key=lambda r: r.ref.identity)
             )
 
+    def load_graph(self, ref: Ref) -> NativeGraph:
+        """Return the actual Conan DepsGraph, with its native dependency views.
+
+        The graph is loaded using the root's exported lockfile. Consumers can use
+        graph.root.conanfile.dependencies.host.topological_sort directly.
+        """
+        with self._read():
+            graph, _ = self._load_graph(normalize_ref(ref))
+            return graph
+
     def _closure(self, ref: Ref) -> GraphResult:
+        graph, records = self._load_graph(ref)
+        return GraphResult(
+            tuple(sorted(records.values(), key=lambda record: record.ref.identity)),
+            _graph_dependencies(graph, records),
+            consistency="live",
+        )
+
+    def _load_graph(self, ref: Ref) -> tuple[NativeGraph, dict[Ref, Record]]:
         _, directory = self._locate(ref)
         root, _, lockfile = read_recipe(directory, ref)
         graph = self._cli.graph(directory)
-        return self._convert_graph(graph, root, lockfile)
-
-    def _convert_graph(self, graph: GraphData, root: Record, lockfile: Lockfile) -> GraphResult:
-        if len(graph.root) != 1:
-            raise InvalidPackage("Conan graph must have exactly one root")
-        root_id = next(iter(graph.root))
-        if root_id not in graph.nodes:
-            raise InvalidPackage("Conan graph root is absent from nodes")
-        records = {root_id: root}
+        root_package = graph.root.conanfile
+        if _package_ref(root_package) != ref:
+            raise InvalidPackage("Conan graph root differs from the requested reference")
+        _validate_package(root_package)
+        records = {ref: root}
         locked = lock_references(lockfile)
-        for node_id, node in graph.nodes.items():
-            if node.context != "host" or node.settings or node.options:
-                raise InvalidPackage("Configurable recipes and build dependencies are unsupported")
-            if node_id != root_id:
-                if node.ref not in locked:
-                    raise InvalidPackage(f"Dependency is not pinned by root lockfile: {node.ref}")
-                ref = from_conan_reference(node.ref)
-                pinned, directory = self._locate(ref)
-                if pinned != node.ref:
-                    raise IdentityConflict(
-                        f"Locked revision differs from published identity: {node.ref}"
-                    )
-                records[node_id] = read_recipe(directory, ref)[0]
-        dependencies = _graph_dependencies(graph, records)
-        return GraphResult(
-            tuple(
-                sorted({r.ref: r for r in records.values()}.values(), key=lambda r: r.ref.identity)
-            ),
-            dependencies,
-            consistency="live",
-        )
+        for package in root_package.dependencies.host.topological_sort.values():
+            _validate_package(package)
+            pinned = package.ref.repr_notime()
+            if pinned not in locked:
+                raise InvalidPackage(f"Dependency is not pinned by root lockfile: {pinned}")
+            package_ref = _package_ref(package)
+            published, folder = self._locate(package_ref)
+            if published != pinned:
+                raise IdentityConflict(f"Locked revision differs from published identity: {pinned}")
+            records[package_ref] = read_recipe(folder, package_ref)[0]
+        return graph, records
 
     def publish(
         self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
@@ -292,14 +295,26 @@ def _validate_coordinates(
             raise VersionConflict("Conan requires one version per direct dependency family")
 
 
-def _graph_dependencies(graph: GraphData, records: dict[str, Record]) -> tuple[Dependency, ...]:
-    result: set[Dependency] = set()
-    for source, node in graph.nodes.items():
-        for target, requirement in node.dependencies.items():
-            if requirement.build:
-                raise InvalidPackage("Build requirements are unsupported")
-            if requirement.direct:
-                if source not in records or target not in records:
-                    raise InvalidPackage("Conan graph contains an unknown endpoint")
-                result.add(Dependency(records[source].ref, records[target].ref))
-    return tuple(sorted(result, key=lambda edge: edge.to_json()))
+def _package_ref(package: NativePackage) -> Ref:
+    return from_conan_reference(package.ref.repr_notime())
+
+
+def _validate_package(package: NativePackage) -> None:
+    if package.context != "host" or package.settings.dumps() or package.options.dumps():
+        raise InvalidPackage("Configurable recipes and build dependencies are unsupported")
+    if tuple(package.dependencies.build.values()):
+        raise InvalidPackage("Build requirements are unsupported")
+
+
+def _graph_dependencies(graph: NativeGraph, records: dict[Ref, Record]) -> tuple[Dependency, ...]:
+    root = graph.root.conanfile
+    packages = (root, *root.dependencies.host.values())
+    edges: set[Dependency] = set()
+    for package in packages:
+        source = _package_ref(package)
+        for target in package.dependencies.direct_host.values():
+            target_ref = _package_ref(target)
+            if source not in records or target_ref not in records:
+                raise InvalidPackage("Conan graph contains an unknown endpoint")
+            edges.add(Dependency(source, target_ref))
+    return tuple(sorted(edges, key=lambda edge: edge.to_json()))

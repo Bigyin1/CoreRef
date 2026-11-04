@@ -39,6 +39,21 @@ make check unit build
 make integration  # собственный временный Conan server
 ```
 
+Получить нативный граф из обычного Python-кода:
+
+```python
+backend = ConanBackend(Path("/absolute/path/to/conan-home"))
+try:
+    graph = backend.load_graph(macro.ref)
+    for package in graph.root.conanfile.dependencies.host.topological_sort.values():
+        print(package.ref)
+finally:
+    backend.close()
+```
+
+Метод возвращает настоящий Conan DepsGraph с его зависимостями и топологической
+сортировкой; собственный обход для Conan не выполняется.
+
 MemoryBackend — простой эталон для тестирования того же API в памяти.
 Конфликты зависимостей Conan обрабатываются штатными механизмами и lockfiles.
 Файлы ресурсов остаются во внешних хранилищах; Python-хелперы Git/файловых ресурсов сохранены.

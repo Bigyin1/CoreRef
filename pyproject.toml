@@ -9,6 +9,7 @@ description = "Experimental Conan-backed hardware catalog"
 readme = "README.md"
 requires-python = ">=3.15"
 dependencies = [
+ "conan>=2.34,<2.35",
  "pydantic>=2.14,<3",
  "networkx>=3.7,<4",
  "frozendict>=2.4.7,<3",
@@ -25,7 +26,6 @@ dev = [
     "mypy>=1.18",
     "dulwich>=1.2.18,<2",
     "types-networkx",
-    "conan>=2.34,<2.35",
     "conan-server>=2.34,<2.35",
 ]
 

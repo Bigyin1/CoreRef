@@ -6,5 +6,12 @@ from .._internal.backends.conan_format import (
     to_conan_reference,
     write_recipe,
 )
+from .conan_types import NativeGraph
 
-__all__ = ["ConanBackend", "from_conan_reference", "to_conan_reference", "write_recipe"]
+__all__ = [
+    "ConanBackend",
+    "NativeGraph",
+    "from_conan_reference",
+    "to_conan_reference",
+    "write_recipe",
+]

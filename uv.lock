@@ -284,6 +284,7 @@ name = "hwcatalog-conan"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "conan" },
     { name = "frozendict" },
     { name = "networkx" },
     { name = "pydantic" },
@@ -296,7 +297,6 @@ git = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "conan" },
     { name = "conan-server" },
     { name = "dulwich" },
     { name = "mypy" },
@@ -308,6 +308,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "conan", specifier = ">=2.34,<2.35" },
     { name = "dulwich", marker = "extra == 'git'", specifier = ">=1.2.18,<2" },
     { name = "frozendict", specifier = ">=2.4.7,<3" },
     { name = "networkx", specifier = ">=3.7,<4" },
@@ -317,7 +318,6 @@ provides-extras = ["git"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "conan", specifier = ">=2.34,<2.35" },
     { name = "conan-server", specifier = ">=2.34,<2.35" },
     { name = "dulwich", specifier = ">=1.2.18,<2" },
     { name = "mypy", specifier = ">=1.18" },

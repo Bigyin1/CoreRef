@@ -1,4 +1,4 @@
-"""Bounded Conan subprocess adapter; no command invokes a shell."""
+"""Conan storage commands and in-process loading of native dependency graphs."""
 
 import os
 import shutil
@@ -7,7 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
-from ...api.errors import BackendUnavailable, DependencyCycle, InvalidPackage, VersionConflict
+from ...api.errors import BackendUnavailable
+from ...backends.conan_types import NativeGraph
+from .conan_native import load_native_graph
 
 
 class RecipeRevisions(BaseModel):
@@ -16,35 +18,6 @@ class RecipeRevisions(BaseModel):
 
 class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
     pass
-
-
-class Requirement(BaseModel):
-    direct: bool
-    build: bool = False
-
-
-class GraphNode(BaseModel):
-    ref: str
-    recipe: str
-    dependencies: dict[str, Requirement] = Field(default_factory=dict)
-    context: str = "host"
-    settings: dict[str, object] = Field(default_factory=dict)
-    options: dict[str, object] = Field(default_factory=dict)
-
-
-class GraphError(BaseModel):
-    type: str
-    error: str = ""
-
-
-class GraphData(BaseModel):
-    nodes: dict[str, GraphNode]
-    root: dict[str, object]
-    error: GraphError | None = None
-
-
-class GraphDocument(BaseModel):
-    graph: GraphData
 
 
 class ExportResult(BaseModel):
@@ -115,39 +88,24 @@ class ConanCLI:
         except ValidationError as exc:
             raise BackendUnavailable("Conan returned an invalid cache path") from exc
 
-    def graph(self, directory: Path, *, locked: bool = True) -> GraphData:
-        result = self.run(
-            "graph",
-            "info",
-            str(directory / "conanfile.py"),
-            "--format=json",
-            "--lockfile",
-            str(directory / "conan.lock") if locked else "",
-            *self.profile_args,
-            *self.source_args,
-            check=False,
+    def graph(self, directory: Path) -> NativeGraph:
+        return load_native_graph(
+            self.home,
+            [
+                "graph",
+                "info",
+                str(directory / "conanfile.py"),
+                "-vquiet",
+                "--lockfile",
+                str(directory / "conan.lock"),
+                *self.profile_args,
+                *self.source_args,
+                "-cc",
+                "core:non_interactive=True",
+                "-cc",
+                f"core.net.http:timeout={self.timeout}",
+            ],
         )
-        try:
-            graph = GraphDocument.model_validate_json(result.stdout).graph
-        except ValidationError as exc:
-            if result.returncode:
-                raise BackendUnavailable(f"Conan graph failed: {result.stderr.strip()}") from exc
-            raise BackendUnavailable("Conan returned an invalid graph") from exc
-        if graph.error:
-            self._graph_error(graph.error, result.stderr)
-        if result.returncode:
-            raise BackendUnavailable(f"Conan graph failed: {result.stderr.strip()}")
-        return graph
-
-    @staticmethod
-    def _graph_error(error: GraphError, message: str) -> None:
-        if error.type == "conflict":
-            raise VersionConflict(message)
-        if error.type == "loop":
-            raise DependencyCycle(message)
-        if "not in lockfile" in error.error:
-            raise InvalidPackage("Recipe dependency is absent from its lockfile")
-        raise BackendUnavailable(f"Conan graph error ({error.type}): {message}")
 
     def create_lockfile(self, directory: Path, *, seed: Path | None = None) -> None:
         self.run(

@@ -40,6 +40,14 @@ Filters применяются к найденным записям. Отсут�
 Методы neighbors, implementations и lineage, параметр resolve_versions удалены.
 Для поиска RTL → BE используется find_dependents с фильтрами имени и представления.
 
+ConanBackend.load_graph(ref) возвращает настоящий объект Conan DepsGraph.
+С ним можно работать из отдельного Python-скрипта:
+`graph.root.conanfile.dependencies.host.topological_sort.values()`.
+Прямые зависимости доступны через dependencies.direct_host. Корень в этом
+списке отсутствует. Тип NativeGraph из hwcatalog.backends.conan служит только
+аннотацией; объект во время выполнения принадлежит Conan. Метод специфичен для
+ConanBackend. Подробности: [нативный граф](conan.md#нативный-граф-из-обычного-python-скрипта).
+
 ## Гарантии и ошибки
 
 Catalog.capabilities содержит atomic_publish, consistency и lockfiles. Memory даёт

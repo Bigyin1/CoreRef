@@ -1,6 +1,7 @@
 """Behavioral tests against real Conan recipes and its dependency graph evaluator."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -262,3 +263,123 @@ def test_cli_timeout_is_not_not_found(
     monkeypatch.setattr(subprocess, "run", timeout)
     with pytest.raises(BackendUnavailable):
         conan_backend.search(SearchQuery())
+
+
+def test_native_graph_exposes_conans_dependencies_and_topological_order(
+    conan_backend: ConanBackend,
+) -> None:
+    # Conan's native runtime class has no typing metadata.
+    from conan.internal.graph.graph import DepsGraph  # type: ignore[import-untyped]
+
+    root = record(name="aaa-root")
+    left, right = record(name="aaa-left"), record(name="bbb-right")
+    shared = record(name="zzz-shared")
+    edges = (
+        Dependency(root.ref, left.ref),
+        Dependency(root.ref, right.ref),
+        Dependency(left.ref, shared.ref),
+        Dependency(right.ref, shared.ref),
+    )
+    conan_backend.publish((root, left, right, shared), dependencies=edges)
+    graph = conan_backend.load_graph(root.ref)
+    assert isinstance(graph, DepsGraph)
+    assert len(graph.nodes) == 4
+    assert "nodes" in graph.serialize()
+    dependencies = graph.root.conanfile.dependencies
+    direct = {
+        from_conan_reference(dep.ref.repr_notime()) for dep in dependencies.direct_host.values()
+    }
+    assert direct == {left.ref, right.ref}
+    ordered = tuple(
+        from_conan_reference(dep.ref.repr_notime())
+        for dep in dependencies.host.topological_sort.values()
+    )
+    assert set(ordered) == {left.ref, right.ref, shared.ref}
+    assert ordered.index(shared.ref) < ordered.index(left.ref)
+    assert ordered.index(shared.ref) < ordered.index(right.ref)
+    assert dependencies.host[to_conan_reference(shared.ref)].ref.name == "soc.zzz-shared.rtl"
+    assert conan_backend.graph.dependency_closure(root.ref).dependencies == tuple(
+        sorted(edges, key=lambda edge: edge.to_json())
+    )
+
+
+def test_native_graph_uses_explicit_home_without_changing_process_state(
+    conan_backend: ConanBackend,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = record()
+    conan_backend.publish((root,))
+    ambient_home = tmp_path / "unrelated-home"
+    monkeypatch.setenv("CONAN_HOME", str(ambient_home))
+    cwd = Path.cwd()
+    graph = conan_backend.load_graph(root.ref)
+    assert tuple(graph.root.conanfile.dependencies.host.topological_sort.values()) == ()
+    assert graph.root.conanfile.recipe_folder is not None
+    assert Path(graph.root.conanfile.recipe_folder).is_relative_to(conan_backend._cli.home)
+    assert os.environ["CONAN_HOME"] == str(ambient_home)
+    assert Path.cwd() == cwd
+    assert not ambient_home.exists()
+    conan_backend.close()
+    with pytest.raises(BackendUnavailable):
+        conan_backend.load_graph(root.ref)
+
+
+def test_native_graph_reports_missing_pinned_dependency(conan_backend: ConanBackend) -> None:
+    rtl, macro = record(), record("lib-lef")
+    conan_backend.publish((rtl, macro), dependencies=(Dependency(macro.ref, rtl.ref),))
+    conan_backend._cli.run("remove", to_conan_reference(rtl.ref), "--confirm")
+    with pytest.raises(BackendUnavailable):
+        conan_backend.load_graph(macro.ref)
+
+
+def test_native_api_failure_is_a_catalog_error(
+    conan_backend: ConanBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from conan.errors import ConanException  # type: ignore[import-untyped]
+
+    from hwcatalog._internal.backends import conan_native
+
+    root = record()
+    conan_backend.publish((root,))
+
+    def fail(*args: object, **kwargs: object) -> object:
+        raise ConanException("simulated API failure")
+
+    monkeypatch.setattr(conan_native, "ConanAPI", fail)
+    with pytest.raises(BackendUnavailable, match="simulated API failure"):
+        conan_backend.load_graph(root.ref)
+
+
+def test_native_graph_computation_does_not_spawn_a_conan_process(
+    conan_backend: ConanBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = record()
+    conan_backend.publish((root,))
+    _, directory = conan_backend._locate(root.ref)
+
+    def reject_subprocess(*args: object, **kwargs: object) -> object:
+        raise AssertionError("Native graph loading must use the in-process Conan API")
+
+    monkeypatch.setattr(subprocess, "run", reject_subprocess)
+    graph = conan_backend._cli.graph(directory)
+    assert from_conan_reference(graph.root.conanfile.ref.repr_notime()) == root.ref
+
+
+def test_native_graph_rejects_an_unlocked_transitive_dependency(
+    conan_backend: ConanBackend,
+) -> None:
+    root, middle, leaf = (record(name=name) for name in ("root", "middle", "leaf"))
+    conan_backend.publish(
+        (root, middle, leaf),
+        dependencies=(Dependency(root.ref, middle.ref), Dependency(middle.ref, leaf.ref)),
+    )
+    _, directory = conan_backend._locate(root.ref)
+    lock_path = directory / "conan.lock"
+    lock = json.loads(lock_path.read_text())
+    lock["requires"] = [value for value in lock["requires"] if "soc.leaf.rtl/" not in value]
+    lock_path.write_text(json.dumps(lock))
+    with pytest.raises(InvalidPackage):
+        conan_backend.load_graph(root.ref)
