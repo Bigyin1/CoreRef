@@ -39,24 +39,22 @@ make check unit build
 make integration  # собственный временный Conan server
 ```
 
-Получить нативный граф из обычного Python-кода:
+Публикация файлов и Git-исходников:
 
 ```python
-backend = ConanBackend(Path("/absolute/path/to/conan-home"))
-try:
-    graph = backend.load_graph(macro.ref)
-    for package in graph.root.conanfile.dependencies.host.topological_sort.values():
-        print(package.ref)
-finally:
-    backend.close()
+with Catalog(ConanBackend(Path("/absolute/path/to/conan-home"))) as catalog:
+    record = catalog.publish_file("package.json")
+    content = catalog.materialize(record.ref).path
 ```
 
-Метод возвращает настоящий Conan DepsGraph с его зависимостями и топологической
-сортировкой; собственный обход для Conan не выполняется.
+JSON описывает один пакет: `ref`, `payload`, `dependencies`, необязательный один
+`source` и карту `files`. Git-координаты фиксируются SCM-механизмом Conan и хранятся
+в `conandata.yml`. Файлы и исходники упаковываются в Conan; `LocatedResource`
+остаётся внешним путём. Пример полного описания — [в документации](docs/conan.md).
 
-MemoryBackend — простой эталон для тестирования того же API в памяти.
-Конфликты зависимостей Conan обрабатываются штатными механизмами и lockfiles.
-Файлы ресурсов остаются во внешних хранилищах; Python-хелперы Git/файловых ресурсов сохранены.
+Conan-рецепты и нативный граф создаются внутри адаптера. Все команды выполняются
+через Conan Python API; нативные dependencies и топологический порядок используются
+внутри библиотеки. MemoryBackend реализует тот же API для тестирования.
 
 Поиск зависимых записей проверяет граф каждого кандидата, а подготовка публикации
 копирует Conan home для проверки batch. Эти ограничения требуют оценки на реальных данных.

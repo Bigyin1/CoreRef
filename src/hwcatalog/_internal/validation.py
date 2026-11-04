@@ -1,6 +1,9 @@
 """Immutable records and exact, acyclic dependency publications."""
 
+import re
 from collections.abc import Collection
+from dataclasses import replace
+from pathlib import PurePosixPath
 
 import networkx as nx
 
@@ -25,7 +28,19 @@ def normalize_ref(value: Ref) -> Ref:
 
 
 def normalize_record(value: Record) -> Record:
-    record = Record(normalize_ref(value.ref), value.payload)
+    if value.source is not None:
+        url = _text(value.source.repository_url)
+        if url.startswith("-") or any(char in url for char in ('"', "`", "$", "\n", "\r", "\0")):
+            raise InvalidPublication("Git URL contains characters unsafe for Conan SCM helpers")
+        if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", value.source.resolved_commit):
+            raise InvalidPublication("Git source requires an exact commit")
+        if value.source.provider != "git":
+            raise InvalidPublication("Only one Git source is supported")
+    for name in value.files:
+        validate_file_name(name)
+    if len(set(value.files)) != len(value.files):
+        raise InvalidPublication("Duplicate artifact names")
+    record = replace(value, ref=normalize_ref(value.ref))
     return Record.from_json(record.to_json())
 
 
@@ -67,3 +82,15 @@ def validate(
     graph: nx.DiGraph[Ref] = nx.DiGraph((edge.source, edge.target) for edge in dependencies)
     if not nx.is_directed_acyclic_graph(graph):
         raise DependencyCycle("Cycle in dependencies")
+
+
+def validate_file_name(name: str) -> None:
+    path = PurePosixPath(_text(name))
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or any(char in name for char in ("\\", ":", "\0"))
+        or str(path) != name
+        or name == "."
+    ):
+        raise InvalidPublication("Artifact names must be canonical relative POSIX paths")

@@ -12,7 +12,8 @@ lowercase-буквы, цифры, `_`, `-`; точки служат раздел
 проверяются на совместимость с Conan. MemoryBackend принимает произвольные непустые
 координаты и используется как тестовое хранилище.
 
-Record содержит ref и payload. Payload — произвольное JSON-значение или объект
+Record содержит ref, payload, необязательный один source (GitResource) и files
+(имена упакованных артефактов). source/files управляются каталогом и отделены от payload. Payload — произвольное JSON-значение или объект
 с методом to_json(), возвращающим JSON-документ. Сериализация принадлежит модели:
 Record.to_json()/from_json(). При публикации содержимое становится независимым
 неизменяемым снимком: объекты — frozendict, массивы — tuple. Python-классы пользователя
@@ -47,4 +48,6 @@ To_networkx() создаёт независимый nx.DiGraph с ключами
 
 GitResource описывает точный Git-коммит; LocatedResource — абсолютный путь
 к внешнему файлу или каталогу. Их materialize() возвращает MaterializedResource(path).
-Ресурсы могут храниться в payload, но каталог не требует их и не материализует при чтении.
+Git source пакета задаётся полем source; в Conan его координаты хранятся в conandata.yml.
+LocatedResource может храниться в payload и не загружается в Conan автоматически.
+Catalog.materialize(ref) устанавливает содержимое пакета с source/ и artifacts/.

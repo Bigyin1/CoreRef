@@ -1,20 +1,25 @@
-"""Version-one recipe format shared by catalog publication and external CI."""
+"""Canonical internal recipe formats and exact dependency lockfiles."""
 
 import re
+import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
+import yaml  # type: ignore[import-untyped]  # Validated by models at this boundary.
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ...api.errors import InvalidPackage, InvalidPublication
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
+from ...api.models.resources import GitResource
 from ..validation import normalize_record, normalize_ref
 
 _TOKEN = re.compile(r"[a-z0-9_-]+\Z")
 _VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
+_CONTENT_FORMAT: Literal[2] = 2
 
 
 def to_conan_reference(ref: Ref) -> str:
@@ -61,7 +66,8 @@ def search_pattern(query: SearchQuery) -> str | None:
 
 class RecipeMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    format: Literal[1] = 1
+    format: Literal[1, 2] = 1
+    has_source: bool = False
     requires: tuple[str, ...] = ()
 
 
@@ -73,9 +79,9 @@ class Lockfile(BaseModel):
     config_requires: tuple[str, ...] = ()
 
 
-def _recipe_text(ref: Ref, requirements: tuple[str, ...]) -> str:
+def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, content: bool = False) -> str:
     name, version = to_conan_reference(ref).split("/")
-    return (
+    text = (
         "from conan import ConanFile\n\n\n"
         "class CatalogRecord(ConanFile):\n"
         f"    name = {name!r}\n"
@@ -84,17 +90,90 @@ def _recipe_text(ref: Ref, requirements: tuple[str, ...]) -> str:
         '    exports = "record.json", "hwcatalog.json", "conan.lock"\n'
         f"    requires = {requirements!r}\n"
     )
+    if content:
+        text += _CONTENT_METHODS
+    return text
 
 
-def write_recipe(directory: Path, record: Record, dependencies: tuple[Ref, ...] = ()) -> None:
+_CONTENT_METHODS = """
+    exports_sources = "artifacts/*"
+
+    def export(self):
+        from pathlib import Path
+        from conan.tools.scm import Git
+        marker = Path(self.recipe_folder) / "source-path.txt"
+        if marker.is_file():
+            Git(self, marker.read_text()).coordinates_to_conandata(repository=True)
+
+    def source(self):
+        import os
+        from conan.tools.scm import Git
+        if self.conan_data and "scm" in self.conan_data:
+            checkout = os.path.join(self.source_folder, "checkout")
+            os.makedirs(checkout, exist_ok=True)
+            Git(self, checkout).checkout_from_conandata_coordinates()
+
+    def package(self):
+        import os
+        from conan.tools.files import copy
+        copy(self, "*", src=os.path.join(self.source_folder, "artifacts"),
+             dst=os.path.join(self.package_folder, "artifacts"))
+        if self.conan_data and "scm" in self.conan_data:
+            copy(self, "*", src=os.path.join(self.source_folder, "checkout"),
+                 dst=os.path.join(self.package_folder, "source"), excludes=(".git", ".git/*"))
+"""
+
+
+class _SCM(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    url: str
+    commit: str
+    requested_ref: str = "HEAD"
+
+
+class _ConanData(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    scm: _SCM
+
+
+def write_recipe(
+    directory: Path,
+    record: Record,
+    dependencies: tuple[Ref, ...] = (),
+    *,
+    source_path: Path | None = None,
+    files: dict[str, Path] | None = None,
+) -> None:
     """Prepare a canonical recipe; CI must create conan.lock before exporting it."""
     record = normalize_record(record)
     requirements = tuple(sorted({to_conan_reference(ref) for ref in dependencies}))
-    metadata = RecipeMetadata(requires=requirements)
+    content = bool(record.source or source_path or record.files)
+    metadata = RecipeMetadata(
+        format=_CONTENT_FORMAT if content else 1,
+        requires=requirements,
+        has_source=bool(record.source or source_path),
+    )
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "conanfile.py").write_text(_recipe_text(record.ref, requirements))
-    (directory / "record.json").write_text(record.to_json())
+    (directory / "conanfile.py").write_text(_recipe_text(record.ref, requirements, content=content))
+    (directory / "record.json").write_text(replace(record, source=None).to_json())
     (directory / "hwcatalog.json").write_text(metadata.model_dump_json())
+    if source_path is not None:
+        (directory / "source-path.txt").write_text(str(source_path))
+    elif record.source is not None:
+        source = record.source
+        data = _ConanData(
+            scm=_SCM(
+                url=source.repository_url,
+                commit=source.resolved_commit,
+                requested_ref=source.requested_ref,
+            )
+        )
+        # JSON is valid YAML and Conan loads it as conandata.yml.
+        (directory / "conandata.yml").write_text(data.model_dump_json())
+    for name, path in (files or {}).items():
+        destination = directory / "artifacts" / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
 
 
 def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata, Lockfile]:
@@ -103,16 +182,41 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata,
         record = normalize_record(Record.from_json((directory / "record.json").read_text()))
         metadata = RecipeMetadata.model_validate_json((directory / "hwcatalog.json").read_text())
         lockfile = Lockfile.model_validate_json((directory / "conan.lock").read_text())
+        if record.source is not None:
+            raise ValueError("Git source must be stored in Conan SCM metadata")
+        if metadata.format == 1 and (record.files or metadata.has_source):
+            raise ValueError("Content requires format two")
+        if metadata.has_source:
+            data = _ConanData.model_validate(
+                yaml.safe_load((directory / "conandata.yml").read_text())
+            )
+            record = normalize_record(
+                replace(
+                    record,
+                    source=GitResource(data.scm.url, data.scm.requested_ref, data.scm.commit),
+                )
+            )
         if record.ref != expected:
             raise ValueError("Record coordinates disagree with the recipe")
         for dependency in metadata.requires:
             if to_conan_reference(from_conan_reference(dependency)) != dependency:
                 raise ValueError("Requirements must use exact versions without revisions")
-        if (directory / "conanfile.py").read_text() != _recipe_text(record.ref, metadata.requires):
-            raise ValueError("Only canonical version-one catalog recipes are supported")
+        recipe = _recipe_text(
+            record.ref, metadata.requires, content=metadata.format == _CONTENT_FORMAT
+        )
+        if (directory / "conanfile.py").read_text() != recipe:
+            raise ValueError("Only canonical catalog recipes are supported")
         _validate_lockfile(lockfile, expected, metadata)
         return record, metadata, lockfile
-    except (OSError, ValueError, TypeError, KeyError, ValidationError, InvalidPublication) as exc:
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        ValidationError,
+        InvalidPublication,
+        yaml.YAMLError,
+    ) as exc:
         raise InvalidPackage(f"Invalid catalog recipe for {expected.identity}: {exc}") from exc
 
 

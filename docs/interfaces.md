@@ -11,6 +11,8 @@ Catalog владеет бэкендом и поддерживает контек
 | get_many(refs) | tuple[Record, ...], сохраняет порядок и дубликаты; отсутствие любого Ref — ошибка |
 | search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по identity |
 | publish(records, *, dependencies=()) | Публикует новые Record и исходящие Dependency |
+| publish_file(path) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
+| materialize(ref) | MaterializedResource(path) с каталогами source/ и artifacts/ |
 | find_dependents(ref, *, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
 | close() | Освобождает ресурсы бэкенда |
 
@@ -40,13 +42,9 @@ Filters применяются к найденным записям. Отсут�
 Методы neighbors, implementations и lineage, параметр resolve_versions удалены.
 Для поиска RTL → BE используется find_dependents с фильтрами имени и представления.
 
-ConanBackend.load_graph(ref) возвращает настоящий объект Conan DepsGraph.
-С ним можно работать из отдельного Python-скрипта:
-`graph.root.conanfile.dependencies.host.topological_sort.values()`.
-Прямые зависимости доступны через dependencies.direct_host. Корень в этом
-списке отсутствует. Тип NativeGraph из hwcatalog.backends.conan служит только
-аннотацией; объект во время выполнения принадлежит Conan. Метод специфичен для
-ConanBackend. Подробности: [нативный граф](conan.md#нативный-граф-из-обычного-python-скрипта).
+Нативные графы Conan и его рецепты остаются внутри адаптера. Публичные методы
+возвращают доменные модели. Для Conan используются его встроенные зависимости
+и топологический порядок. Формат JSON-входа описан в [документации Conan](conan.md).
 
 ## Ошибки
 
@@ -55,7 +53,7 @@ VersionConflict, InvalidPackage, BackendUnavailable, PartialPublicationError.
 Последняя содержит published и uncertain для восстановления после неопределённого
 результата записи. Автоматических повторов или rollback удалённой публикации нет.
 
-Backend — Protocol с graph, get_many, search, publish и close.
+Backend — Protocol с graph, get_many, search, publish, publish_file, materialize и close.
 JSONSerializable — Protocol с методом to_json() -> str; наследование не требуется.
 
 ## Внешние ресурсы

@@ -1,5 +1,6 @@
 """Round trips through an owned Conan server, never a configured user server."""
 
+import json
 import secrets
 import shutil
 import socket
@@ -7,27 +8,28 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from dataclasses import asdict
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
 import pytest
 
+from hwcatalog._internal.backends.conan_format import write_recipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import BackendUnavailable, IdentityConflict
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import ConanBackend, write_recipe
+from hwcatalog.backends.conan import ConanBackend
 
 pytestmark = pytest.mark.conan_remote
 
 
 @pytest.fixture
 def remote_backend(tmp_path: Path) -> Iterator[ConanBackend]:
-    executable = Path(sys.executable).parent / "conan"
     server_executable = Path(sys.executable).parent / "conan_server"
-    if not executable.is_file() or not server_executable.is_file():
+    if not server_executable.is_file():
         pytest.skip("Install Conan and conan-server development dependencies")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -54,11 +56,9 @@ def remote_backend(tmp_path: Path) -> Iterator[ConanBackend]:
         )
         try:
             _wait_for_server(f"http://127.0.0.1:{port}/v2/ping", process, log.name)
-            backend = ConanBackend(
-                tmp_path / "publisher", remote="catalog", executable=str(executable)
-            )
-            backend._cli.run("remote", "add", "catalog", f"http://127.0.0.1:{port}")
-            backend._cli.run("remote", "login", "catalog", "test", "--password", password)
+            backend = ConanBackend(tmp_path / "publisher", remote="catalog")
+            backend._client.run("remote", "add", "catalog", f"http://127.0.0.1:{port}")
+            backend._client.run("remote", "login", "catalog", "test", "--password", password)
             yield backend
             backend.close()
         finally:
@@ -95,7 +95,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     with pytest.raises(IdentityConflict):
         catalog.publish((rtl,))
     original_graph = catalog.graph.dependency_closure(be.ref)
-    native = remote_backend.load_graph(be.ref)
+    native, _ = remote_backend._load_graph(be.ref)
     native_refs = tuple(
         str(dep.ref) for dep in native.root.conanfile.dependencies.host.topological_sort.values()
     )
@@ -103,8 +103,8 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     # A conflicting local-only revision must never leak into a remote publication's lockfile.
     rogue = tmp_path / "local-only-revision"
     write_recipe(rogue, Record(rtl.ref, {"local-only": True}))
-    remote_backend._cli.create_lockfile(rogue)
-    remote_backend._cli.export(rogue)
+    remote_backend._client.create_lockfile(rogue)
+    remote_backend._client.export(rogue)
     another_be = Record(Ref("cpu", "5.0", "lib-lef", "soc"))
     catalog.publish((another_be,), dependencies=(Dependency(another_be.ref, rtl.ref),))
     assert {r.ref for r in catalog.graph.dependency_closure(another_be.ref).records} == {
@@ -113,20 +113,55 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     }
     home = tmp_path / "reader"
     home.mkdir()
-    shutil.copyfile(remote_backend._cli.home / "remotes.json", home / "remotes.json")
-    with Catalog(
-        ConanBackend(home, remote="catalog", executable=remote_backend._cli.executable)
-    ) as reader:
+    shutil.copyfile(remote_backend._client.home / "remotes.json", home / "remotes.json")
+    with Catalog(ConanBackend(home, remote="catalog")) as reader:
         assert reader.get(be.ref).payload == {"source": "cpu.lib"}
         assert reader.graph.dependency_closure(be.ref) == original_graph
         new_rtl = Record(Ref("cpu", "2.0", "rtl", "soc"))
         external = tmp_path / "ci"
         write_recipe(external, new_rtl)
-        remote_backend._cli.create_lockfile(external)
-        pinned = remote_backend._cli.export(external)
-        remote_backend._cli.upload(pinned)
+        remote_backend._client.create_lockfile(external)
+        pinned = remote_backend._client.export(external)
+        remote_backend._client.upload(pinned)
         assert reader.get(new_rtl.ref).ref == new_rtl.ref
         assert reader.graph.dependency_closure(be.ref) == original_graph
-    remote_backend._cli.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
+    remote_backend._client.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
     with pytest.raises(BackendUnavailable):
         catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))
+
+
+def test_remote_stores_source_and_artifacts_without_git_or_original_files(
+    remote_backend: ConanBackend, tmp_path: Path, checkout: Path
+) -> None:
+    # The isolated test server deliberately accepts a local SCM URL.
+    (remote_backend._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
+    dependency = Record(Ref("flow", "1.0", "run", "tools"))
+    Catalog(remote_backend).publish((dependency,))
+    artifact = tmp_path / "cpu.lib"
+    artifact.write_text("library(cpu) {}")
+    description = tmp_path / "package.json"
+    description.write_text(
+        json.dumps(
+            {
+                "ref": asdict(Ref("cpu", "1.0", "lib-lef", "soc")),
+                "source": {"path": "checkout"},
+                "dependencies": [asdict(dependency.ref)],
+                "files": {"cpu.lib": "cpu.lib"},
+                "payload": {"corner": "tt"},
+            }
+        )
+    )
+    published = Catalog(remote_backend).publish_file(description)
+    artifact.unlink()
+    description.unlink()
+    shutil.rmtree(checkout)
+    home = tmp_path / "fresh-reader"
+    home.mkdir()
+    shutil.copyfile(remote_backend._client.home / "remotes.json", home / "remotes.json")
+    with Catalog(ConanBackend(home, remote="catalog")) as reader:
+        assert reader.get(published.ref) == published
+        content = reader.materialize(published.ref).path
+        assert (content / "source/cpu.sv").read_text() == "module cpu; endmodule\n"
+        assert (content / "artifacts/cpu.lib").read_text() == "library(cpu) {}"
+        assert not (content / "source/.git").exists()
+        assert reader.materialize(published.ref).path == content

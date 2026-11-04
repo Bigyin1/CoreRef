@@ -1,4 +1,4 @@
-"""Typing for the native Conan 2.34 objects returned by ConanBackend.load_graph.
+"""Internal typing for native Conan 2.34 objects.
 
 These protocols describe existing Conan objects; they do not wrap or replace them.
 Conan itself currently ships without typing metadata.
@@ -49,6 +49,9 @@ class NativePackage(Protocol):
 
     @property
     def recipe_folder(self) -> str | None: ...
+
+    @property
+    def package_folder(self) -> str | None: ...
 
     @property
     def dependencies(self) -> NativeDependencies: ...

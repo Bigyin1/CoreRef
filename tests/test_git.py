@@ -2,7 +2,7 @@
 
 import sys
 from collections.abc import Iterator
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -70,9 +70,9 @@ def test_missing_ref_and_noncommit(repository: Repo) -> None:
 
 def test_resolved_resource_can_be_published(repository: Repo, catalog: Catalog) -> None:
     resource = GitResource.from_repository(
-        repository.path, repository_url=URL, requested_ref="annotated"
+        repository.path, repository_url=str(repository.path), requested_ref="annotated"
     )
-    record = replace(release("git"), payload=(asdict(resource),))
+    record = replace(release("git"), source=resource)
     catalog.publish((record,))
     assert catalog.get(record.ref) == record
 

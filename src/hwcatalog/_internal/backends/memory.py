@@ -1,14 +1,21 @@
 """In-memory reference storage for records and exact dependencies."""
 
+import hashlib
+import shutil
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from ...api.errors import NotFound
+from ...api.errors import InvalidPublication, MaterializationError, NotFound
 from ...api.graph import CatalogGraph
 from ...api.models.graph import Dependency
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
+from ...api.models.resources import GitResource, MaterializedResource
+from ..manifest import read_manifest
 from ..validation import normalize_dependency, normalize_record, validate
 
 
@@ -47,6 +54,7 @@ class MemoryReader:
 
 class MemoryBackend:
     def __init__(self) -> None:
+        self._content = TemporaryDirectory(prefix="hwcatalog-memory-")
         self._records: dict[Ref, Record] = {}
         self._dependencies: tuple[Dependency, ...] = ()
         self._lock = threading.RLock()
@@ -69,11 +77,64 @@ class MemoryBackend:
         self, records: tuple[Record, ...], *, dependencies: tuple[Dependency, ...] = ()
     ) -> None:
         records = tuple(normalize_record(record) for record in records)
+        if any(record.files for record in records):
+            raise InvalidPublication("Publish stored files using a package JSON document")
         dependencies = tuple(normalize_dependency(edge) for edge in dependencies)
         with self._lock:
             validate(records, dependencies, self._records.keys())
+            for record in records:
+                self._store_content(record, {})
             self._records.update((record.ref, record) for record in records)
             self._dependencies += dependencies
 
+    def publish_file(self, path: Path) -> Record:
+        manifest = read_manifest(path)
+        record = manifest.record
+        if manifest.source_path is not None:
+            record = replace(
+                record,
+                source=GitResource.from_repository(
+                    manifest.source_path, repository_url=str(manifest.source_path)
+                ),
+            )
+        with self._lock:
+            validate((record,), manifest.dependencies, self._records.keys())
+            self._store_content(record, manifest.files)
+            self._records[record.ref] = normalize_record(record)
+            self._dependencies += manifest.dependencies
+            return self._records[record.ref]
+
+    def materialize(self, ref: Ref) -> MaterializedResource:
+        with self._lock:
+            record = self.get_many((ref,))[0]
+            directory = self._content_path(ref)
+            if record.source is None and not record.files:
+                raise MaterializationError("Package has no stored source or artifacts")
+            if not directory.is_dir():
+                raise MaterializationError("Stored package content is missing")
+            return MaterializedResource(directory)
+
+    def _store_content(self, record: Record, files: dict[str, Path]) -> None:
+        if record.source is None and not files:
+            return
+        with TemporaryDirectory(dir=self._content.name) as temporary:
+            package = Path(temporary) / "package"
+            package.mkdir()
+            if record.source is not None:
+                checkout = record.source.materialize(self._content.name).path
+                shutil.copytree(checkout, package / "source", ignore=shutil.ignore_patterns(".git"))
+            for name, local in files.items():
+                destination = package / "artifacts" / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(local, destination)
+            destination = self._content_path(record.ref)
+            # Validation excludes published identities; only a failed attempt can remain.
+            if destination.exists():
+                shutil.rmtree(destination)
+            package.rename(destination)
+
+    def _content_path(self, ref: Ref) -> Path:
+        return Path(self._content.name) / hashlib.sha256(ref.identity.encode()).hexdigest()
+
     def close(self) -> None:
-        """No external resources are retained by the reference backend."""
+        self._content.cleanup()

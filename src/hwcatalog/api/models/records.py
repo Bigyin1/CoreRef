@@ -8,6 +8,7 @@ from frozendict import deepfreeze
 
 from ..protocols import JSONSerializable
 from ..types import JSON
+from .resources import GitResource
 
 
 @dataclass(frozen=True)
@@ -42,14 +43,21 @@ class Record:
 
     ref: Ref
     payload: JSON | JSONSerializable = None
+    source: GitResource | None = None
+    files: tuple[str, ...] = ()
 
     def to_json(self) -> str:
         """Store the payload's JSON value, without its Python class information."""
         payload = self.payload
         if isinstance(payload, JSONSerializable):
             payload = json.loads(payload.to_json())
+        value = {"ref": asdict(self.ref), "payload": payload}
+        if self.source is not None:
+            value["source"] = asdict(self.source)
+        if self.files:
+            value["files"] = self.files
         return json.dumps(
-            {"ref": asdict(self.ref), "payload": payload},
+            value,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
@@ -59,7 +67,12 @@ class Record:
     def from_json(cls, payload: str) -> Self:
         """Restore an immutable JSON snapshot; the consumer decodes its own payload."""
         value = json.loads(payload)
-        return cls(Ref(**value["ref"]), deepfreeze(value["payload"]))
+        if not isinstance(value, dict):
+            raise ValueError("Record must be a JSON object")
+        source = GitResource(**value["source"]) if value.get("source") is not None else None
+        return cls(
+            Ref(**value["ref"]), deepfreeze(value["payload"]), source, tuple(value.get("files", ()))
+        )
 
 
 __all__ = ["Record", "Ref"]

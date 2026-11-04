@@ -1,5 +1,6 @@
 """Storage operations used by Catalog."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -7,6 +8,7 @@ if TYPE_CHECKING:
     from .models.graph import Dependency
     from .models.query import SearchQuery
     from .models.records import Record, Ref
+    from .models.resources import MaterializedResource
 
 
 @runtime_checkable
@@ -40,6 +42,14 @@ class Backend(Protocol):
 
         There is no publication tracking or retry guarantee in the PoC API.
         """
+        ...
+
+    def publish_file(self, path: Path) -> Record:
+        """Publish a single-package JSON document with optional source and files."""
+        ...
+
+    def materialize(self, ref: Ref) -> MaterializedResource:
+        """Provide the package's local content directory."""
         ...
 
     def close(self) -> None:

@@ -2,14 +2,17 @@
 
 import json
 import os
-import shutil
 import subprocess
-import sys
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from hwcatalog._internal.backends.conan_format import (
+    from_conan_reference,
+    to_conan_reference,
+    write_recipe,
+)
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
     BackendUnavailable,
@@ -23,28 +26,14 @@ from hwcatalog.api.errors import (
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import (
-    ConanBackend,
-    from_conan_reference,
-    to_conan_reference,
-    write_recipe,
-)
+from hwcatalog.backends.conan import ConanBackend
 
 pytestmark = pytest.mark.conan
 
 
 @pytest.fixture
-def conan_executable() -> str:
-    path = Path(sys.executable).parent / "conan"
-    executable = str(path) if path.is_file() else shutil.which("conan")
-    if executable is None:
-        pytest.skip("Install development dependencies to run Conan tests")
-    return executable
-
-
-@pytest.fixture
-def conan_backend(tmp_path: Path, conan_executable: str) -> ConanBackend:
-    return ConanBackend(tmp_path / "home", executable=conan_executable)
+def conan_backend(tmp_path: Path) -> ConanBackend:
+    return ConanBackend(tmp_path / "home")
 
 
 def record(kind: str = "rtl", version: str = "1.0", name: str = "cpu") -> Record:
@@ -174,7 +163,7 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
     conan_backend.publish((rtl,))
     build = tmp_path / "external-ci"
     write_recipe(build, be, (rtl.ref,))
-    cli = conan_backend._cli
+    cli = conan_backend._client
     cli.run(
         "lock",
         "create",
@@ -223,8 +212,8 @@ def test_multiple_revisions_are_not_silently_selected(
     conan_backend.publish((original,))
     folder = tmp_path / "replacement"
     write_recipe(folder, replace(original, payload={"different": True}))
-    conan_backend._cli.create_lockfile(folder)
-    conan_backend._cli.export(folder)
+    conan_backend._client.create_lockfile(folder)
+    conan_backend._client.export(folder)
     with pytest.raises(IdentityConflict):
         conan_backend.get_many((original.ref,))
 
@@ -238,28 +227,24 @@ def test_partial_failure_reports_confirmed_and_uncertain_refs(
         if "zzz" in reference:
             raise BackendUnavailable("simulated lost response")
 
-    monkeypatch.setattr(conan_backend._cli, "upload", fail_second)
+    monkeypatch.setattr(conan_backend._client, "upload", fail_second)
     with pytest.raises(PartialPublicationError) as caught:
         conan_backend.publish((second, first))
     assert caught.value.published == (first.ref,)
     assert caught.value.uncertain == second.ref
 
 
-def test_cli_failure_is_not_not_found(tmp_path: Path) -> None:
-    backend = ConanBackend(tmp_path / "home", executable=str(tmp_path / "no-such-conan"))
-    with pytest.raises(BackendUnavailable):
-        backend.get_many((record().ref,))
-
-
-def test_cli_timeout_is_not_not_found(
+def test_command_os_error_is_not_not_found(
     conan_backend: ConanBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def timeout(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired("conan", 1)
+    from hwcatalog._internal.backends import conan_client
 
-    monkeypatch.setattr(subprocess, "run", timeout)
-    with pytest.raises(BackendUnavailable):
-        conan_backend.search(SearchQuery())
+    def fail(*args: object, **kwargs: object) -> object:
+        raise OSError("API initialization failed")
+
+    monkeypatch.setattr(conan_client, "ConanAPI", fail)
+    with pytest.raises(BackendUnavailable, match="API initialization failed"):
+        conan_backend.get_many((record().ref,))
 
 
 def test_native_graph_exposes_conans_dependencies_and_topological_order(
@@ -278,7 +263,7 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         Dependency(right.ref, shared.ref),
     )
     conan_backend.publish((root, left, right, shared), dependencies=edges)
-    graph = conan_backend.load_graph(root.ref)
+    graph, _ = conan_backend._load_graph(root.ref)
     assert isinstance(graph, DepsGraph)
     assert len(graph.nodes) == 4
     assert "nodes" in graph.serialize()
@@ -310,24 +295,24 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     ambient_home = tmp_path / "unrelated-home"
     monkeypatch.setenv("CONAN_HOME", str(ambient_home))
     cwd = Path.cwd()
-    graph = conan_backend.load_graph(root.ref)
+    graph, _ = conan_backend._load_graph(root.ref)
     assert tuple(graph.root.conanfile.dependencies.host.topological_sort.values()) == ()
     assert graph.root.conanfile.recipe_folder is not None
-    assert Path(graph.root.conanfile.recipe_folder).is_relative_to(conan_backend._cli.home)
+    assert Path(graph.root.conanfile.recipe_folder).is_relative_to(conan_backend._client.home)
     assert os.environ["CONAN_HOME"] == str(ambient_home)
     assert Path.cwd() == cwd
     assert not ambient_home.exists()
     conan_backend.close()
     with pytest.raises(BackendUnavailable):
-        conan_backend.load_graph(root.ref)
+        conan_backend.graph.dependency_closure(root.ref)
 
 
 def test_native_graph_reports_missing_pinned_dependency(conan_backend: ConanBackend) -> None:
     rtl, macro = record(), record("lib-lef")
     conan_backend.publish((rtl, macro), dependencies=(Dependency(macro.ref, rtl.ref),))
-    conan_backend._cli.run("remove", to_conan_reference(rtl.ref), "--confirm")
+    conan_backend._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
     with pytest.raises(BackendUnavailable):
-        conan_backend.load_graph(macro.ref)
+        conan_backend._load_graph(macro.ref)
 
 
 def test_native_api_failure_is_a_catalog_error(
@@ -336,7 +321,7 @@ def test_native_api_failure_is_a_catalog_error(
 ) -> None:
     from conan.errors import ConanException  # type: ignore[import-untyped]
 
-    from hwcatalog._internal.backends import conan_native
+    from hwcatalog._internal.backends import conan_client
 
     root = record()
     conan_backend.publish((root,))
@@ -344,25 +329,25 @@ def test_native_api_failure_is_a_catalog_error(
     def fail(*args: object, **kwargs: object) -> object:
         raise ConanException("simulated API failure")
 
-    monkeypatch.setattr(conan_native, "ConanAPI", fail)
+    monkeypatch.setattr(conan_client, "ConanAPI", fail)
     with pytest.raises(BackendUnavailable, match="simulated API failure"):
-        conan_backend.load_graph(root.ref)
+        conan_backend._load_graph(root.ref)
 
 
 def test_native_graph_computation_does_not_spawn_a_conan_process(
     conan_backend: ConanBackend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = record()
-    conan_backend.publish((root,))
-    _, directory = conan_backend._locate(root.ref)
-
     def reject_subprocess(*args: object, **kwargs: object) -> object:
-        raise AssertionError("Native graph loading must use the in-process Conan API")
+        raise AssertionError("Catalog operations must use the in-process Conan API")
 
     monkeypatch.setattr(subprocess, "run", reject_subprocess)
-    graph = conan_backend._cli.graph(directory)
-    assert from_conan_reference(graph.root.conanfile.ref.repr_notime()) == root.ref
+    monkeypatch.setattr(subprocess, "Popen", reject_subprocess)
+    root = record()
+    conan_backend.publish((root,))
+    assert conan_backend.get_many((root.ref,))[0].ref == root.ref
+    assert conan_backend.search(SearchQuery())[0].ref == root.ref
+    assert len(conan_backend.graph.dependency_closure(root.ref).records) == 1
 
 
 def test_native_graph_rejects_an_unlocked_transitive_dependency(
@@ -379,4 +364,4 @@ def test_native_graph_rejects_an_unlocked_transitive_dependency(
     lock["requires"] = [value for value in lock["requires"] if "soc.leaf.rtl/" not in value]
     lock_path.write_text(json.dumps(lock))
     with pytest.raises(InvalidPackage):
-        conan_backend.load_graph(root.ref)
+        conan_backend._load_graph(root.ref)

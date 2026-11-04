@@ -288,6 +288,7 @@ dependencies = [
     { name = "frozendict" },
     { name = "networkx" },
     { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -313,6 +314,7 @@ requires-dist = [
     { name = "frozendict", specifier = ">=2.4.7,<3" },
     { name = "networkx", specifier = ">=3.7,<4" },
     { name = "pydantic", specifier = ">=2.14,<3" },
+    { name = "pyyaml", specifier = ">=6,<7" },
 ]
 provides-extras = ["git"]
 
