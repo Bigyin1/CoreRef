@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from examples.conan_config import configured_home
+from hwcatalog._internal.conan import graph as conan_graph
+from hwcatalog._internal.conan import records as conan_records
 from hwcatalog._internal.conan.format import (
     from_conan_reference,
     to_conan_reference,
@@ -87,7 +89,7 @@ def test_publish_rejects_an_invalid_catalog_dependency_before_conan_executes_it(
     conan_catalog: Catalog,
 ) -> None:
     dependency = conan_catalog.publish(record())
-    _, directory = conan_catalog._locate(dependency.ref)
+    _, directory = conan_records.locate(conan_catalog._client, dependency.ref)
     (directory / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
     with pytest.raises(InvalidPackage, match="canonical"):
         conan_catalog.publish(record("lib-lef"), dependencies=(dependency.ref,))
@@ -122,7 +124,7 @@ def test_conan_round_trip_search_and_project_lockfile(
         == be.ref
     )
     assert not catalog.dependencies(be.ref, filters=SearchQuery(kind="missing"))
-    _, folder = conan_catalog._locate(be.ref)
+    _, folder = conan_records.locate(conan_catalog._client, be.ref)
     assert not (folder / "conan.lock").exists()
     lockfile = catalog.create_lockfile((be.ref,), tmp_path / "workspace/conan.lock")
     assert lockfile.is_file()
@@ -210,7 +212,7 @@ def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None
     rtl, be = record(), record("lib-lef")
     conan_catalog.publish(rtl)
     conan_catalog.publish(be, dependencies=(rtl.ref,))
-    _, folder = conan_catalog._locate(be.ref)
+    _, folder = conan_records.locate(conan_catalog._client, be.ref)
     if damage == "missing":
         (folder / "record.json").unlink()
     elif damage == "bad-marker":
@@ -274,7 +276,7 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
     conan_catalog.publish(left, dependencies=(shared.ref,))
     conan_catalog.publish(right, dependencies=(shared.ref,))
     conan_catalog.publish(root, dependencies=(left.ref, right.ref))
-    graph, _ = conan_catalog._load_graph(root.ref)
+    graph, _ = conan_graph.load_graph(conan_catalog._client, root.ref)
     assert isinstance(graph, DepsGraph)
     assert len(graph.nodes) == 4
     assert "nodes" in graph.serialize()
@@ -312,7 +314,7 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     ambient_home = tmp_path / "unrelated-home"
     monkeypatch.setenv("CONAN_HOME", str(ambient_home))
     cwd = Path.cwd()
-    graph, _ = conan_catalog._load_graph(root.ref)
+    graph, _ = conan_graph.load_graph(conan_catalog._client, root.ref)
     assert tuple(graph.root.conanfile.dependencies.host.topological_sort.values()) == ()
     assert graph.root.conanfile.recipe_folder is not None
     assert Path(graph.root.conanfile.recipe_folder).is_relative_to(conan_catalog._client.home)
@@ -330,7 +332,7 @@ def test_native_graph_reports_missing_pinned_dependency(conan_catalog: Catalog) 
     conan_catalog.publish(macro, dependencies=(rtl.ref,))
     conan_catalog._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
     with pytest.raises(CatalogError):
-        conan_catalog._load_graph(macro.ref)
+        conan_graph.load_graph(conan_catalog._client, macro.ref)
 
 
 def test_native_api_failure_is_a_catalog_error(
@@ -349,7 +351,7 @@ def test_native_api_failure_is_a_catalog_error(
 
     monkeypatch.setattr(client, "ConanAPI", fail)
     with pytest.raises(CatalogError, match="simulated API failure"):
-        conan_catalog._load_graph(root.ref)
+        conan_graph.load_graph(conan_catalog._client, root.ref)
 
 
 def test_native_graph_computation_does_not_spawn_a_conan_process(
@@ -386,7 +388,7 @@ def test_native_graph_rejects_an_unlocked_transitive_dependency(
         str(lock_path),
     )
     with pytest.raises(InvalidPackage):
-        conan_catalog._load_graph(root.ref, lockfile=lock_path)
+        conan_graph.load_graph(conan_catalog._client, root.ref, lockfile=lock_path)
 
 
 def test_default_cache_uses_conan_home_and_stays_bound_to_it(

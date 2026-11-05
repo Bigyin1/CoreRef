@@ -18,6 +18,7 @@ from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 
 from examples.conan_config import configured_home
+from hwcatalog._internal.conan import graph as conan_graph
 from hwcatalog._internal.conan.format import read_recipe, write_recipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
@@ -106,7 +107,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     with pytest.raises(Conflict):
         catalog.publish(rtl)
     original_graph = resolve_published(catalog, be.ref)
-    native, _ = remote_catalog._load_graph(be.ref)
+    native, _ = conan_graph.load_graph(remote_catalog._client, be.ref)
     native_refs = tuple(
         str(dep.ref) for dep in native.root.conanfile.dependencies.host.topological_sort.values()
     )

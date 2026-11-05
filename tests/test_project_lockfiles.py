@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from examples.conan_config import configured_home
+from hwcatalog._internal.conan import records as conan_records
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, InvalidPackage
 from hwcatalog.api.models.graph import Dependency
@@ -36,7 +37,7 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
         original_lock = lockfile.read_bytes()
         record = catalog.publish_file(description, lockfile=lockfile)
         assert record.files == ("cpu.lib",)
-        _, recipe = connection._locate(result)
+        _, recipe = conan_records.locate(connection._client, result)
         assert not (recipe / "conan.lock").exists()
         assert resolve_published(catalog, result, lockfile=lockfile).dependencies == (
             Dependency(result, dependency.ref),

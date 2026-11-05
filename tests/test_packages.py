@@ -10,6 +10,7 @@ import pytest
 from dulwich.repo import Repo
 
 from examples.conan_config import configured_home
+from hwcatalog._internal.conan import records as conan_records
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from hwcatalog.api.models.graph import Dependency
@@ -87,7 +88,7 @@ def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path)
     with (connection := Catalog(configured_home(tmp_path / "home"))) as catalog:
         record = catalog.publish_file(description(tmp_path, source=asdict(source)))
         assert record.source == source
-        _, folder = connection._locate(record.ref)
+        _, folder = conan_records.locate(connection._client, record.ref)
         assert "exports_sources" not in (folder / "conanfile.py").read_text()
         assert "source" not in json.loads((folder / "record.json").read_text())
         assert "scm" in (folder / "conandata.yml").read_text()

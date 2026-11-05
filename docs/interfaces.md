@@ -75,10 +75,12 @@ Dependency(source, target) используется в GraphResult. Вместо
 Причина сбоя сохраняется в сообщении и цепочке исключений. Автоматических повторов
 или rollback удалённой публикации нет.
 
-Catalog реализует get, search, dependencies, resolve_local, find_dependents,
-publish, publish_file, create_lockfile, materialize и close напрямую.
-Отдельных Backend и CatalogGraph нет. Вспомогательные объекты Conan находятся
-в `_internal/conan`; нативные графы и рецепты остаются внутри каталога.
+Catalog предоставляет get, search, dependencies, resolve_local, find_dependents,
+publish, publish_file, create_lockfile, materialize и close. В классе остаются
+настройка клиента, управление временем жизни и короткие вызовы внутренних функций.
+Чтение записей, работа с графом, публикация и получение файлов реализованы
+в `_internal/conan/records.py`, `graph.py`, `publication.py` и `materialization.py`.
+Отдельных Backend и CatalogGraph нет; нативные графы и рецепты остаются внутренними.
 JSONSerializable — Protocol с методом to_json() -> str; наследование не требуется.
 
 ## Внешние ресурсы
