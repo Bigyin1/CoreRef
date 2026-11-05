@@ -6,15 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ...api.errors import (
-    BackendUnavailable,
-    IdentityConflict,
-    InvalidPackage,
-    InvalidPublication,
-    MaterializationError,
-    NotFound,
-)
-from ...api.graph import CatalogGraph
+from ...api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from ...api.models.graph import Dependency, GraphResult
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
@@ -36,64 +28,6 @@ from .conan_format import (
 from .conan_types import NativeGraph, NativePackage
 
 
-class ConanGraph:
-    def __init__(self, backend: ConanBackend) -> None:
-        self.backend = backend
-
-    def dependencies(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
-        ref, filters = normalize_ref(ref), normalize_query(filters)
-        with self.backend._operation():
-            requirements = self.backend._requirements(ref)
-            records = self.backend._read_records(requirements).values()
-            return tuple(sorted((r for r in records if filters.matches(r)), key=lambda r: r.ref))
-
-    def consumers(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
-        return self.find_dependents(ref, candidates=filters, transitive=False)
-
-    def resolve_local(
-        self,
-        record: Record,
-        *,
-        dependencies: tuple[Ref, ...] = (),
-        lockfile: Path | None = None,
-    ) -> GraphResult:
-        """Resolve local root data independently of its publication status."""
-        record, dependencies = normalize_publication(record, dependencies)
-        with self.backend._operation():
-            requirements = tuple(self.backend._requirement(ref) for ref in dependencies)
-            with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
-                directory = Path(temporary)
-                write_recipe(directory, record, requirements)
-                graph = self.backend._client.graph(directory, lockfile=lockfile)
-                records = self.backend._graph_records(graph, record)
-                return GraphResult(
-                    tuple(sorted(records.values(), key=lambda item: item.ref)),
-                    _graph_dependencies(graph, records),
-                )
-
-    def find_dependents(
-        self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
-    ) -> tuple[Record, ...]:
-        ref = normalize_ref(ref)
-        with self.backend._operation():
-            self.backend.get_many((ref,))
-            result = []
-            for candidate in self.backend.search(normalize_query(candidates)):
-                if candidate.ref == ref:
-                    continue
-                if transitive:
-                    graph, _ = self.backend._load_graph(candidate.ref)
-                    matches = any(
-                        _package_ref(package) == ref
-                        for package in graph.root.conanfile.dependencies.host.values()
-                    )
-                else:
-                    matches = any(record.ref == ref for record in self.dependencies(candidate.ref))
-                if matches:
-                    result.append(candidate)
-            return tuple(sorted(result, key=lambda record: record.ref))
-
-
 class ConanBackend:
     """One local cache or one configured remote; callers coordinate other publishers.
 
@@ -111,13 +45,12 @@ class ConanBackend:
         self._client = ConanClient(home, remote, timeout)
         self._lock = threading.RLock()
         self._closed = False
-        self.graph: CatalogGraph = ConanGraph(self)
 
     @contextmanager
     def _operation(self) -> Iterator[None]:
         with self._lock:
             if self._closed:
-                raise BackendUnavailable("Conan backend is closed")
+                raise CatalogError("Conan backend is closed")
             yield
 
     def close(self) -> None:
@@ -130,15 +63,14 @@ class ConanBackend:
         if revisions is None or not revisions.revisions:
             raise NotFound(ref)
         if len(revisions.revisions) != 1:
-            raise IdentityConflict(f"Multiple recipe revisions for {logical}")
+            raise Conflict(f"Multiple recipe revisions for {logical}")
         pinned = f"{logical}#{next(iter(revisions.revisions))}"
         return pinned, self._client.cache_path(pinned)
 
-    def get_many(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
+    def get(self, ref: Ref) -> Record:
+        ref = normalize_ref(ref)
         with self._operation():
-            refs = tuple(normalize_ref(ref) for ref in refs)
-            records = self._read_records(tuple(to_conan_reference(ref) for ref in refs))
-            return tuple(records[ref] for ref in refs)
+            return self._read_records((to_conan_reference(ref),))[ref]
 
     def _read_records(self, references: tuple[str, ...]) -> dict[Ref, Record]:
         records = {}
@@ -146,9 +78,7 @@ class ConanBackend:
             ref = from_conan_reference(reference)
             published, directory = self._locate(ref)
             if "#" in reference and published != reference:
-                raise IdentityConflict(
-                    f"Locked revision differs from published identity: {reference}"
-                )
+                raise Conflict(f"Locked revision differs from published identity: {reference}")
             records[ref] = read_recipe(directory, ref)[0]
         return records
 
@@ -163,9 +93,58 @@ class ConanBackend:
             if pattern is None:
                 return ()
             candidates = self._client.index(pattern)
-            refs = tuple(from_conan_reference(value) for value in candidates)
-            records = self.get_many(refs)
+            records = self._read_records(tuple(candidates)).values()
             return tuple(sorted((r for r in records if query.matches(r)), key=lambda r: r.ref))
+
+    def dependencies(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
+        ref, filters = normalize_ref(ref), normalize_query(filters)
+        with self._operation():
+            requirements = self._requirements(ref)
+            records = self._read_records(requirements).values()
+            return tuple(sorted((r for r in records if filters.matches(r)), key=lambda r: r.ref))
+
+    def resolve_local(
+        self,
+        record: Record,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+        lockfile: Path | None = None,
+    ) -> GraphResult:
+        """Resolve local root data independently of its publication status."""
+        record, dependencies = normalize_publication(record, dependencies)
+        with self._operation():
+            requirements = tuple(self._requirement(ref) for ref in dependencies)
+            with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
+                directory = Path(temporary)
+                write_recipe(directory, record, requirements)
+                graph = self._client.graph(directory, lockfile=lockfile)
+                records = self._graph_records(graph, record)
+                return GraphResult(
+                    tuple(sorted(records.values(), key=lambda item: item.ref)),
+                    _graph_dependencies(graph, records),
+                )
+
+    def find_dependents(
+        self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
+    ) -> tuple[Record, ...]:
+        ref = normalize_ref(ref)
+        with self._operation():
+            self.get(ref)
+            result = []
+            for candidate in self.search(normalize_query(candidates)):
+                if candidate.ref == ref:
+                    continue
+                if transitive:
+                    graph, _ = self._load_graph(candidate.ref)
+                    matches = any(
+                        _package_ref(package) == ref
+                        for package in graph.root.conanfile.dependencies.host.values()
+                    )
+                else:
+                    matches = any(record.ref == ref for record in self.dependencies(candidate.ref))
+                if matches:
+                    result.append(candidate)
+            return tuple(sorted(result, key=lambda record: record.ref))
 
     def _load_graph(
         self, ref: Ref, *, lockfile: Path | None = None
@@ -229,11 +208,11 @@ class ConanBackend:
     ) -> Record:
         record, dependencies = normalize_publication(record, dependencies)
         if record.files and manifest is None:
-            raise InvalidPublication("Publish stored files using a package JSON document")
+            raise InvalidPackage("Publish stored files using a package JSON document")
         logical = to_conan_reference(record.ref)
         with self._operation():
             if logical in self._client.index(f"{logical}*#*"):
-                raise IdentityConflict("Record identity already published")
+                raise Conflict("Record identity already published")
             requirements = tuple(self._requirement(target) for target in dependencies)
             with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:
                 directory = Path(temporary)
@@ -254,31 +233,23 @@ class ConanBackend:
                 self._client.upload(pinned)
                 return stored
 
-    def materialize(
-        self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
-    ) -> MaterializedPackage:
+    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
         """Install artifacts and optionally run Conan source retrieval for this package."""
         with self._operation():
             pinned, directory = self._locate(normalize_ref(ref))
             record, _ = read_recipe(directory, ref)
             if not record.source and not record.files:
-                raise MaterializationError("Package has no stored source or artifacts")
+                raise CatalogError("Package has no stored source or artifacts")
             with TemporaryDirectory(prefix="hwcatalog-conan-install-") as temporary:
-                lock = None
-                if lockfile is not None:
-                    lock = Path(temporary) / "conan.lock"
-                    self._client.extend_lockfile(pinned, lockfile, lock)
-                result = self._client.install(
-                    pinned, lock, Path(temporary), with_sources=with_sources
-                )
+                result = self._client.install(pinned, Path(temporary), with_sources=with_sources)
                 self._dependency_records(result)
                 package = result.root.conanfile.dependencies.host[to_conan_reference(ref)]
                 if package.package_folder is None:
-                    raise MaterializationError("Conan did not install the data package")
+                    raise CatalogError("Conan did not install the data package")
                 source_path = None
                 if with_sources and record.source is not None:
                     if package.folders.source_folder is None:
-                        raise MaterializationError("Conan did not provide the SCM source folder")
+                        raise CatalogError("Conan did not provide the SCM source folder")
                     source_path = Path(package.folders.source_folder) / "source"
                 return MaterializedPackage(Path(package.package_folder), source_path)
 

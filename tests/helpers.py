@@ -78,6 +78,6 @@ def graph_json(result: GraphResult) -> str:
 
 def resolve_published(catalog: Backend, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
     """Inspect saved package data through the same resolver used for local inputs."""
-    record = catalog.get_many((ref,))[0]
-    dependencies = tuple(item.ref for item in catalog.graph.dependencies(ref))
-    return catalog.graph.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
+    record = catalog.get(ref)
+    dependencies = tuple(item.ref for item in catalog.dependencies(ref))
+    return catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)

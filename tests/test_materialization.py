@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog.api.errors import MaterializationError
+from hwcatalog.api.errors import CatalogError
 from hwcatalog.api.models.resources import LocatedResource, MaterializedResource
 
 
@@ -30,7 +30,7 @@ def test_local_resource_paths(tmp_path: Path, provider: str, use_uri: bool) -> N
 def test_unavailable_local_paths(tmp_path: Path, locator: str) -> None:
     if locator == "missing":
         locator = str(tmp_path / "missing")
-    with pytest.raises(MaterializationError):
+    with pytest.raises(CatalogError):
         LocatedResource("nfs", locator).materialize()
-    with pytest.raises(MaterializationError, match="Unsupported filesystem provider"):
+    with pytest.raises(CatalogError, match="Unsupported filesystem provider"):
         LocatedResource("s3", "s3://bucket/report").materialize(tmp_path)

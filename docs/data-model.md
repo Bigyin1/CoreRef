@@ -36,7 +36,7 @@ Dependency(source: Ref, target: Ref) означает, что source требу�
 SearchQuery задаёт необязательные точные фильтры namespace/name/kind/version,
 соединённые через AND. Пустой запрос находит все записи. Поиска по payload нет.
 
-Dependencies и consumers возвращают непосредственно tuple[Record, ...],
+Dependencies и find_dependents возвращают непосредственно tuple[Record, ...],
 отсортированный по Ref. Промежуточной структуры соседней привязки нет.
 
 GraphResult содержит records и dependencies. Корень входит в records;

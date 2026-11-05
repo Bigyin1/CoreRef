@@ -5,9 +5,9 @@
 
 ## RTL → LIB/LEF
 
-1. Передать локальный Record и прямые зависимости в `catalog.graph.resolve_local()`
+1. Передать локальный Record и прямые зависимости в `catalog.resolve_local()`
    и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
-   из опубликованного пакета, его читают через `get(top_ref)` и `graph.dependencies(top_ref)`.
+   из опубликованного пакета, его читают через `get(top_ref)` и `dependencies(top_ref)`.
 2. Для выбранного RTL вызвать `catalog.find_dependents(rtl_ref,
    candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"))`.
 3. Из найденных кандидатов приложение выбирает нужную реализацию и читает payload
@@ -30,8 +30,9 @@ flowchart TB
 наличие точного CPU в его графе подтверждает связь с выбранным RTL. Версии CPU и BE
 могут различаться. Промежуточный DFT-узел не обязан иметь те же namespace/name/kind.
 
-Прямой поиск `dependencies(ref)` возвращает Record входов узла, `consumers(ref)` —
-непосредственных потребителей. Для собственного анализа GraphResult.to_networkx()
+Прямой поиск `dependencies(ref)` возвращает Record входов узла;
+`find_dependents(ref, candidates=SearchQuery(), transitive=False)` — непосредственных
+потребителей. Для собственного анализа GraphResult.to_networkx()
 предоставляет DiGraph. Экспорт и обработка выбранного графа не меняют публикации.
 
 Полный исполняемый пример находится в examples/conan_macro.py.

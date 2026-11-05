@@ -4,14 +4,14 @@ import re
 from dataclasses import replace
 from pathlib import PurePosixPath
 
-from ..api.errors import DependencyCycle, InvalidPublication
+from ..api.errors import InvalidPackage
 from ..api.models.query import SearchQuery
 from ..api.models.records import Record, Ref
 
 
 def _text(value: str, *, blank: bool = False) -> str:
     if not isinstance(value, str) or (not blank and not value.strip()):
-        raise InvalidPublication("Expected a nonempty string" if not blank else "Expected a string")
+        raise InvalidPackage("Expected a nonempty string" if not blank else "Expected a string")
     return str(value)
 
 
@@ -27,15 +27,15 @@ def normalize_record(value: Record) -> Record:
     if value.source is not None:
         url = _text(value.source.repository_url)
         if url.startswith("-") or any(char in url for char in ('"', "`", "$", "\n", "\r", "\0")):
-            raise InvalidPublication("Git URL contains characters unsafe for Conan SCM helpers")
+            raise InvalidPackage("Git URL contains characters unsafe for Conan SCM helpers")
         if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", value.source.resolved_commit):
-            raise InvalidPublication("Git source requires an exact commit")
+            raise InvalidPackage("Git source requires an exact commit")
         if value.source.provider != "git":
-            raise InvalidPublication("Only one Git source is supported")
+            raise InvalidPackage("Only one Git source is supported")
     for name in value.files:
         validate_file_name(name)
     if len(set(value.files)) != len(value.files):
-        raise InvalidPublication("Duplicate artifact names")
+        raise InvalidPackage("Duplicate artifact names")
     record = replace(value, ref=normalize_ref(value.ref))
     return Record.from_json(record.to_json())
 
@@ -45,15 +45,15 @@ def normalize_publication(
 ) -> tuple[Record, tuple[Ref, ...]]:
     """Validate one new package and its direct dependency references."""
     if not isinstance(record, Record):
-        raise InvalidPublication("Publish accepts one Record")
+        raise InvalidPackage("Publish accepts one Record")
     record = normalize_record(record)
     if any(not isinstance(ref, Ref) for ref in dependencies):
-        raise InvalidPublication("Dependencies must be Ref values")
+        raise InvalidPackage("Dependencies must be Ref values")
     dependencies = tuple(normalize_ref(ref) for ref in dependencies)
     if len(dependencies) != len(set(dependencies)):
-        raise InvalidPublication("Duplicate dependency")
+        raise InvalidPackage("Duplicate dependency")
     if record.ref in dependencies:
-        raise DependencyCycle("A package cannot depend on itself")
+        raise InvalidPackage("A package cannot depend on itself")
     return record, dependencies
 
 
@@ -75,4 +75,4 @@ def validate_file_name(name: str) -> None:
         or str(path) != name
         or name == "."
     ):
-        raise InvalidPublication("Artifact names must be canonical relative POSIX paths")
+        raise InvalidPackage("Artifact names must be canonical relative POSIX paths")

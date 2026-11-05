@@ -8,12 +8,13 @@ Catalog владеет бэкендом и поддерживает контек
 | Операция | Результат |
 |---|---|
 | get(ref) | Record; NotFound при отсутствии |
-| get_many(refs) | tuple[Record, ...], сохраняет порядок и дубликаты; отсутствие любого Ref — ошибка |
 | search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по Ref |
 | publish(record, *, dependencies=(), lockfile=None) | Публикует один новый пакет и возвращает Record; dependencies — tuple[Ref, ...] |
 | publish_file(path, *, lockfile=None) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
 | create_lockfile(refs, path) | Создаёт или обновляет lockfile проекта штатными средствами Conan; возвращает Path |
-| materialize(ref, *, with_sources=False, lockfile=None) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
+| materialize(ref, *, with_sources=False) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
+| dependencies(ref, filters=SearchQuery()) | Непосредственные зависимости как tuple[Record, ...] |
+| resolve_local(record, *, dependencies=(), lockfile=None) | GraphResult для локального корня и опубликованных зависимостей; корень не публикуется |
 | find_dependents(ref, *, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
 | close() | Освобождает ресурсы бэкенда |
 
@@ -26,16 +27,10 @@ Find_dependents сначала фильтрует кандидатов по Sear
 только прямая зависимость. Сам ref исключается, результаты уникальны и упорядочены
 по Ref. Пустой candidates разрешает проверку всего каталога.
 
-## Граф
+## Разрешение графа
 
-| Операция catalog.graph | Результат |
-|---|---|
-| dependencies(ref, filters=SearchQuery()) | Непосредственные зависимости как tuple[Record, ...] |
-| consumers(ref, filters=SearchQuery()) | Непосредственные потребители как tuple[Record, ...] |
-| resolve_local(record, *, dependencies=(), lockfile=None) | GraphResult для локального корня и опубликованных зависимостей; корень не публикуется |
-
-Filters применяются к найденным записям. Отсутствующий опубликованный корень
-в `dependencies` и `consumers` вызывает NotFound.
+Filters в `dependencies` применяются к найденным записям. Отсутствующий опубликованный
+корень в `dependencies` и `find_dependents` вызывает NotFound.
 Обход Conan использует явно переданный lockfile проекта. Новые пакеты не содержат
 собственного lockfile. Разрешение версий выполняет Conan.
 
@@ -51,8 +46,8 @@ Filters применяются к найденным записям. Отсут�
 
 ```python
 record = catalog.get(ref)
-dependencies = tuple(item.ref for item in catalog.graph.dependencies(ref))
-graph = catalog.graph.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
+dependencies = tuple(item.ref for item in catalog.dependencies(ref))
+graph = catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
 ```
 
 
@@ -68,13 +63,19 @@ Dependency(source, target) используется в GraphResult. Вместо
 
 ## Ошибки
 
-Ошибки: NotFound, IdentityConflict, InvalidPublication, DependencyCycle,
-VersionConflict, InvalidPackage, BackendUnavailable.
-Сбой upload сообщается как BackendUnavailable. Автоматических повторов или rollback
-удалённой публикации нет.
+Все ошибки наследуются от CatalogError:
 
-Backend — Protocol с graph, get_many, search, publish, publish_file, create_lockfile,
-materialize и close.
+- CatalogError — сбой операции Conan, получения файлов или конфигурации клиента.
+- NotFound — запрошенный Ref отсутствует.
+- Conflict — повторная публикация или несовместимые версии/revisions.
+- InvalidPackage — некорректное описание пакета, рецепт или граф, включая циклы.
+
+Причина сбоя сохраняется в сообщении и цепочке исключений. Автоматических повторов
+или rollback удалённой публикации нет.
+
+Backend — единый Protocol с get, search, dependencies, resolve_local,
+find_dependents, publish, publish_file, create_lockfile, materialize и close.
+Catalog предоставляет эти операции напрямую, отдельного CatalogGraph нет.
 JSONSerializable — Protocol с методом to_json() -> str; наследование не требуется.
 
 ## Внешние ресурсы
@@ -84,7 +85,9 @@ GitResource хранит SCM-координаты без клонировани�
 `source()` сгенерированного Conan-рецепта. LocatedResource.materialize()
 проверяет внешний путь и возвращает MaterializedResource(path).
 
-Прямые dependencies, consumers и find_dependents(transitive=False) читают
+Прямые dependencies и find_dependents(transitive=False) читают
 requirements канонических рецептов без graph info. Транзитивный поиск использует
-нативный граф Conan. При materialize один install разрешает и устанавливает граф;
-явный проектный lockfile дополняется корнем во временной копии командой lock add.
+нативный граф Conan. Materialize выполняет один install по точной recipe revision
+и requirements опубликованного пакета, без проектного lockfile и команд lock.
+В каталоге один Ref соответствует одной revision; несколько revisions вызывают
+Conflict. Случайный conan.lock из текущей директории не используется.

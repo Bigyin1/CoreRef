@@ -18,7 +18,7 @@ from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
 )
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
-from ...api.errors import BackendUnavailable, DependencyCycle, InvalidPackage, VersionConflict
+from ...api.errors import CatalogError, Conflict, InvalidPackage
 from .conan_types import NativeGraph, NativeReference
 
 _API_LOCK = RLock()
@@ -51,7 +51,7 @@ def _resolve_home(home: Path | None) -> Path:
         with _API_LOCK:
             return Path(cast(_API, ConanAPI()).home_folder).resolve()
     except (ConanException, OSError) as error:
-        raise BackendUnavailable(f"Conan could not resolve its default home: {error}") from error
+        raise CatalogError(f"Conan could not resolve its default home: {error}") from error
 
 
 def _configured_remote(home: Path, requested: str | None) -> str | None:
@@ -61,10 +61,10 @@ def _configured_remote(home: Path, requested: str | None) -> str | None:
         with _API_LOCK:
             remotes = cast(_API, ConanAPI(cache_folder=str(home))).remotes.list()
     except (ConanException, OSError) as exc:
-        raise BackendUnavailable(f"Conan could not read configured remotes: {exc}") from exc
+        raise CatalogError(f"Conan could not read configured remotes: {exc}") from exc
     if len(remotes) > 1:
         names = ", ".join(remote.name for remote in remotes)
-        raise BackendUnavailable(f"Multiple enabled Conan remotes ({names}); specify remote=...")
+        raise CatalogError(f"Multiple enabled Conan remotes ({names}); specify remote=...")
     return remotes[0].name if remotes else None
 
 
@@ -111,15 +111,15 @@ class ConanClient:
                         raise ConanException(str(result["conan_error"]))
                 return result
         except GraphConflictError as exc:
-            raise VersionConflict(str(exc)) from exc
+            raise Conflict(str(exc)) from exc
         except GraphLoopError as exc:
-            raise DependencyCycle(str(exc)) from exc
+            raise InvalidPackage(str(exc)) from exc
         except ConanException as exc:
             if "not in lockfile" in str(exc):
                 raise InvalidPackage("Recipe dependency is absent from its lockfile") from exc
-            raise BackendUnavailable(f"Conan command {arguments[:2]} failed: {exc}") from exc
+            raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
         except OSError as exc:
-            raise BackendUnavailable(f"Conan command {arguments[:2]} failed: {exc}") from exc
+            raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
 
     def index(self, pattern: str) -> dict[str, RecipeRevisions]:
         source = ("--remote", self.remote) if self.remote else ()
@@ -127,11 +127,11 @@ class ConanClient:
         try:
             groups = RecipeIndex.model_validate(result["results"]).root
         except (ValidationError, KeyError) as exc:
-            raise BackendUnavailable("Conan returned an invalid recipe index") from exc
+            raise CatalogError("Conan returned an invalid recipe index") from exc
         entries: dict[str, RecipeRevisions] = {}
         for group in groups.values():
             if "error" in group:
-                raise BackendUnavailable(f"Conan index failed: {group['error']}")
+                raise CatalogError(f"Conan index failed: {group['error']}")
             entries.update(
                 (key, value) for key, value in group.items() if isinstance(value, RecipeRevisions)
             )
@@ -142,7 +142,7 @@ class ConanClient:
             self.run("download", reference, "--only-recipe", "--remote", self.remote)
         result = self.run("cache", "path", reference)
         if not isinstance(result, str):
-            raise BackendUnavailable("Conan returned an invalid cache path")
+            raise CatalogError("Conan returned an invalid cache path")
         return Path(result)
 
     def graph(self, directory: Path, *, lockfile: Path | None = None) -> NativeGraph:
@@ -204,21 +204,7 @@ class ConanClient:
         )
         return cast(NativeGraph, result["graph"])
 
-    def extend_lockfile(self, reference: str, source: Path, output: Path) -> None:
-        """Add the consumer requirement without resolving another dependency graph."""
-        self.run(
-            "lock",
-            "add",
-            f"--requires={reference}",
-            "--lockfile",
-            str(source),
-            "--lockfile-out",
-            str(output),
-        )
-
-    def install(
-        self, reference: str, lockfile: Path | None, output: Path, *, with_sources: bool = False
-    ) -> NativeGraph:
+    def install(self, reference: str, output: Path, *, with_sources: bool = False) -> NativeGraph:
         source_args: tuple[str, ...] = ()
         if with_sources:
             logical = reference.split("#", 1)[0]
@@ -230,7 +216,7 @@ class ConanClient:
                 "--requires",
                 reference,
                 "--lockfile",
-                str(lockfile) if lockfile is not None else "",
+                "",
                 "--build=never",
                 *source_args,
                 "--output-folder",

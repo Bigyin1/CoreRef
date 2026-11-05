@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote, urlsplit
 
-from ..errors import MaterializationError
+from ..errors import CatalogError
 from ..types import JSON
 
 
@@ -47,7 +47,7 @@ class LocatedResource:
     def materialize(self, cache_dir: str | Path | None = None) -> MaterializedResource:
         """Resolve a local or already mounted filesystem path."""
         if self.provider not in ("file", "local", "nfs"):
-            raise MaterializationError(f"Unsupported filesystem provider {self.provider!r}")
+            raise CatalogError(f"Unsupported filesystem provider {self.provider!r}")
         try:
             parsed = urlsplit(self.locator)
             if (
@@ -59,10 +59,10 @@ class LocatedResource:
             elif not parsed.scheme:
                 path = Path(self.locator)
             else:
-                raise MaterializationError("A local or already mounted filesystem path is required")
+                raise CatalogError("A local or already mounted filesystem path is required")
             return MaterializedResource(path=path.expanduser().resolve(strict=True))
         except (OSError, ValueError) as exc:
-            raise MaterializationError("Resource path is not available locally") from exc
+            raise CatalogError("Resource path is not available locally") from exc
 
 
 __all__ = [

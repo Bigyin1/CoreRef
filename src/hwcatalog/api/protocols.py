@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from .graph import CatalogGraph
+    from .models.graph import GraphResult
     from .models.query import SearchQuery
     from .models.records import Record, Ref
     from .models.resources import MaterializedPackage
@@ -24,14 +24,28 @@ class Backend(Protocol):
     The PoC assumes one publisher per reference; callers coordinate writes.
     """
 
-    graph: CatalogGraph
-
-    def get_many(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
-        """Preserve input order and duplicates; raise NotFound if any reference is absent."""
+    def get(self, ref: Ref) -> Record:
+        """Return a published record; raise NotFound if the reference is absent."""
         ...
 
     def search(self, query: SearchQuery) -> tuple[Record, ...]:
         """Return all exact AND-matches in deterministic reference order; an empty tuple if none."""
+        ...
+
+    def dependencies(self, ref: Ref, filters: SearchQuery = ...) -> tuple[Record, ...]:
+        """Return immediate dependencies in deterministic reference order."""
+        ...
+
+    def resolve_local(
+        self, record: Record, *, dependencies: tuple[Ref, ...] = (), lockfile: Path | None = None
+    ) -> GraphResult:
+        """Resolve local root data and its published dependencies without publishing it."""
+        ...
+
+    def find_dependents(
+        self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
+    ) -> tuple[Record, ...]:
+        """Filter candidates by their direct or transitive dependency on ref."""
         ...
 
     def publish(
@@ -55,10 +69,8 @@ class Backend(Protocol):
         """Write a project lockfile using Conan."""
         ...
 
-    def materialize(
-        self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
-    ) -> MaterializedPackage:
-        """Provide artifacts; source_path is populated only when sources are requested."""
+    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+        """Fetch a published package; source_path is populated when sources are requested."""
         ...
 
     def close(self) -> None:

@@ -8,7 +8,7 @@ import pytest
 
 from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import DependencyCycle, InvalidPackage, NotFound, VersionConflict
+from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
@@ -32,7 +32,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     for branch in (left, right):
         catalog.publish(branch, dependencies=(leaf.ref,))
     root = Record(record("top").ref, {"local": ["working-tree"]})
-    graph = catalog.graph.resolve_local(root, dependencies=(left.ref, right.ref))
+    graph = catalog.resolve_local(root, dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
     assert set(graph.dependencies) == {
         Dependency(root.ref, left.ref),
@@ -49,7 +49,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
 
 def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     root = record("top")
-    graph = local_catalog.graph.resolve_local(root)
+    graph = local_catalog.resolve_local(root)
     assert graph.records == (root,)
     assert graph.dependencies == ()
     assert local_catalog.search() == ()
@@ -62,11 +62,11 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     catalog.publish(current)
     catalog.publish(root, dependencies=(old.ref,))
     local = replace(root, payload={"local": True})
-    graph = catalog.graph.resolve_local(local, dependencies=(current.ref,))
+    graph = catalog.resolve_local(local, dependencies=(current.ref,))
     assert graph.records == (current, local)
     assert graph.dependencies == (Dependency(root.ref, current.ref),)
     assert catalog.get(root.ref) == root
-    assert catalog.graph.dependencies(root.ref) == (old,)
+    assert catalog.dependencies(root.ref) == (old,)
 
 
 def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> None:
@@ -77,21 +77,21 @@ def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> 
         catalog.publish(item)
     catalog.publish(left, dependencies=(first.ref,))
     catalog.publish(right, dependencies=(second.ref,))
-    with pytest.raises(VersionConflict):
-        catalog.graph.resolve_local(root, dependencies=(left.ref, right.ref))
+    with pytest.raises(Conflict):
+        catalog.resolve_local(root, dependencies=(left.ref, right.ref))
 
 
 def test_local_graph_rejects_cycles_and_missing_dependencies(local_catalog: Catalog) -> None:
     catalog = local_catalog
     root, child = record("top"), record("child")
-    with pytest.raises(DependencyCycle):
-        catalog.graph.resolve_local(root, dependencies=(root.ref,))
+    with pytest.raises(InvalidPackage):
+        catalog.resolve_local(root, dependencies=(root.ref,))
     with pytest.raises(NotFound):
-        catalog.graph.resolve_local(root, dependencies=(child.ref,))
+        catalog.resolve_local(root, dependencies=(child.ref,))
     catalog.publish(root)
     catalog.publish(child, dependencies=(root.ref,))
-    with pytest.raises(DependencyCycle):
-        catalog.graph.resolve_local(root, dependencies=(child.ref,))
+    with pytest.raises(InvalidPackage):
+        catalog.resolve_local(root, dependencies=(child.ref,))
 
 
 def test_conan_resolves_one_consumer_without_exporting(
@@ -110,7 +110,7 @@ def test_conan_resolves_one_consumer_without_exporting(
             return original_run(*arguments)
 
         monkeypatch.setattr(backend._client, "run", track)
-        catalog.graph.resolve_local(record("top"), dependencies=tuple(d.ref for d in dependencies))
+        catalog.resolve_local(record("top"), dependencies=tuple(d.ref for d in dependencies))
         graphs = [args for args in operations if args[:2] == ("graph", "info")]
         assert len(graphs) == 1
         assert not Path(graphs[0][2]).exists()  # Temporary consumer is removed.
@@ -127,11 +127,8 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(tmp_path: Path) -> No
         catalog.publish(child, dependencies=(leaf.ref,))
         lockfile = catalog.create_lockfile((child.ref,), tmp_path / "project/conan.lock")
         original = lockfile.read_bytes()
-        expected = catalog.graph.resolve_local(root, dependencies=(child.ref,))
-        assert (
-            catalog.graph.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile)
-            == expected
-        )
+        expected = catalog.resolve_local(root, dependencies=(child.ref,))
+        assert catalog.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile) == expected
         assert lockfile.read_bytes() == original
         backend._client.run(
             "lock",
@@ -144,5 +141,5 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(tmp_path: Path) -> No
         )
         incomplete = lockfile.read_bytes()
         with pytest.raises(InvalidPackage, match="absent from its lockfile"):
-            catalog.graph.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile)
+            catalog.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile)
         assert lockfile.read_bytes() == incomplete

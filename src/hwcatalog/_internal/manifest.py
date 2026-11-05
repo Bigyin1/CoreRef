@@ -6,7 +6,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
-from ..api.errors import InvalidPublication
+from ..api.errors import InvalidPackage
 from ..api.models.records import Record, Ref
 from ..api.models.resources import GitResource
 from ..api.types import JSON
@@ -63,15 +63,15 @@ def read_manifest(path: Path) -> Manifest:
         git = GitResource(**source.model_dump()) if isinstance(source, _Git) else None
         checkout = _local_path(path, source.path) if isinstance(source, _Checkout) else None
         if checkout is not None and not checkout.is_dir():
-            raise InvalidPublication("Git source path must be a repository directory")
+            raise InvalidPackage("Git source path must be a repository directory")
         files: dict[str, Path] = {}
         for name, locator in document.files.items():
             validate_file_name(name)
             local = _local_path(path, locator)
             if not local.is_file():
-                raise InvalidPublication(f"Artifact is not a regular file: {locator}")
+                raise InvalidPackage(f"Artifact is not a regular file: {locator}")
             if any(name.startswith(other + "/") or other.startswith(name + "/") for other in files):
-                raise InvalidPublication("Artifact paths cannot overlap")
+                raise InvalidPackage("Artifact paths cannot overlap")
             files[name] = local
         record = normalize_record(
             Record(document.ref.ref(), cast(JSON, document.payload), git, tuple(sorted(files)))
@@ -79,7 +79,7 @@ def read_manifest(path: Path) -> Manifest:
         dependencies = tuple(item.ref() for item in document.dependencies)
         return Manifest(record, dependencies, checkout, files)
     except (OSError, ValueError, TypeError, ValidationError) as exc:
-        raise InvalidPublication(f"Invalid package description {path}: {exc}") from exc
+        raise InvalidPackage(f"Invalid package description {path}: {exc}") from exc
 
 
 def _local_path(manifest: Path, locator: str) -> Path:

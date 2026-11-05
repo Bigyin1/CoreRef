@@ -4,6 +4,7 @@ from pathlib import Path
 from types import TracebackType
 
 from .._internal.validation import normalize_query, normalize_ref
+from .models.graph import GraphResult
 from .models.query import SearchQuery
 from .models.records import Record, Ref
 from .models.resources import MaterializedPackage
@@ -11,11 +12,10 @@ from .protocols import Backend
 
 
 class Catalog:
-    """Manage records and expose graph operations through ``graph``."""
+    """Publish, query, resolve and fetch packages through one backend."""
 
     def __init__(self, backend: Backend) -> None:
         self._backend = backend
-        self.graph = backend.graph
 
     def __enter__(self) -> Catalog:
         return self
@@ -32,11 +32,17 @@ class Catalog:
         self._backend.close()
 
     def get(self, ref: Ref) -> Record:
-        return self.get_many((ref,))[0]
+        return self._backend.get(normalize_ref(ref))
 
-    def get_many(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
-        refs = tuple(normalize_ref(ref) for ref in refs)
-        return self._backend.get_many(refs)
+    def dependencies(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
+        """Return immediate dependencies, optionally filtered by their record fields."""
+        return self._backend.dependencies(ref, filters)
+
+    def resolve_local(
+        self, record: Record, *, dependencies: tuple[Ref, ...] = (), lockfile: Path | None = None
+    ) -> GraphResult:
+        """Resolve local root data regardless of whether its Ref is published."""
+        return self._backend.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
 
     def publish(
         self,
@@ -56,13 +62,9 @@ class Catalog:
         """Capture project dependencies in a Conan-managed lockfile at the caller's path."""
         return self._backend.create_lockfile(refs, Path(path))
 
-    def materialize(
-        self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
-    ) -> MaterializedPackage:
-        """Install artifacts and optionally fetch SCM sources into the backend cache."""
-        return self._backend.materialize(
-            normalize_ref(ref), with_sources=with_sources, lockfile=lockfile
-        )
+    def materialize(self, ref: Ref, *, with_sources: bool = False) -> MaterializedPackage:
+        """Fetch a published package and optionally its pinned SCM sources."""
+        return self._backend.materialize(normalize_ref(ref), with_sources=with_sources)
 
     def search(self, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
         """Return all matching records in deterministic reference order."""
@@ -73,7 +75,7 @@ class Catalog:
         self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
     ) -> tuple[Record, ...]:
         """Find candidate records requiring an exact reference, directly or transitively."""
-        return self.graph.find_dependents(ref, candidates=candidates, transitive=transitive)
+        return self._backend.find_dependents(ref, candidates=candidates, transitive=transitive)
 
 
 __all__ = ["Catalog"]

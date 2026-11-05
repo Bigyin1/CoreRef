@@ -14,15 +14,7 @@ from hwcatalog._internal.backends.conan_format import (
     write_recipe,
 )
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import (
-    BackendUnavailable,
-    CatalogError,
-    IdentityConflict,
-    InvalidPackage,
-    InvalidPublication,
-    NotFound,
-    VersionConflict,
-)
+from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
@@ -46,7 +38,7 @@ def record(kind: str = "rtl", version: str = "1.0", name: str = "cpu") -> Record
 def test_conan_coordinates_reject_lossy_conversion(field: str, value: str) -> None:
     if field == "version" and value == "with.dot":
         return
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         to_conan_reference(replace(record().ref, **{field: value}))
 
 
@@ -56,9 +48,9 @@ def test_reference_round_trip() -> None:
     assert from_conan_reference("soc.cpu.lib-lef/4.0#" + "a" * 32) == ref
     with pytest.raises(InvalidPackage):
         from_conan_reference("ordinary-library/1.0@user/channel")
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         to_conan_reference(replace(ref, name="a" * 101))
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         to_conan_reference(replace(ref, namespace="-invalid"))
 
 
@@ -91,7 +83,7 @@ def test_publish_does_not_scan_unrelated_packages(
     )
     conan_backend._client.export(foreign)
     published = conan_backend.publish(record())
-    assert conan_backend.get_many((published.ref,)) == (published,)
+    assert conan_backend.get(published.ref) == published
 
 
 def test_publish_rejects_an_invalid_catalog_dependency_before_conan_executes_it(
@@ -114,12 +106,7 @@ def test_conan_round_trip_search_and_project_lockfile(
     catalog.publish(be, dependencies=(rtl.ref,))
     stored = catalog.get(rtl.ref)
     assert stored.payload == {"files": ("cpu.rtl",)}
-    assert catalog.get_many((be.ref, rtl.ref, be.ref)) == (
-        catalog.get(be.ref),
-        stored,
-        catalog.get(be.ref),
-    )
-    assert not catalog.get_many(())
+    assert catalog.get(be.ref).ref == be.ref
     for query in (
         SearchQuery(kind="rtl"),
         SearchQuery(version="1.0"),
@@ -132,9 +119,12 @@ def test_conan_round_trip_search_and_project_lockfile(
     expected = resolve_published(catalog, be.ref)
     assert expected.dependencies == (edge,)
     assert len(expected.to_networkx()) == 2
-    assert catalog.graph.dependencies(be.ref)[0] == stored
-    assert catalog.graph.consumers(rtl.ref)[0].ref == be.ref
-    assert not catalog.graph.dependencies(be.ref, filters=SearchQuery(kind="missing"))
+    assert catalog.dependencies(be.ref)[0] == stored
+    assert (
+        catalog.find_dependents(rtl.ref, candidates=SearchQuery(), transitive=False)[0].ref
+        == be.ref
+    )
+    assert not catalog.dependencies(be.ref, filters=SearchQuery(kind="missing"))
     _, folder = conan_backend._locate(be.ref)
     assert not (folder / "conan.lock").exists()
     lockfile = catalog.create_lockfile((be.ref,), tmp_path / "workspace/conan.lock")
@@ -142,13 +132,13 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert resolve_published(catalog, be.ref, lockfile=lockfile) == expected
     catalog.publish(record(version="2.0"))
     assert resolve_published(catalog, be.ref) == expected
-    with pytest.raises(IdentityConflict):
+    with pytest.raises(Conflict):
         catalog.publish(be)
     with pytest.raises(NotFound):
         catalog.get(record(name="missing").ref)
     catalog.close()
     catalog.close()
-    with pytest.raises(BackendUnavailable):
+    with pytest.raises(CatalogError):
         catalog.search()
 
 
@@ -170,7 +160,7 @@ def test_conan_reverse_search_uses_each_candidates_graph(conan_backend: ConanBac
         wrong.ref,
     )
     assert not catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="rtl"))
-    incoming = catalog.graph.consumers(rtl.ref)
+    incoming = catalog.find_dependents(rtl.ref, candidates=SearchQuery(), transitive=False)
     assert tuple(n.ref for n in incoming) == (mid.ref,)
     with pytest.raises(NotFound):
         catalog.find_dependents(record(name="absent").ref, candidates=query)
@@ -182,7 +172,7 @@ def test_conan_rejects_conflicting_direct_requirements(conan_backend: ConanBacke
     second = conan_backend.publish(second)
     with pytest.raises(CatalogError):
         conan_backend.publish(root, dependencies=(first.ref, second.ref))
-    assert conan_backend.get_many((first.ref, second.ref)) == (first, second)
+    assert (conan_backend.get(first.ref), conan_backend.get(second.ref)) == (first, second)
 
 
 def test_native_conan_diamond_conflict_is_a_domain_error(conan_backend: ConanBackend) -> None:
@@ -193,9 +183,9 @@ def test_native_conan_diamond_conflict_is_a_domain_error(conan_backend: ConanBac
     second = conan_backend.publish(second)
     left = conan_backend.publish(left, dependencies=(first.ref,))
     right = conan_backend.publish(right, dependencies=(second.ref,))
-    with pytest.raises(VersionConflict):
+    with pytest.raises(Conflict):
         conan_backend.publish(root, dependencies=(left.ref, right.ref))
-    assert conan_backend.get_many((left.ref, right.ref)) == (left, right)
+    assert (conan_backend.get(left.ref), conan_backend.get(right.ref)) == (left, right)
 
 
 def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: Path) -> None:
@@ -214,7 +204,7 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
         "--no-remote",
     )
     cli.run("export", str(build), "--no-remote")
-    assert conan_backend.get_many((be.ref,))[0].ref == be.ref
+    assert conan_backend.get(be.ref).ref == be.ref
     assert resolve_published(conan_backend, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
 
 
@@ -243,8 +233,8 @@ def test_multiple_revisions_are_not_silently_selected(
     write_recipe(folder, replace(original, payload={"different": True}))
     conan_backend._client.create_lockfile(folder)
     conan_backend._client.export(folder)
-    with pytest.raises(IdentityConflict):
-        conan_backend.get_many((original.ref,))
+    with pytest.raises(Conflict):
+        (conan_backend.get(original.ref),)
 
 
 def test_upload_failure_is_reported_for_the_single_package(
@@ -254,10 +244,10 @@ def test_upload_failure_is_reported_for_the_single_package(
 
     def fail_upload(reference: str) -> None:
         assert reference.startswith("soc.cpu.rtl/1.0#")
-        raise BackendUnavailable("simulated lost response")
+        raise CatalogError("simulated lost response")
 
     monkeypatch.setattr(conan_backend._client, "upload", fail_upload)
-    with pytest.raises(BackendUnavailable, match="simulated lost response"):
+    with pytest.raises(CatalogError, match="simulated lost response"):
         conan_backend.publish(root)
 
 
@@ -270,8 +260,8 @@ def test_command_os_error_is_not_not_found(
         raise OSError("API initialization failed")
 
     monkeypatch.setattr(conan_client, "ConanAPI", fail)
-    with pytest.raises(BackendUnavailable, match="API initialization failed"):
-        conan_backend.get_many((record().ref,))
+    with pytest.raises(CatalogError, match="API initialization failed"):
+        (conan_backend.get(record().ref),)
 
 
 def test_native_graph_exposes_conans_dependencies_and_topological_order(
@@ -333,7 +323,7 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     assert Path.cwd() == cwd
     assert not ambient_home.exists()
     conan_backend.close()
-    with pytest.raises(BackendUnavailable):
+    with pytest.raises(CatalogError):
         resolve_published(conan_backend, root.ref)
 
 
@@ -342,7 +332,7 @@ def test_native_graph_reports_missing_pinned_dependency(conan_backend: ConanBack
     conan_backend.publish(rtl)
     conan_backend.publish(macro, dependencies=(rtl.ref,))
     conan_backend._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
-    with pytest.raises(BackendUnavailable):
+    with pytest.raises(CatalogError):
         conan_backend._load_graph(macro.ref)
 
 
@@ -361,7 +351,7 @@ def test_native_api_failure_is_a_catalog_error(
         raise ConanException("simulated API failure")
 
     monkeypatch.setattr(conan_client, "ConanAPI", fail)
-    with pytest.raises(BackendUnavailable, match="simulated API failure"):
+    with pytest.raises(CatalogError, match="simulated API failure"):
         conan_backend._load_graph(root.ref)
 
 
@@ -376,7 +366,7 @@ def test_native_graph_computation_does_not_spawn_a_conan_process(
     monkeypatch.setattr(subprocess, "Popen", reject_subprocess)
     root = record()
     conan_backend.publish(root)
-    assert conan_backend.get_many((root.ref,))[0].ref == root.ref
+    assert conan_backend.get(root.ref).ref == root.ref
     assert conan_backend.search(SearchQuery())[0].ref == root.ref
     assert len(resolve_published(conan_backend, root.ref).records) == 1
 
@@ -435,5 +425,5 @@ def test_invalid_default_cache_is_a_domain_error(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CONAN_HOME", "relative-path")
-    with pytest.raises(BackendUnavailable, match="default home"):
+    with pytest.raises(CatalogError, match="default home"):
         ConanBackend()

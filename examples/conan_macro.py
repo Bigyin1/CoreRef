@@ -43,8 +43,8 @@ def main() -> None:
         for result in catalog.find_dependents(rtl.ref, candidates=candidates):
             print(result.ref)
             print(result.to_json())
-            dependencies = tuple(record.ref for record in catalog.graph.dependencies(result.ref))
-            graph = catalog.graph.resolve_local(result, dependencies=dependencies)
+            dependencies = tuple(record.ref for record in catalog.dependencies(result.ref))
+            graph = catalog.resolve_local(result, dependencies=dependencies)
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
             content = catalog.materialize(result.ref).path
             print((content / "artifacts/cpu.lib").read_text().strip())

@@ -8,7 +8,7 @@ import pytest
 
 from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import BackendUnavailable, InvalidPackage
+from hwcatalog.api.errors import CatalogError, InvalidPackage
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
@@ -42,7 +42,7 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
         assert resolve_published(catalog, result, lockfile=lockfile).dependencies == (
             Dependency(result, dependency.ref),
         )
-        installed = catalog.materialize(result, lockfile=lockfile)
+        installed = catalog.materialize(result)
         assert (installed.path / "artifacts/cpu.lib").read_text() == artifact.read_text()
         assert not (installed.path / "conan.lock").exists()
         assert lockfile.read_bytes() == original_lock
@@ -53,9 +53,9 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "damage,exception",
     [
-        ("missing", BackendUnavailable),
+        ("missing", CatalogError),
         ("incomplete", InvalidPackage),
-        ("malformed", BackendUnavailable),
+        ("malformed", CatalogError),
     ],
 )
 def test_conan_validates_the_supplied_project_lockfile(

@@ -21,8 +21,8 @@ from examples.conan_config import configured_home
 from hwcatalog._internal.backends.conan_format import read_recipe, write_recipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
-    BackendUnavailable,
-    IdentityConflict,
+    CatalogError,
+    Conflict,
 )
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
@@ -104,7 +104,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     catalog.publish(rtl)
     catalog.publish(be, dependencies=(rtl.ref,))
     assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))[0].ref == be.ref
-    with pytest.raises(IdentityConflict):
+    with pytest.raises(Conflict):
         catalog.publish(rtl)
     original_graph = resolve_published(catalog, be.ref)
     native, _ = remote_backend._load_graph(be.ref)
@@ -138,7 +138,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
         assert reader.get(new_rtl.ref).ref == new_rtl.ref
         assert resolve_published(reader, be.ref) == original_graph
     remote_backend._client.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
-    with pytest.raises(BackendUnavailable):
+    with pytest.raises(CatalogError):
         catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))
 
 
@@ -149,11 +149,11 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
     catalog = Catalog(remote_backend)
 
     def reject_upload(reference: str) -> None:
-        raise BackendUnavailable(f"Simulated upload failure: {reference}")
+        raise CatalogError(f"Simulated upload failure: {reference}")
 
     with monkeypatch.context() as patch:
         patch.setattr(remote_backend._client, "upload", reject_upload)
-        with pytest.raises(BackendUnavailable, match="Simulated upload failure"):
+        with pytest.raises(CatalogError, match="Simulated upload failure"):
             catalog.publish(record)
     directory = remote_backend._client.cache_path(str(record.ref), download=False)
     assert read_recipe(directory, record.ref)[0] == record
@@ -203,7 +203,7 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
         offline = git_origin.with_name("offline-origin.git")
         git_origin.rename(offline)
         try:
-            with pytest.raises(BackendUnavailable):
+            with pytest.raises(CatalogError):
                 reader.materialize(published.ref, with_sources=True)
         finally:
             offline.rename(git_origin)

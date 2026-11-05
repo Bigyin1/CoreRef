@@ -29,12 +29,12 @@ macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.
 with Catalog(ConanBackend()) as catalog:
     rtl = catalog.publish(rtl)
     macro = catalog.publish(macro, dependencies=(rtl.ref,))
-    inputs = catalog.graph.dependencies(macro.ref)  # tuple[Record, ...]
+    inputs = catalog.dependencies(macro.ref)  # tuple[Record, ...]
     implementations = catalog.find_dependents(
         rtl.ref,
         candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"),
     )
-    graph = catalog.graph.resolve_local(macro, dependencies=(rtl.ref,))
+    graph = catalog.resolve_local(macro, dependencies=(rtl.ref,))
     print(graph.dependencies)
 ```
 
@@ -77,7 +77,7 @@ Conan-рецепты и нативный граф создаются внутр�
 ```python
 with Catalog(ConanBackend()) as catalog:
     local = Record(Ref("soc", "1.0", "rtl", "soc1"))
-    graph = catalog.graph.resolve_local(local, dependencies=(rtl.ref,))
+    graph = catalog.resolve_local(local, dependencies=(rtl.ref,))
 ```
 
 Адаптер создаёт временный consumer-рецепт и получает весь граф одним `graph info`
@@ -91,7 +91,7 @@ with Catalog(ConanBackend()) as catalog:
 ```python
 with Catalog(ConanBackend()) as catalog:
     lockfile = catalog.create_lockfile((rtl.ref,), "workspace/conan.lock")
-    graph = catalog.graph.resolve_local(macro, dependencies=(rtl.ref,), lockfile=lockfile)
+    graph = catalog.resolve_local(macro, dependencies=(rtl.ref,), lockfile=lockfile)
 ```
 
 Каталог не разбирает JSON lockfile и не задаёт версию его формата. Новые пакеты

@@ -10,7 +10,7 @@ import yaml  # type: ignore[import-untyped]  # Validated by models at this bound
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ...api.errors import InvalidPackage, InvalidPublication
+from ...api.errors import InvalidPackage
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
 from ...api.models.resources import GitResource
@@ -39,9 +39,7 @@ def to_conan_reference(ref: Ref) -> str:
     if ref.namespace.startswith("-") or not all(
         _TOKEN.fullmatch(value) for value in (ref.namespace, ref.name, ref.kind)
     ):
-        raise InvalidPublication(
-            "Conan coordinates require lowercase tokens without dots or slashes"
-        )
+        raise InvalidPackage("Conan coordinates require lowercase tokens without dots or slashes")
     name = ref.package_name
     value = str(ref)
     if (
@@ -49,7 +47,7 @@ def to_conan_reference(ref: Ref) -> str:
         or len(value) > _MAX_REFERENCE_LENGTH
         or not _VERSION.fullmatch(ref.version)
     ):
-        raise InvalidPublication("Reference exceeds Conan name/version constraints")
+        raise InvalidPackage("Reference exceeds Conan name/version constraints")
     return value
 
 
@@ -62,7 +60,7 @@ def from_conan_reference(value: str) -> Ref:
         if to_conan_reference(ref) != value.split("#", 1)[0]:
             raise ValueError("Noncanonical coordinates")
         return ref
-    except (ValueError, InvalidPublication) as exc:
+    except (ValueError, InvalidPackage) as exc:
         raise InvalidPackage(f"Not a catalog Conan reference: {value!r}") from exc
 
 
@@ -172,7 +170,7 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata]
         TypeError,
         KeyError,
         ValidationError,
-        InvalidPublication,
+        InvalidPackage,
         yaml.YAMLError,
     ) as exc:
         raise InvalidPackage(f"Invalid catalog recipe for {expected}: {exc}") from exc

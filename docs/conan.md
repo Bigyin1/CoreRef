@@ -127,14 +127,17 @@ Conan. Формат, версия схемы и содержимое файла 
 ```python
 lockfile = catalog.create_lockfile((rtl_ref,), "/work/project/conan.lock")
 record = catalog.publish_file("package.json", lockfile=lockfile)
-dependencies = tuple(item.ref for item in catalog.graph.dependencies(record.ref))
-graph = catalog.graph.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
-package = catalog.materialize(record.ref, with_sources=True, lockfile=lockfile)
+dependencies = tuple(item.ref for item in catalog.dependencies(record.ref))
+graph = catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
+package = catalog.materialize(record.ref, with_sources=True)
 ```
 
-Существующий файл используется как вход при явном обновлении. При обычном чтении,
-публикации или materialize он не изменяется. Без `lockfile` Conan получает явно
-пустой аргумент, чтобы не подобрать случайный файл из cwd.
+Существующий файл используется как вход при явном обновлении. При обычном чтении
+или публикации он не изменяется. Materialize не принимает lockfile: Ref выбирает
+единственную опубликованную revision, а requirements пакета уже закреплены.
+Если для Ref существует несколько revisions, каталог сообщает Conflict.
+При materialize Conan получает явно пустой `--lockfile`, чтобы не подобрать
+случайный файл из cwd. Это также применяется к разрешению и публикации без `lockfile`.
 Типы рёбер, settings/options, build requirements, overrides и диапазоны версий
 в публичной модели не поддерживаются. Поиск RTL → BE проверяет граф каждого
 кандидата из `SearchQuery`.
@@ -153,7 +156,7 @@ package(). Отдельные предварительные `graph info` и `ex
 SCM фиксируется единственным export() внутри export-pkg. Полная ссылка с revision
 берётся из возвращённого нативного графа, а пакет отправляется через upload.
 Home не копируется, cache save/restore не используется. После ошибки в cache
-могут остаться рецепт или пакет. Сбой upload сообщается как BackendUnavailable;
+могут остаться рецепт или пакет. Сбой upload сообщается как CatalogError;
 автоматического rollback или retry нет.
 
 Рецепт генерируется Jinja-шаблоном
@@ -171,4 +174,4 @@ JSON-метаданные и SCM-координаты сериализуются
 
 GitResource — описание SCM без собственной реализации Git-кэша. Сгенерированный
 source() получает исходники штатным conan.tools.scm.Git. Для записи без файлов
-и source materialize() вызывает MaterializationError.
+и source materialize() вызывает CatalogError.

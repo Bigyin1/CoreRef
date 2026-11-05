@@ -9,7 +9,7 @@ import pytest
 
 from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import IdentityConflict, InvalidPublication
+from hwcatalog.api.errors import Conflict, InvalidPackage
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.api.protocols import JSONSerializable
 from hwcatalog.api.types import JSON
@@ -78,7 +78,7 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
     catalog.publish(Record(ref))
     catalog.publish(Record(other))
     assert catalog.get(same).ref == ref
-    with pytest.raises(IdentityConflict):
+    with pytest.raises(Conflict):
         catalog.publish(Record(same))
 
 
@@ -94,7 +94,7 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
     ],
 )
 def test_required_reference_fields(ref: Ref) -> None:
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         normalize_record(Record(ref))
 
 

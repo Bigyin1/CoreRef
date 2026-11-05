@@ -11,15 +11,7 @@ from dulwich.repo import Repo
 
 from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import (
-    BackendUnavailable,
-    CatalogError,
-    IdentityConflict,
-    InvalidPackage,
-    InvalidPublication,
-    MaterializationError,
-    NotFound,
-)
+from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.api.models.resources import GitResource
@@ -56,7 +48,7 @@ def test_publish_json_dependencies_and_stored_files(packages: Catalog, tmp_path:
     assert record.files == ("timing/cpu.lib",)
     assert record.source is None
     assert packages.get(record.ref) == record
-    assert packages.graph.dependencies(record.ref) == (packages.get(rtl.ref),)
+    assert packages.dependencies(record.ref) == (packages.get(rtl.ref),)
     assert resolve_published(packages, record.ref).dependencies == (
         Dependency(record.ref, rtl.ref),
     )
@@ -65,7 +57,7 @@ def test_publish_json_dependencies_and_stored_files(packages: Catalog, tmp_path:
     content = packages.materialize(record.ref).path
     assert (content / "artifacts/timing/cpu.lib").read_bytes() == b"library(cpu) {}\n\x00"
     assert packages.materialize(record.ref).path == content
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         packages.publish(record)
 
 
@@ -104,7 +96,7 @@ def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path)
         fetched = catalog.materialize(record.ref, with_sources=True)
         assert fetched.source_path is not None
         assert (fetched.source_path / "cpu.sv").is_file()
-        with pytest.raises(IdentityConflict):
+        with pytest.raises(Conflict):
             catalog.publish_file(description(tmp_path, source=asdict(source)))
         (folder / "conandata.yml").write_text("scm: {commit: nope}")
         with pytest.raises(InvalidPackage):
@@ -114,7 +106,7 @@ def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path)
 def test_dirty_source_fails_before_publication(tmp_path: Path, checkout: Path) -> None:
     (checkout / "cpu.sv").write_text("uncommitted")
     with Catalog(ConanBackend(configured_home(tmp_path / "home"))) as catalog:
-        with pytest.raises(BackendUnavailable, match="dirty"):
+        with pytest.raises(CatalogError, match="dirty"):
             catalog.publish_file(description(tmp_path, source={"path": "checkout"}))
         assert not catalog.search()
 
@@ -146,17 +138,17 @@ def test_invalid_manifest_does_not_publish(
     packages: Catalog, tmp_path: Path, fields: dict[str, object]
 ) -> None:
     (tmp_path / "input.txt").write_text("input")
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         packages.publish_file(description(tmp_path, **fields))
     assert not packages.search()
 
 
 def test_invalid_json_and_missing_description(packages: Catalog, tmp_path: Path) -> None:
     path = tmp_path / "package.json"
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         packages.publish_file(path)
     path.write_text("{")
-    with pytest.raises(InvalidPublication):
+    with pytest.raises(InvalidPackage):
         packages.publish_file(path)
 
 
@@ -165,7 +157,7 @@ def test_missing_content_and_record(packages: Catalog) -> None:
     with pytest.raises(NotFound):
         packages.materialize(record.ref)
     packages.publish(record)
-    with pytest.raises(MaterializationError):
+    with pytest.raises(CatalogError):
         packages.materialize(record.ref)
 
 
