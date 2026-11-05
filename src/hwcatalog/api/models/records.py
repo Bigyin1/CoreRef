@@ -21,19 +21,21 @@ class Ref:
     namespace: str
 
     @property
-    def identity(self) -> str:
-        """An unambiguous key for these exact coordinates."""
-        return json.dumps(
-            [self.namespace, self.name, self.version, self.kind],
-            separators=(",", ":"),
-        )
+    def package_name(self) -> str:
+        """The namespace, component and representation without a version."""
+        return f"{self.namespace}.{self.name}.{self.kind}"
 
-    @property
-    def family(self) -> str:
-        """The same package coordinates across versions."""
-        return json.dumps(
-            [self.namespace, self.name, self.kind],
-            separators=(",", ":"),
+    def __str__(self) -> str:
+        return f"{self.package_name}/{self.version}"
+
+    def __lt__(self, other: Ref) -> bool:
+        if not isinstance(other, Ref):
+            return NotImplemented
+        return (self.namespace, self.name, self.version, self.kind) < (
+            other.namespace,
+            other.name,
+            other.version,
+            other.kind,
         )
 
 

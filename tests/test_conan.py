@@ -312,7 +312,7 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         Dependency(right.ref, shared.ref),
     )
     assert conan_backend.graph.dependency_closure(root.ref).dependencies == tuple(
-        sorted(edges, key=lambda edge: edge.to_json())
+        sorted(edges, key=lambda edge: (edge.source, edge.target))
     )
 
 

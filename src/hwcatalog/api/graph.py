@@ -1,117 +1,39 @@
-"""Exact dependencies and consumers; backends own each read operation."""
+"""Backend-independent queries returning domain graph snapshots."""
 
-from collections.abc import Callable
-from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Protocol
 
-import networkx as nx
-
-from .._internal.graph import GraphReader
-from .._internal.validation import normalize_publication, normalize_query, normalize_ref
-from .errors import DependencyCycle, InvalidPublication, VersionConflict
-from .models.graph import Dependency, GraphResult
+from .models.graph import GraphResult
 from .models.query import SearchQuery
 from .models.records import Record, Ref
 
 
-class CatalogGraph:
-    """Query dependency graphs; the owning Catalog closes the backend."""
-
-    def __init__(self, read: Callable[[], AbstractContextManager[GraphReader]]) -> None:
-        self._read = read
+class CatalogGraph(Protocol):
+    """Resolve dependencies with the owning backend; native Conan objects stay internal."""
 
     def dependencies(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
-        """Return immediate dependencies in deterministic identity order."""
-        ref, filters = normalize_ref(ref), normalize_query(filters)
-        with self._read() as reader:
-            return reader.dependencies(ref, filters)
+        """Return immediate dependencies in deterministic reference order."""
+        ...
 
     def consumers(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
-        """Return records that directly depend on ref."""
-        ref, filters = normalize_ref(ref), normalize_query(filters)
-        with self._read() as reader:
-            return reader.consumers(ref, filters)
+        """Find immediate consumers; Conan checks candidate requirements."""
+        ...
 
     def dependency_closure(self, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
-        """Return the exact dependency graph, including the selected root."""
-        if lockfile is not None:
-            raise InvalidPublication("Project lockfiles require a Conan backend")
-        ref = normalize_ref(ref)
-        with self._read() as reader:
-            return self._traverse(reader, ref)
+        """Resolve a published root and its complete dependency graph."""
+        ...
 
     def resolve_local(
-        self,
-        record: Record,
-        *,
-        dependencies: tuple[Ref, ...] = (),
-        lockfile: Path | None = None,
+        self, record: Record, *, dependencies: tuple[Ref, ...] = (), lockfile: Path | None = None
     ) -> GraphResult:
-        """Resolve a local root and published dependencies without publishing the root.
-
-        Conan resolves one consumer graph. Memory emulates its cycle and version
-        constraints; local root data takes precedence over any published record.
-        """
-        if lockfile is not None:
-            raise InvalidPublication("Project lockfiles require a Conan backend")
-        record, dependencies = normalize_publication(record, dependencies)
-        records = {record.ref: record}
-        edges = {Dependency(record.ref, target) for target in dependencies}
-        with self._read() as reader:
-            for target in dependencies:
-                closure = self._traverse(reader, target)
-                records.update((item.ref, item) for item in closure.records)
-                edges.update(closure.dependencies)
-        if any(edge.target == record.ref for edge in edges):
-            raise DependencyCycle("Local project has a cyclic dependency")
-        families: dict[str, Ref] = {}
-        for ref in records:
-            if families.setdefault(ref.family, ref) != ref:
-                raise VersionConflict(f"Multiple versions for {ref.family}")
-        return GraphResult(
-            tuple(sorted(records.values(), key=lambda item: item.ref.identity)),
-            tuple(sorted(edges, key=lambda edge: edge.to_json())),
-        )
+        """Resolve a local root and published dependencies without publishing the root."""
+        ...
 
     def find_dependents(
         self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
     ) -> tuple[Record, ...]:
-        """Filter candidate records by their direct or transitive dependency on ref."""
-        ref, candidates = normalize_ref(ref), normalize_query(candidates)
-        with self._read() as reader:
-            reader.get_many((ref,))
-            matches = []
-            for record in reader.search(candidates):
-                if record.ref == ref:
-                    continue
-                records = (
-                    self._traverse(reader, record.ref).records
-                    if transitive
-                    else reader.dependencies(record.ref, SearchQuery())
-                )
-                if any(candidate.ref == ref for candidate in records):
-                    matches.append(record)
-            return tuple(sorted(matches, key=lambda record: record.ref.identity))
-
-    def _traverse(self, reader: GraphReader, ref: Ref) -> GraphResult:
-        graph: nx.DiGraph[Ref] = nx.DiGraph()
-        graph.add_node(ref, record=reader.get_many((ref,))[0])
-        for layer in nx.bfs_layers(graph, ref):
-            for current in layer:
-                for record in reader.dependencies(current, SearchQuery()):
-                    graph.add_node(record.ref, record=record)
-                    graph.add_edge(current, record.ref)
-        return GraphResult(
-            tuple(
-                graph.nodes[node]["record"] for node in sorted(graph, key=lambda ref: ref.identity)
-            ),
-            tuple(
-                sorted(
-                    (Dependency(source, target) for source, target in graph.edges),
-                    key=lambda edge: edge.to_json(),
-                )
-            ),
-        )
+        """Filter candidates by their direct or transitive dependency on ref."""
+        ...
 
 
 __all__ = ["CatalogGraph"]

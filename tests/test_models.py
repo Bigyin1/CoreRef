@@ -26,7 +26,7 @@ class UserPayload:
 
 
 def test_minimal_record() -> None:
-    record = Record(Ref("core", "1", "release", "demo"))
+    record = Record(Ref("core", "1.0", "release", "demo"))
     assert record.payload is None
     assert Record.from_json(record.to_json()) == record
     with pytest.raises(FrozenInstanceError):
@@ -35,7 +35,7 @@ def test_minimal_record() -> None:
 
 @pytest.mark.parametrize("value", [None, True, 12, "custom", [1, {"size": -10}], {"schema": False}])
 def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
-    record = Record(Ref("opaque", "1", "release", "demo"), UserPayload(value))
+    record = Record(Ref("opaque", "1.0", "release", "demo"), UserPayload(value))
     catalog.publish(record)
     stored = catalog.get(record.ref)
     assert stored == Record.from_json(record.to_json())
@@ -45,10 +45,10 @@ def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
 def test_custom_payload_is_serialized_once_and_frozen(catalog: Catalog) -> None:
     nested: list[JSON] = [1, {"ports": [2, 3]}]
     payload = UserPayload({"nested": nested})
-    catalog.publish(Record(Ref("core", "1", "release", "demo"), payload))
+    catalog.publish(Record(Ref("core", "1.0", "release", "demo"), payload))
     assert payload.calls == 1
     nested.append(4)
-    stored = catalog.get(Ref("core", "1", "release", "demo"))
+    stored = catalog.get(Ref("core", "1.0", "release", "demo"))
     assert isinstance(stored.payload, Mapping)
     assert stored.payload["nested"] == (1, {"ports": (2, 3)})
     with pytest.raises(TypeError):
@@ -62,19 +62,19 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
             return "{"
 
     with pytest.raises(json.JSONDecodeError):
-        catalog.publish(Record(Ref("invalid", "1", "release", "demo"), InvalidPayload()))
+        catalog.publish(Record(Ref("invalid", "1.0", "release", "demo"), InvalidPayload()))
     assert not catalog.search()
 
 
 def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
-    ref = Ref("core", "1", "release", "rtl/ip")
-    same = Ref("core", "1", "release", "rtl/ip")
-    other = replace(ref, namespace="backend/ip")
+    ref = Ref("core", "1.0", "release", "rtl-ip")
+    same = Ref("core", "1.0", "release", "rtl-ip")
+    other = replace(ref, namespace="backend-ip")
     assert ref == same
     assert hash(ref) == hash(same)
-    assert ref.family == replace(ref, version="2").family
+    assert ref.package_name == replace(ref, version="2.0").package_name
     assert ref != other
-    assert ref.family != other.family
+    assert ref.package_name != other.package_name
     catalog.publish(Record(ref))
     catalog.publish(Record(other))
     assert catalog.get(same).ref == ref
@@ -85,12 +85,12 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
 @pytest.mark.parametrize(
     "ref",
     [
-        Ref("", "1", "release", "demo"),
+        Ref("", "1.0", "release", "demo"),
         Ref("core", " ", "release", "demo"),
-        Ref("core", "1", "", "demo"),
-        Ref("core", "1", " ", "demo"),
-        Ref("core", "1", "release", ""),
-        Ref("core", "1", "release", " "),
+        Ref("core", "1.0", "", "demo"),
+        Ref("core", "1.0", " ", "demo"),
+        Ref("core", "1.0", "release", ""),
+        Ref("core", "1.0", "release", " "),
     ],
 )
 def test_required_reference_fields(ref: Ref) -> None:
@@ -99,12 +99,12 @@ def test_required_reference_fields(ref: Ref) -> None:
 
 
 class CustomKind(StrEnum):
-    REPORT = "vendor.report"
+    REPORT = "vendor-report"
 
 
 @pytest.mark.parametrize("kind", ["artifact", "execution", CustomKind.REPORT, "custom"])
 def test_consumer_kinds(catalog: Catalog, kind: str) -> None:
-    ref = Ref("core", "1", kind, "demo")
+    ref = Ref("core", "1.0", kind, "demo")
     catalog.publish(Record(ref))
     stored = catalog.get(ref)
     assert stored.ref.kind == kind
@@ -113,9 +113,9 @@ def test_consumer_kinds(catalog: Catalog, kind: str) -> None:
 
 def test_kind_is_required() -> None:
     with pytest.raises(TypeError):
-        Ref("core", "1", namespace="demo")  # type: ignore[call-arg]
+        Ref("core", "1.0", namespace="demo")  # type: ignore[call-arg]
 
 
 def test_namespace_is_required() -> None:
     with pytest.raises(TypeError):
-        Ref("core", "1", "artifact")  # type: ignore[call-arg]
+        Ref("core", "1.0", "artifact")  # type: ignore[call-arg]

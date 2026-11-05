@@ -16,9 +16,6 @@ dependencies = [
  "frozendict>=2.4.7,<3",
 ]
 
-[project.optional-dependencies]
-git = ["dulwich>=1.2.18,<2"]
-
 [dependency-groups]
 dev = [
     "pytest>=8.4",

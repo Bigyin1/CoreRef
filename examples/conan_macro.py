@@ -39,7 +39,7 @@ def main() -> None:
         catalog.publish_file(manifest)
         candidates = SearchQuery(namespace="soc1", name="cpu", kind="lib-lef")
         for result in catalog.find_dependents(rtl.ref, candidates=candidates):
-            print(result.ref.identity)
+            print(result.ref)
             print(result.to_json())
             graph = catalog.graph.dependency_closure(result.ref)
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")

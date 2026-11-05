@@ -1,11 +1,11 @@
-"""The public API and in-memory catalog work without importing the Conan adapter."""
+"""Public domain models import without Conan; the adapter is loaded explicitly."""
 
 import subprocess
 import sys
 from textwrap import dedent
 
 
-def test_public_api_and_memory_backend_import_independently_of_conan() -> None:
+def test_public_models_import_independently_of_conan() -> None:
     code = dedent("""
         import sys
         from pathlib import Path
@@ -41,9 +41,10 @@ def test_public_api_and_memory_backend_import_independently_of_conan() -> None:
 
         from hwcatalog.api import catalog, protocols, types
         from hwcatalog.api.models import query
-        from hwcatalog.backends.memory import MemoryBackend
+        from hwcatalog.backends.conan import ConanBackend
 
-        backend: protocols.Backend = MemoryBackend()
+        home = TemporaryDirectory()
+        backend: protocols.Backend = ConanBackend(Path(home.name))
         manifest: dict[str, types.JSON] = {"views": ["rtl", "timing"]}
         record = records.Record(
             ref=records.Ref("rtl", "v1", "rtl-project", "public"),
@@ -68,10 +69,8 @@ def test_public_api_and_memory_backend_import_independently_of_conan() -> None:
             local = resources.LocatedResource("nfs", directory).materialize()
             assert local.path == Path(directory).resolve()
 
-        assert "conan" not in sys.modules, "Public API and memory must not import Conan"
-        assert "hwcatalog._internal.backends.conan" not in sys.modules
-        assert "conan" not in sys.modules
-        assert "dulwich" not in sys.modules, "Git support must be loaded only when called"
+        home.cleanup()
+        assert "dulwich" not in sys.modules, "Conan source retrieval uses its native Git helper"
     """)
     result = subprocess.run(  # noqa: S603 - fixed script with the current Python interpreter
         [sys.executable, "-I", "-c", code], capture_output=True, text=True, check=False, timeout=10

@@ -3,7 +3,7 @@
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import NotFound
+from hwcatalog.api.errors import CatalogError, NotFound
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 
@@ -31,16 +31,14 @@ def test_candidate_search_uses_arbitrary_paths_and_exact_versions(catalog: Catal
         catalog.find_dependents(Ref("missing", "1.0", "rtl", "soc"), candidates=query)
 
 
-def test_exact_closure_preserves_published_versions(catalog: Catalog) -> None:
-    root, first, second = (
-        Record(Ref(name, version, "rtl", "soc"))
-        for name, version in (("top", "1.0"), ("cpu", "1.0"), ("cpu", "2.0"))
-    )
+def test_conflicting_versions_are_rejected_by_conan(catalog: Catalog) -> None:
+    first = Record(Ref("cpu", "1.0", "rtl", "soc"))
+    second = Record(Ref("cpu", "2.0", "rtl", "soc"))
     catalog.publish(first)
     catalog.publish(second)
-    catalog.publish(root, dependencies=(first.ref, second.ref))
-    assert {record.ref for record in catalog.graph.dependency_closure(root.ref).records} == {
-        root.ref,
-        first.ref,
-        second.ref,
-    }
+    with pytest.raises(CatalogError, match="Duplicated requirement"):
+        catalog.publish(
+            Record(Ref("top", "1.0", "rtl", "soc")), dependencies=(first.ref, second.ref)
+        )
+    assert catalog.get(first.ref) == first
+    assert catalog.get(second.ref) == second

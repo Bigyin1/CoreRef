@@ -8,12 +8,7 @@ from pydantic import TypeAdapter
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.api.models.resources import GitResource, LocatedResource, Resource
-
-
-def test_resource_is_abstract() -> None:
-    with pytest.raises(TypeError, match="abstract"):
-        Resource()  # type: ignore[abstract]
+from hwcatalog.api.models.resources import GitResource, LocatedResource
 
 
 def test_resource_fields_cannot_be_reassigned() -> None:

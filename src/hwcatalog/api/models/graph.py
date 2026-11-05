@@ -1,8 +1,7 @@
 """Exact dependency edges and immutable graph results."""
 
-import json
-from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Self
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import networkx as nx
 
@@ -15,22 +14,12 @@ else:
     _RefGraph = nx.DiGraph
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class Dependency:
     """A source record requires an exact target record."""
 
     source: Ref
     target: Ref
-
-    def to_json(self) -> str:
-        return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
-
-    @classmethod
-    def from_json(cls, payload: str) -> Self:
-        value = json.loads(payload)
-        if set(value) != {"source", "target"}:
-            raise ValueError("A dependency contains only source and target")
-        return cls(Ref(**value["source"]), Ref(**value["target"]))
 
 
 @dataclass(frozen=True)

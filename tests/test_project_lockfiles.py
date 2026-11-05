@@ -8,11 +8,10 @@ import pytest
 
 from hwcatalog._internal.backends.conan_format import _recipe_text, write_recipe
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import BackendUnavailable, InvalidPackage, InvalidPublication
+from hwcatalog.api.errors import BackendUnavailable, InvalidPackage
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
-from hwcatalog.backends.memory import MemoryBackend
 
 
 def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
@@ -87,7 +86,7 @@ def test_conan_validates_the_supplied_project_lockfile(
         assert catalog.get(macro.ref) == macro
 
 
-def test_empty_project_and_memory_lockfile_contract(tmp_path: Path) -> None:
+def test_empty_project_lockfile(tmp_path: Path) -> None:
     with Catalog(ConanBackend(tmp_path / "cache")) as catalog:
         lockfile = catalog.create_lockfile((), tmp_path / "empty/conan.lock")
         empty_lock = lockfile.read_bytes()
@@ -97,19 +96,6 @@ def test_empty_project_and_memory_lockfile_contract(tmp_path: Path) -> None:
         catalog.create_lockfile((root.ref,), lockfile)
         catalog.create_lockfile((), lockfile)
         assert lockfile.read_bytes() == empty_lock
-    with Catalog(MemoryBackend()) as memory:
-        operations = (
-            lambda: memory.create_lockfile((), tmp_path / "unsupported.lock"),
-            lambda: memory.publish(root, lockfile=lockfile),
-            lambda: memory.publish_file(tmp_path / "unused.json", lockfile=lockfile),
-            lambda: memory.materialize(root.ref, lockfile=lockfile),
-            lambda: memory.graph.dependency_closure(root.ref, lockfile=lockfile),
-            lambda: memory.graph.resolve_local(root, lockfile=lockfile),
-        )
-        for operation in operations:
-            with pytest.raises(InvalidPublication, match="require a Conan backend"):
-                operation()
-        assert not (tmp_path / "unsupported.lock").exists()
 
 
 @pytest.mark.parametrize("format_version", [1, 2, 3])

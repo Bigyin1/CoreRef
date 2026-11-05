@@ -31,7 +31,7 @@ class Backend(Protocol):
         ...
 
     def search(self, query: SearchQuery) -> tuple[Record, ...]:
-        """Return all exact AND-matches in deterministic identity order; an empty tuple if none."""
+        """Return all exact AND-matches in deterministic reference order; an empty tuple if none."""
         ...
 
     def publish(
@@ -52,7 +52,7 @@ class Backend(Protocol):
         ...
 
     def create_lockfile(self, refs: tuple[Ref, ...], path: Path) -> Path:
-        """Write a project lockfile using Conan; Memory does not support this operation."""
+        """Write a project lockfile using Conan."""
         ...
 
     def materialize(

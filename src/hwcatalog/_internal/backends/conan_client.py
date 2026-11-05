@@ -195,8 +195,20 @@ class ConanClient:
         )
         return cast(NativeGraph, result["graph"])
 
+    def extend_lockfile(self, reference: str, source: Path, output: Path) -> None:
+        """Add the consumer requirement without resolving another dependency graph."""
+        self.run(
+            "lock",
+            "add",
+            f"--requires={reference}",
+            "--lockfile",
+            str(source),
+            "--lockfile-out",
+            str(output),
+        )
+
     def install(
-        self, reference: str, lockfile: Path, output: Path, *, with_sources: bool = False
+        self, reference: str, lockfile: Path | None, output: Path, *, with_sources: bool = False
     ) -> NativeGraph:
         source_args: tuple[str, ...] = ()
         if with_sources:
@@ -209,7 +221,7 @@ class ConanClient:
                 "--requires",
                 reference,
                 "--lockfile",
-                str(lockfile),
+                str(lockfile) if lockfile is not None else "",
                 "--build=never",
                 *source_args,
                 "--output-folder",

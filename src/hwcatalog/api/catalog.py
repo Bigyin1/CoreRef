@@ -65,7 +65,7 @@ class Catalog:
         )
 
     def search(self, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
-        """Return all matching records in deterministic identity order."""
+        """Return all matching records in deterministic reference order."""
         query = normalize_query(query)
         return self._backend.search(query)
 

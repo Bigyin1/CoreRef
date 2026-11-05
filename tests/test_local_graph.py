@@ -1,4 +1,4 @@
-"""Resolve unpublished consumers using one Conan graph or its Memory equivalent."""
+"""Resolve unpublished consumers using the native Conan graph API."""
 
 from collections.abc import Iterator
 from dataclasses import replace
@@ -11,12 +11,11 @@ from hwcatalog.api.errors import DependencyCycle, InvalidPackage, NotFound, Vers
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
-from hwcatalog.backends.memory import MemoryBackend
 
 
-@pytest.fixture(params=["memory", "conan"])
-def local_catalog(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Catalog]:
-    backend = MemoryBackend() if request.param == "memory" else ConanBackend(tmp_path / "cache")
+@pytest.fixture
+def local_catalog(tmp_path: Path) -> Iterator[Catalog]:
+    backend = ConanBackend(tmp_path / "cache")
     with Catalog(backend) as catalog:
         yield catalog
 

@@ -1,6 +1,6 @@
-"""In-memory instances provide the isolated dependency API contract."""
+"""Real Conan instances and Git fixtures use owned temporary directories."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -11,29 +11,13 @@ from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.protocols import Backend
-from hwcatalog.backends.memory import MemoryBackend
-
-type Factory = Callable[[], Backend]
+from hwcatalog.backends.conan import ConanBackend
 
 
 @pytest.fixture
-def backend_factory() -> Iterator[Factory]:
-    clients: list[Backend] = []
-
-    def create() -> Backend:
-        backend = MemoryBackend()
-        clients.append(backend)
-        return backend
-
-    yield create
-    for client in clients:
-        client.close()
-
-
-@pytest.fixture
-def catalog(backend_factory: Factory) -> Catalog:
-    return Catalog(backend_factory())
+def catalog(tmp_path: Path) -> Iterator[Catalog]:
+    with Catalog(ConanBackend(tmp_path / "conan-home")) as catalog:
+        yield catalog
 
 
 @pytest.fixture

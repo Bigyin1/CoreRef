@@ -23,12 +23,11 @@ from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.api.models.resources import GitResource
 from hwcatalog.backends.conan import ConanBackend
-from hwcatalog.backends.memory import MemoryBackend
 
 
-@pytest.fixture(params=["memory", "conan"])
-def packages(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Catalog]:
-    backend = MemoryBackend() if request.param == "memory" else ConanBackend(tmp_path / "home")
+@pytest.fixture
+def packages(tmp_path: Path) -> Iterator[Catalog]:
+    backend = ConanBackend(tmp_path / "home")
     with Catalog(backend) as catalog:
         yield catalog
 
@@ -91,9 +90,7 @@ def test_local_source_is_captured_once_outside_payload(
 
 
 def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path) -> None:
-    source = GitResource.from_repository(
-        checkout, repository_url=str(checkout), requested_ref="main"
-    )
+    source = GitResource(str(checkout), "main", _commit(checkout))
     with Catalog(backend := ConanBackend(tmp_path / "home")) as catalog:
         record = catalog.publish_file(description(tmp_path, source=asdict(source)))
         assert record.source == source
@@ -172,7 +169,7 @@ def test_missing_content_and_record(packages: Catalog) -> None:
 def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
     packages: Catalog, checkout: Path
 ) -> None:
-    source = GitResource.from_repository(checkout, repository_url=str(checkout))
+    source = GitResource(str(checkout), "HEAD", _commit(checkout))
     record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
     packages.publish(record)
     shutil.rmtree(checkout)
@@ -202,3 +199,8 @@ def test_publishing_pinned_scm_does_not_contact_git(
         package = catalog.materialize(record.ref)
         assert package.source_path is None
         assert not (package.path / "source").exists()
+
+
+def _commit(checkout: Path) -> str:
+    with Repo(checkout) as repo:
+        return repo.head().decode()

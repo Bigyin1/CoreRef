@@ -155,10 +155,6 @@ Home не копируется, cache save/restore не используется
 тот же `catalog.publish_file()`, без написания рецепта Conan. Ручные рецепты
 не являются поддерживаемым входным форматом.
 
-`MemoryBackend` поддерживает тот же JSON и хранит файлы во временном каталоге
-до `close()`. Для локального Git source он фиксирует HEAD и локальный путь через
-`GitResource`; проверка чистоты и выбор remote URL относятся к Conan-адаптеру.
-Git-операции Memory требуют extra `git` и выполняются только при `with_sources=True`.
-Публикация SCM не сохраняет снимок исходников. `materialize()` для записи без файлов
-и source вызывает `MaterializationError`.
-Conan lockfiles не эмулируются в Memory: явный запрос вызывает `InvalidPublication`.
+GitResource — описание SCM без собственной реализации Git-кэша. Сгенерированный
+source() получает исходники штатным conan.tools.scm.Git. Для записи без файлов
+и source materialize() вызывает MaterializationError.

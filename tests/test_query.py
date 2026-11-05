@@ -26,11 +26,11 @@ def test_criteria_are_detached() -> None:
         SearchQuery(name="rtl", version="v1"),
         SearchQuery(kind="release"),
         SearchQuery(kind="run"),
-        SearchQuery(namespace="demo/ip"),
+        SearchQuery(namespace="demo-ip"),
         SearchQuery(namespace="flow"),
         SearchQuery(namespace="missing"),
         SearchQuery(namespace=""),
-        SearchQuery(name="rtl", version="v1", kind="release", namespace="demo/ip"),
+        SearchQuery(name="rtl", version="v1", kind="release", namespace="demo-ip"),
         SearchQuery(name="rtl", namespace="flow"),
         SearchQuery(name="rtl", version="v1", kind="run"),
         SearchQuery(kind="unknown"),
@@ -45,16 +45,16 @@ def test_query_matching_and_backend_search_agree(catalog: Catalog, query: Search
     for record in records:
         catalog.publish(record)
     expected = tuple(record for record in records if query.matches(record))
-    assert catalog.search(query) == tuple(sorted(expected, key=lambda record: record.ref.identity))
+    assert catalog.search(query) == tuple(sorted(expected, key=lambda record: record.ref))
 
 
 def test_payload_cannot_override_identity(catalog: Catalog) -> None:
     record = Record(
-        Ref("source", "1", "release", "demo"),
+        Ref("source", "1.0", "release", "demo"),
         {"name": "wrong", "version": "wrong", "kind": "payload-kind", "namespace": "payload-ns"},
     )
     catalog.publish(record)
-    assert catalog.search(SearchQuery(name="source", version="1")) == (record,)
+    assert catalog.search(SearchQuery(name="source", version="1.0")) == (record,)
     assert not catalog.search(SearchQuery(name="wrong"))
     assert catalog.search(SearchQuery(kind="release")) == (record,)
     assert not catalog.search(SearchQuery(kind="payload-kind"))
@@ -64,16 +64,16 @@ def test_payload_cannot_override_identity(catalog: Catalog) -> None:
 
 def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
     records = tuple(
-        Record(Ref("core", "1", kind, namespace))
+        Record(Ref("core", "1.0", kind, namespace))
         for namespace in ("rtl", "physical")
         for kind in ("ip", "soc")
     )
-    root = Record(Ref("top", "1", "release", "demo"))
+    root = Record(Ref("top", "1.0", "release", "demo"))
     for record in records:
         catalog.publish(record)
     catalog.publish(root, dependencies=tuple(record.ref for record in records))
     assert len(catalog.graph.dependency_closure(root.ref).records) == 5
-    assert {record.ref for record in catalog.search(SearchQuery(name="core", version="1"))} == {
+    assert {record.ref for record in catalog.search(SearchQuery(name="core", version="1.0"))} == {
         record.ref for record in records
     }
     assert len(catalog.search(SearchQuery(namespace="rtl"))) == 2
@@ -83,15 +83,15 @@ def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
 
 
 def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) -> None:
-    refs = tuple(Ref("same", "1", kind, "demo") for kind in ("release", "run", "report"))
+    refs = tuple(Ref("same", "1.0", kind, "demo") for kind in ("release", "run", "report"))
     records = tuple(Record(ref) for ref in refs)
-    root = Record(Ref("top", "1", "package", "demo"))
+    root = Record(Ref("top", "1.0", "package", "demo"))
     for record in records:
         catalog.publish(record)
     catalog.publish(root, dependencies=refs)
     assert len(set(refs)) == len(refs)
-    assert len({ref.family for ref in refs}) == len(refs)
-    assert len(catalog.search(SearchQuery(name="same", version="1"))) == 3
+    assert len({ref.package_name for ref in refs}) == len(refs)
+    assert len(catalog.search(SearchQuery(name="same", version="1.0"))) == 3
     assert len(catalog.graph.dependency_closure(root.ref).records) == 4
     for record in records:
         assert catalog.search(SearchQuery(kind=record.ref.kind)) == (record,)

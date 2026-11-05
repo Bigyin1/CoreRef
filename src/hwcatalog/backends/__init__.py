@@ -1,1 +1,1 @@
-"""Bundled Conan and in-memory adapters; import a backend explicitly."""
+"""Conan adapter; import hwcatalog.backends.conan explicitly."""

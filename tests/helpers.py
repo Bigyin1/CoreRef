@@ -32,7 +32,7 @@ def release(
 ) -> Record:
     return normalize_record(
         Record(
-            Ref(name, version, "release", f"{team}/{project_type}"),
+            Ref(name, version, "release", f"{team}-{project_type}"),
             {
                 "resources": [
                     {
@@ -53,7 +53,7 @@ def release(
 def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS) -> Record:
     return normalize_record(
         Record(
-            Ref(name, "1", "run", "flow"),
+            Ref(name, "1.0", "run", "flow"),
             {"type_id": type_id, "purpose": "synthesis", "details": {"array": [3, 1, 2]}},
         )
     )

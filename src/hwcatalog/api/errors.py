@@ -33,10 +33,6 @@ class InvalidPackage(CatalogError):
     """A stored Conan recipe violates the catalog package format."""
 
 
-class GitResolutionError(CatalogError):
-    """A local Git reference could not be resolved to a commit."""
-
-
 class MaterializationError(CatalogError):
     """A resource could not be made available locally or its cache is invalid."""
 
@@ -45,7 +41,6 @@ __all__ = [
     "BackendUnavailable",
     "CatalogError",
     "DependencyCycle",
-    "GitResolutionError",
     "IdentityConflict",
     "InvalidPackage",
     "InvalidPublication",

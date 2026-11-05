@@ -32,8 +32,8 @@ def to_conan_reference(ref: Ref) -> str:
         raise InvalidPublication(
             "Conan coordinates require lowercase tokens without dots or slashes"
         )
-    name = f"{ref.namespace}.{ref.name}.{ref.kind}"
-    value = f"{name}/{ref.version}"
+    name = ref.package_name
+    value = str(ref)
     if (
         len(name) > _MAX_NAME_LENGTH
         or len(value) > _MAX_REFERENCE_LENGTH
@@ -238,4 +238,4 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata]
         InvalidPublication,
         yaml.YAMLError,
     ) as exc:
-        raise InvalidPackage(f"Invalid catalog recipe for {expected.identity}: {exc}") from exc
+        raise InvalidPackage(f"Invalid catalog recipe for {expected}: {exc}") from exc

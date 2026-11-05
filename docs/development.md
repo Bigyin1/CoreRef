@@ -7,7 +7,7 @@
 |---|---|
 | make install | Установка окружения |
 | make check | Ruff, форматирование, строгий mypy |
-| make unit | Модели, Memory и настоящий локальный Conan |
+| make unit | Модели и настоящий локальный Conan |
 | make integration | Временный локальный Conan server |
 | make build | Wheel и sdist |
 

@@ -291,11 +291,6 @@ dependencies = [
     { name = "pyyaml" },
 ]
 
-[package.optional-dependencies]
-git = [
-    { name = "dulwich" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "conan-server" },
@@ -310,13 +305,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "conan", specifier = ">=2.34,<2.35" },
-    { name = "dulwich", marker = "extra == 'git'", specifier = ">=1.2.18,<2" },
     { name = "frozendict", specifier = ">=2.4.7,<3" },
     { name = "networkx", specifier = ">=3.7,<4" },
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "pyyaml", specifier = ">=6,<7" },
 ]
-provides-extras = ["git"]
 
 [package.metadata.requires-dev]
 dev = [

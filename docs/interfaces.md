@@ -1,7 +1,7 @@
 # Публичный API
 
 Catalog владеет бэкендом и поддерживает контекстный менеджер. Модели находятся
-в hwcatalog.api.models, адаптеры — hwcatalog.backends.conan и hwcatalog.backends.memory.
+в hwcatalog.api.models, адаптер — hwcatalog.backends.conan.
 
 ## Записи
 
@@ -9,7 +9,7 @@ Catalog владеет бэкендом и поддерживает контек
 |---|---|
 | get(ref) | Record; NotFound при отсутствии |
 | get_many(refs) | tuple[Record, ...], сохраняет порядок и дубликаты; отсутствие любого Ref — ошибка |
-| search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по identity |
+| search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по Ref |
 | publish(record, *, dependencies=(), lockfile=None) | Публикует один новый пакет и возвращает Record; dependencies — tuple[Ref, ...] |
 | publish_file(path, *, lockfile=None) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
 | create_lockfile(refs, path) | Создаёт или обновляет lockfile проекта штатными средствами Conan; возвращает Path |
@@ -24,7 +24,7 @@ Publish принимает один Record. Все зависимости дол
 Find_dependents сначала фильтрует кандидатов по SearchQuery, затем проверяет их
 зависимости. Промежуточные узлы могут быть любыми. При transitive=False учитывается
 только прямая зависимость. Сам ref исключается, результаты уникальны и упорядочены
-по identity. Пустой candidates разрешает проверку всего каталога.
+по Ref. Пустой candidates разрешает проверку всего каталога.
 
 ## Граф
 
@@ -38,15 +38,13 @@ Find_dependents сначала фильтрует кандидатов по Sear
 Filters применяются к найденным записям. Отсутствующий опубликованный корень
 в `dependencies`, `consumers` и `dependency_closure` вызывает NotFound.
 Обход Conan использует явно переданный lockfile проекта. Новые пакеты не содержат
-собственного lockfile. Memory возвращает точный сохранённый граф и отклоняет явную
-передачу Conan lockfile через `InvalidPublication`. Разрешение версий hwcatalog из API удалено.
+собственного lockfile. Разрешение версий выполняет Conan.
 
 `resolve_local` принимает Record локального проекта и tuple[Ref, ...] его прямых
 зависимостей. Conan получает один общий consumer-граф из временного рецепта через
 `graph info`, без `export`, `export-pkg` или `upload`. Данные локального корня
 имеют приоритет над ранее опубликованным пакетом с таким Ref. Все зависимости
-должны существовать. Циклы и несовместимые требования отклоняются Conan;
-Memory воспроизводит ограничения одного локального графа для тестирования.
+должны существовать. Циклы и несовместимые требования отклоняются Conan.
 
 Ранее унаследованные RelationKind, Direction, LineageDirection, Relation и Neighbor
 удалены. Публикация принимает ссылки на зависимости без повторения исходного Ref;
@@ -71,8 +69,12 @@ JSONSerializable — Protocol с методом to_json() -> str; наследо
 
 ## Внешние ресурсы
 
-GitResource.from_repository() фиксирует commit локального репозитория.
-GitResource.materialize(cache_dir) подготавливает checkout точного commit;
-для этого нужен extra git. LocatedResource.materialize() проверяет абсолютный путь.
-Оба возвращают MaterializedResource с полем path. Доступ к файловым ресурсам
-и координация совместного Git-кэша остаются у приложения.
+GitResource хранит SCM-координаты без клонирования или собственного кэша.
+Исходники получает `catalog.materialize(ref, with_sources=True)` через штатный
+`source()` сгенерированного Conan-рецепта. LocatedResource.materialize()
+проверяет внешний путь и возвращает MaterializedResource(path).
+
+Прямые dependencies, consumers и find_dependents(transitive=False) читают
+requirements канонических рецептов без graph info. Транзитивный поиск использует
+нативный граф Conan. При materialize один install разрешает и устанавливает граф;
+явный проектный lockfile дополняется корнем во временной копии командой lock add.
