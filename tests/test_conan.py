@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from examples.conan_config import configured_home
 from hwcatalog._internal.backends.conan_format import (
     from_conan_reference,
     to_conan_reference,
@@ -33,7 +34,7 @@ pytestmark = pytest.mark.conan
 
 @pytest.fixture
 def conan_backend(tmp_path: Path) -> ConanBackend:
-    return ConanBackend(tmp_path / "home")
+    return ConanBackend(configured_home(tmp_path / "home"))
 
 
 def record(kind: str = "rtl", version: str = "1.0", name: str = "cpu") -> Record:
@@ -211,7 +212,6 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
         "--lockfile-out",
         str(build / "conan.lock"),
         "--no-remote",
-        *cli.profile_args,
     )
     cli.run("export", str(build), "--no-remote")
     assert conan_backend.get_many((be.ref,))[0].ref == be.ref
@@ -406,7 +406,7 @@ def test_default_cache_uses_conan_home_and_stays_bound_to_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    home = tmp_path / "native-home"
+    home = configured_home(tmp_path / "native-home")
     monkeypatch.setenv("CONAN_HOME", str(home))
     backend = ConanBackend()
     assert backend._client.home == home.resolve()
@@ -423,6 +423,7 @@ def test_default_cache_uses_native_conanrc_resolution(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CONAN_HOME", raising=False)
+    configured_home(tmp_path / "configured-home")
     (tmp_path / ".conanrc").write_text("conan_home=./configured-home\n")
     backend = ConanBackend()
     assert backend._client.home == (tmp_path / "configured-home").resolve()

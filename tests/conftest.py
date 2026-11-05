@@ -10,13 +10,14 @@ from dulwich.objects import Blob, Commit, ObjectID, Tree
 from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
+from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.backends.conan import ConanBackend
 
 
 @pytest.fixture
 def catalog(tmp_path: Path) -> Iterator[Catalog]:
-    with Catalog(ConanBackend(tmp_path / "conan-home")) as catalog:
+    with Catalog(ConanBackend(configured_home(tmp_path / "conan-home"))) as catalog:
         yield catalog
 
 
@@ -57,3 +58,9 @@ def git_origin(checkout: Path, tmp_path: Path) -> Path:
         branch = branches[-1].removeprefix(b"refs/heads/")
         repo.refs[GitRef(b"refs/remotes/origin/" + branch)] = repo.head()
     return remote
+
+
+@pytest.fixture(autouse=True)
+def isolated_default_profiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CONAN_DEFAULT_PROFILE", raising=False)
+    monkeypatch.delenv("CONAN_DEFAULT_BUILD_PROFILE", raising=False)

@@ -13,6 +13,11 @@ JSON-ключи identity/family и отдельная JSON-сериализац�
 `namespace.name.kind/version`, например `soc1.cpu.lib-lef/4.0`.
 Тип представления задаётся полем Ref.kind; типизации рёбер нет.
 
+Conan должен быть настроен заранее: профили, remotes и аутентификация.
+Библиотека использует стандартные настройки Conan и не создаёт собственных профилей.
+При одном включённом remote он выбирается автоматически; при нескольких задаётся
+`remote="catalog"`. Без включённых remotes используется локальный cache.
+
 ```python
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.query import SearchQuery
@@ -57,7 +62,8 @@ with Catalog(ConanBackend()) as catalog:
 
 JSON описывает один пакет: `ref`, `payload`, `dependencies`, необязательный один
 `source` и карту `files`. Git-координаты фиксируются SCM-механизмом Conan и хранятся
-в `conandata.yml`. В Conan упаковываются обычные файлы; Git-код остаётся в GitLab.
+в `conandata.yml`. Git-код остаётся в GitLab. Новые рецепты не содержат
+`exports_sources`; обычные файлы артефактов проходят через `exports` и `package()`.
 Опция `with_sources=True` получает его штатным `source()` Conan и возвращает
 отдельный `package.source_path`. `LocatedResource` остаётся внешним путём. Пример полного описания — [в документации](docs/conan.md).
 

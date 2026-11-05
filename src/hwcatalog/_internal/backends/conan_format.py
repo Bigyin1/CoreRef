@@ -20,7 +20,7 @@ _TOKEN = re.compile(r"[a-z0-9_-]+\Z")
 _VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
-_RECIPE_FORMAT: Literal[4] = 4
+_RECIPE_FORMAT: Literal[5] = 5
 
 _RECIPE_ENV = Environment(
     loader=PackageLoader("hwcatalog._internal.backends"),
@@ -31,7 +31,6 @@ _RECIPE_ENV = Environment(
     keep_trailing_newline=True,
 )
 _RECIPE_ENV.filters["pyrepr"] = repr
-_RECIPE_TEMPLATE = _RECIPE_ENV.get_template("conanfile.py.j2")
 
 
 def to_conan_reference(ref: Ref) -> str:
@@ -80,14 +79,15 @@ def search_pattern(query: SearchQuery) -> str | None:
 
 class RecipeMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    format: Literal[1, 2, 3, 4] = 1
+    format: Literal[1, 2, 3, 4, 5] = 1
     has_source: bool = False
     requires: tuple[str, ...] = ()
 
 
 def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, format_version: int = 1) -> str:
     name, version = to_conan_reference(ref).split("/")
-    return _RECIPE_TEMPLATE.render(
+    template = "conanfile.py.j2" if format_version >= _RECIPE_FORMAT else "legacy_conanfile.py.j2"
+    return _RECIPE_ENV.get_template(template).render(
         name=name, version=version, requirements=requirements, format_version=format_version
     )
 

@@ -4,7 +4,6 @@ Conan ships no typing metadata. Untyped imports and runtime casts are confined
 to this adapter and the protocols describing its actual return objects.
 """
 
-import platform
 from collections.abc import Mapping
 from pathlib import Path
 from threading import RLock
@@ -29,8 +28,17 @@ class _Commands(Protocol):
     def run(self, cmd: list[str], raise_on_errors: bool) -> object: ...
 
 
+class _Remote(Protocol):
+    name: str
+
+
+class _Remotes(Protocol):
+    def list(self) -> list[_Remote]: ...
+
+
 class _API(Protocol):
     command: _Commands
+    remotes: _Remotes
 
     @property
     def home_folder(self) -> str: ...
@@ -46,6 +54,20 @@ def _resolve_home(home: Path | None) -> Path:
         raise BackendUnavailable(f"Conan could not resolve its default home: {error}") from error
 
 
+def _configured_remote(home: Path, requested: str | None) -> str | None:
+    if requested is not None:
+        return requested
+    try:
+        with _API_LOCK:
+            remotes = cast(_API, ConanAPI(cache_folder=str(home))).remotes.list()
+    except (ConanException, OSError) as exc:
+        raise BackendUnavailable(f"Conan could not read configured remotes: {exc}") from exc
+    if len(remotes) > 1:
+        names = ", ".join(remote.name for remote in remotes)
+        raise BackendUnavailable(f"Multiple enabled Conan remotes ({names}); specify remote=...")
+    return remotes[0].name if remotes else None
+
+
 class RecipeRevisions(BaseModel):
     revisions: dict[str, object] = Field(default_factory=dict)
 
@@ -57,22 +79,12 @@ class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
 class ConanClient:
     def __init__(self, home: Path | None, remote: str | None, timeout: float) -> None:
         self.home = _resolve_home(home)
-        self.home.mkdir(parents=True, exist_ok=True)
-        self.remote = remote
+        self.remote = _configured_remote(self.home, remote)
         self.timeout = timeout
-        self.profile = self.home / "hwcatalog-profile"
-        self.profile.write_text("[settings]\n[options]\n[conf]\n")
-        self.build_profile = self.home / "hwcatalog-build-profile"
-        operating_system = {"Darwin": "Macos"}.get(platform.system(), platform.system())
-        self.build_profile.write_text(f"[settings]\nos={operating_system}\n")
 
     @property
     def source_args(self) -> tuple[str, ...]:
         return ("--remote", self.remote) if self.remote else ("--no-remote",)
-
-    @property
-    def profile_args(self) -> tuple[str, ...]:
-        return ("--profile:host", str(self.profile), "--profile:build", str(self.build_profile))
 
     def run(self, *arguments: str) -> object:
         """Run a command without spawning Conan or changing environment/cwd."""
@@ -142,7 +154,6 @@ class ConanClient:
                 str(directory / "conanfile.py"),
                 "--lockfile",
                 str(lockfile) if lockfile is not None else "",
-                *self.profile_args,
                 *self.source_args,
             ),
         )
@@ -157,7 +168,6 @@ class ConanClient:
             str(seed) if seed else "",
             "--lockfile-out",
             str(directory / "conan.lock"),
-            *self.profile_args,
             *self.source_args,
         )
 
@@ -172,7 +182,7 @@ class ConanClient:
         arguments.extend(("--lockfile", str(seed) if seed is not None else ""))
         arguments.extend(("--lockfile-out", str(output)))
         if references:
-            arguments.extend(("--lockfile-clean", *self.profile_args, *self.source_args))
+            arguments.extend(("--lockfile-clean", *self.source_args))
         self.run(*arguments)
 
     def export(self, directory: Path) -> str:
@@ -189,7 +199,6 @@ class ConanClient:
                 "--skip-binaries",
                 "--lockfile",
                 str(lockfile) if lockfile is not None else "",
-                *self.profile_args,
                 *self.source_args,
             ),
         )
@@ -226,7 +235,6 @@ class ConanClient:
                 *source_args,
                 "--output-folder",
                 str(output),
-                *self.profile_args,
                 *self.source_args,
             ),
         )

@@ -44,6 +44,12 @@ def test_public_models_import_independently_of_conan() -> None:
         from hwcatalog.backends.conan import ConanBackend
 
         home = TemporaryDirectory()
+        from conan.api.conan_api import ConanAPI
+        native = ConanAPI(cache_folder=home.name)
+        native.remotes.disable("*")
+        profiles = Path(home.name) / "profiles"
+        profiles.mkdir(exist_ok=True)
+        (profiles / "default").write_text("[settings]\\nos=Linux\\n")
         backend: protocols.Backend = ConanBackend(Path(home.name))
         manifest: dict[str, types.JSON] = {"views": ["rtl", "timing"]}
         record = records.Record(

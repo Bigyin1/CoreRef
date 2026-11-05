@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import DependencyCycle, InvalidPackage, NotFound, VersionConflict
 from hwcatalog.api.models.graph import Dependency
@@ -15,7 +16,7 @@ from hwcatalog.backends.conan import ConanBackend
 
 @pytest.fixture
 def local_catalog(tmp_path: Path) -> Iterator[Catalog]:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     with Catalog(backend) as catalog:
         yield catalog
 
@@ -96,7 +97,7 @@ def test_local_graph_rejects_cycles_and_missing_dependencies(local_catalog: Cata
 def test_conan_resolves_one_consumer_without_exporting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     with Catalog(backend) as catalog:
         dependencies = tuple(record(name) for name in ("left", "right"))
         for item in dependencies:
@@ -119,7 +120,7 @@ def test_conan_resolves_one_consumer_without_exporting(
 
 
 def test_conan_local_consumer_uses_opaque_project_lockfile(tmp_path: Path) -> None:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     with Catalog(backend) as catalog:
         leaf, child, root = (record(name) for name in ("leaf", "child", "top"))
         catalog.publish(leaf)

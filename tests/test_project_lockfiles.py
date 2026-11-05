@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from examples.conan_config import configured_home
 from hwcatalog._internal.backends.conan_format import write_recipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import BackendUnavailable, InvalidPackage
@@ -17,7 +18,7 @@ from tests.helpers import resolve_published
 
 
 def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     dependency = Record(Ref("cpu", "1.0", "rtl", "soc"))
     result = Ref("cpu", "4.0", "lib-lef", "soc")
     artifact = tmp_path / "cpu.lib"
@@ -62,7 +63,7 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
 def test_conan_validates_the_supplied_project_lockfile(
     tmp_path: Path, damage: str, exception: type[Exception]
 ) -> None:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"))
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc"))
     with Catalog(backend) as catalog:
@@ -89,7 +90,7 @@ def test_conan_validates_the_supplied_project_lockfile(
 
 
 def test_empty_project_lockfile(tmp_path: Path) -> None:
-    with Catalog(ConanBackend(tmp_path / "cache")) as catalog:
+    with Catalog(ConanBackend(configured_home(tmp_path / "cache"))) as catalog:
         lockfile = catalog.create_lockfile((), tmp_path / "empty/conan.lock")
         empty_lock = lockfile.read_bytes()
         root = Record(Ref("root", "1.0", "rtl", "soc"))
@@ -104,7 +105,7 @@ def test_empty_project_lockfile(tmp_path: Path) -> None:
 def test_legacy_recipe_with_embedded_lockfile_remains_readable(
     tmp_path: Path, format_version: int
 ) -> None:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     record = Record(Ref("cpu", "1.0", "rtl", "soc"))
     recipe = tmp_path / "legacy"
     write_recipe(recipe, record)

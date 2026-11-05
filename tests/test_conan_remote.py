@@ -14,8 +14,11 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 import pytest
+from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
+from conan.cli.cli import Cli  # type: ignore[import-untyped]
 
-from hwcatalog._internal.backends.conan_format import write_recipe
+from examples.conan_config import configured_home
+from hwcatalog._internal.backends.conan_format import read_recipe, write_recipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
     BackendUnavailable,
@@ -59,9 +62,14 @@ def remote_backend(tmp_path: Path) -> Iterator[ConanBackend]:
         )
         try:
             _wait_for_server(f"http://127.0.0.1:{port}/v2/ping", process, log.name)
-            backend = ConanBackend(tmp_path / "publisher", remote="catalog")
-            backend._client.run("remote", "add", "catalog", f"http://127.0.0.1:{port}")
-            backend._client.run("remote", "login", "catalog", "test", "--password", password)
+            home = configured_home(tmp_path / "publisher")
+            api = ConanAPI(cache_folder=str(home))
+            Cli(api).add_commands()
+            api.command.run(["remote", "add", "catalog", f"http://127.0.0.1:{port}", "-vquiet"])
+            api.command.run(
+                ["remote", "login", "catalog", "test", "--password", password, "-vquiet"]
+            )
+            backend = ConanBackend(home)
             yield backend
             backend.close()
         finally:
@@ -118,7 +126,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     home = tmp_path / "reader"
     home.mkdir()
     shutil.copyfile(remote_backend._client.home / "remotes.json", home / "remotes.json")
-    with Catalog(ConanBackend(home, remote="catalog")) as reader:
+    with Catalog(ConanBackend(configured_home(home), remote="catalog")) as reader:
         assert reader.get(be.ref).payload == {"source": "cpu.lib"}
         assert resolve_published(reader, be.ref) == original_graph
         new_rtl = Record(Ref("cpu", "2.0", "rtl", "soc"))
@@ -147,8 +155,8 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
         patch.setattr(remote_backend._client, "upload", reject_upload)
         with pytest.raises(BackendUnavailable, match="Simulated upload failure"):
             catalog.publish(record)
-    with Catalog(ConanBackend(remote_backend._client.home)) as cached:
-        assert cached.get(record.ref) == record
+    directory = remote_backend._client.cache_path(str(record.ref), download=False)
+    assert read_recipe(directory, record.ref)[0] == record
     assert catalog.search() == ()
 
     # A prepared local package must not block another attempt to publish to the server.
@@ -184,7 +192,7 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     home = tmp_path / "fresh-reader"
     home.mkdir()
     shutil.copyfile(remote_backend._client.home / "remotes.json", home / "remotes.json")
-    with Catalog(ConanBackend(home, remote="catalog")) as reader:
+    with Catalog(ConanBackend(configured_home(home), remote="catalog")) as reader:
         assert reader.get(published.ref) == published
         installed = reader.materialize(published.ref)
         assert installed.source_path is None
@@ -204,3 +212,16 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
         assert fetched.source_path is not None
         assert (fetched.source_path / "cpu.sv").read_text() == "module cpu; endmodule\n"
         assert not fetched.source_path.is_relative_to(fetched.path)
+
+
+def test_one_configured_remote_is_used_automatically(
+    remote_backend: ConanBackend, tmp_path: Path
+) -> None:
+    record = Record(Ref("automatic", "1.0", "rtl", "soc"))
+    with Catalog(remote_backend) as publisher:
+        assert remote_backend._client.remote == "catalog"
+        publisher.publish(record)
+        home = configured_home(tmp_path / "automatic-reader")
+        shutil.copyfile(remote_backend._client.home / "remotes.json", home / "remotes.json")
+        with Catalog(ConanBackend(home)) as reader:
+            assert reader.get(record.ref) == record

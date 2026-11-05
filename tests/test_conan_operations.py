@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
@@ -16,7 +17,7 @@ from tests.test_packages import description
 def test_install_resolves_once_and_preserves_project_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked: bool
 ) -> None:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     with Catalog(backend) as catalog:
         rtl = catalog.publish(Record(Ref("cpu", "1.0", "rtl", "soc")))
         artifact = tmp_path / "cpu.lib"
@@ -46,7 +47,7 @@ def test_install_resolves_once_and_preserves_project_lock(
 def test_direct_queries_do_not_resolve_dependency_graphs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = ConanBackend(tmp_path / "cache")
+    backend = ConanBackend(configured_home(tmp_path / "cache"))
     with Catalog(backend) as catalog:
         rtl = catalog.publish(Record(Ref("cpu", "1.0", "rtl", "soc")))
         macro = catalog.publish(

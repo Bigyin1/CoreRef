@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from dulwich.repo import Repo
 
+from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
     BackendUnavailable,
@@ -28,7 +29,7 @@ from tests.helpers import resolve_published
 
 @pytest.fixture
 def packages(tmp_path: Path) -> Iterator[Catalog]:
-    backend = ConanBackend(tmp_path / "home")
+    backend = ConanBackend(configured_home(tmp_path / "home"))
     with Catalog(backend) as catalog:
         yield catalog
 
@@ -92,10 +93,11 @@ def test_local_source_is_captured_once_outside_payload(
 
 def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path) -> None:
     source = GitResource(str(checkout), "main", _commit(checkout))
-    with Catalog(backend := ConanBackend(tmp_path / "home")) as catalog:
+    with Catalog(backend := ConanBackend(configured_home(tmp_path / "home"))) as catalog:
         record = catalog.publish_file(description(tmp_path, source=asdict(source)))
         assert record.source == source
         _, folder = backend._locate(record.ref)
+        assert "exports_sources" not in (folder / "conanfile.py").read_text()
         assert "source" not in json.loads((folder / "record.json").read_text())
         assert "scm" in (folder / "conandata.yml").read_text()
         assert str(checkout) not in (folder / "conanfile.py").read_text()
@@ -111,7 +113,7 @@ def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path)
 
 def test_dirty_source_fails_before_publication(tmp_path: Path, checkout: Path) -> None:
     (checkout / "cpu.sv").write_text("uncommitted")
-    with Catalog(ConanBackend(tmp_path / "home")) as catalog:
+    with Catalog(ConanBackend(configured_home(tmp_path / "home"))) as catalog:
         with pytest.raises(BackendUnavailable, match="dirty"):
             catalog.publish_file(description(tmp_path, source={"path": "checkout"}))
         assert not catalog.search()
@@ -194,7 +196,7 @@ def test_publishing_pinned_scm_does_not_contact_git(
     monkeypatch.setattr(subprocess, "Popen", reject)
     source = GitResource("https://gitlab.example.invalid/rtl/cpu.git", "v1", "a" * 40)
     record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
-    with Catalog(ConanBackend(tmp_path / "home")) as catalog:
+    with Catalog(ConanBackend(configured_home(tmp_path / "home"))) as catalog:
         catalog.publish(record)
         assert catalog.get(record.ref) == record
         package = catalog.materialize(record.ref)
