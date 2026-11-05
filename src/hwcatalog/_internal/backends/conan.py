@@ -68,6 +68,27 @@ class ConanGraph(CatalogGraph):
         with self.backend._read():
             return self.backend._closure(normalize_ref(ref), lockfile=lockfile)
 
+    def resolve_local(
+        self,
+        record: Record,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+        lockfile: Path | None = None,
+    ) -> GraphResult:
+        """Resolve a temporary consumer recipe; leave the local root unpublished."""
+        record, dependencies = normalize_publication(record, dependencies)
+        with self.backend._read():
+            requirements = tuple(self.backend._requirement(ref) for ref in dependencies)
+            with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
+                directory = Path(temporary)
+                write_recipe(directory, record, requirements)
+                graph = self.backend._client.graph(directory, lockfile=lockfile)
+                records = self.backend._graph_records(graph, record)
+                return GraphResult(
+                    tuple(sorted(records.values(), key=lambda item: item.ref.identity)),
+                    _graph_dependencies(graph, records),
+                )
+
     def find_dependents(
         self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
     ) -> tuple[Record, ...]:
@@ -160,11 +181,14 @@ class ConanBackend:
         _, directory = self._locate(ref)
         root, _ = read_recipe(directory, ref)
         graph = self._client.graph(directory, lockfile=lockfile)
+        return graph, self._graph_records(graph, root)
+
+    def _graph_records(self, graph: NativeGraph, root: Record) -> dict[Ref, Record]:
         root_package = graph.root.conanfile
-        if _package_ref(root_package) != ref:
+        if _package_ref(root_package) != root.ref:
             raise InvalidPackage("Conan graph root differs from the requested reference")
         _validate_package(root_package)
-        records = {ref: root}
+        records = {root.ref: root}
         for package in root_package.dependencies.host.topological_sort.values():
             _validate_package(package)
             pinned = package.ref.repr_notime()
@@ -173,7 +197,7 @@ class ConanBackend:
             if published != pinned:
                 raise IdentityConflict(f"Locked revision differs from published identity: {pinned}")
             records[package_ref] = read_recipe(folder, package_ref)[0]
-        return graph, records
+        return records
 
     def publish(
         self,

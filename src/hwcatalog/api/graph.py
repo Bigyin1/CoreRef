@@ -7,8 +7,8 @@ from pathlib import Path
 import networkx as nx
 
 from .._internal.graph import GraphReader
-from .._internal.validation import normalize_query, normalize_ref
-from .errors import InvalidPublication
+from .._internal.validation import normalize_publication, normalize_query, normalize_ref
+from .errors import DependencyCycle, InvalidPublication, VersionConflict
 from .models.graph import Dependency, GraphResult
 from .models.query import SearchQuery
 from .models.records import Record, Ref
@@ -39,6 +39,39 @@ class CatalogGraph:
         ref = normalize_ref(ref)
         with self._read() as reader:
             return self._traverse(reader, ref)
+
+    def resolve_local(
+        self,
+        record: Record,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+        lockfile: Path | None = None,
+    ) -> GraphResult:
+        """Resolve a local root and published dependencies without publishing the root.
+
+        Conan resolves one consumer graph. Memory emulates its cycle and version
+        constraints; local root data takes precedence over any published record.
+        """
+        if lockfile is not None:
+            raise InvalidPublication("Project lockfiles require a Conan backend")
+        record, dependencies = normalize_publication(record, dependencies)
+        records = {record.ref: record}
+        edges = {Dependency(record.ref, target) for target in dependencies}
+        with self._read() as reader:
+            for target in dependencies:
+                closure = self._traverse(reader, target)
+                records.update((item.ref, item) for item in closure.records)
+                edges.update(closure.dependencies)
+        if any(edge.target == record.ref for edge in edges):
+            raise DependencyCycle("Local project has a cyclic dependency")
+        families: dict[str, Ref] = {}
+        for ref in records:
+            if families.setdefault(ref.family, ref) != ref:
+                raise VersionConflict(f"Multiple versions for {ref.family}")
+        return GraphResult(
+            tuple(sorted(records.values(), key=lambda item: item.ref.identity)),
+            tuple(sorted(edges, key=lambda edge: edge.to_json())),
+        )
 
     def find_dependents(
         self, ref: Ref, *, candidates: SearchQuery, transitive: bool = True

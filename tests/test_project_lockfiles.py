@@ -104,6 +104,7 @@ def test_empty_project_and_memory_lockfile_contract(tmp_path: Path) -> None:
             lambda: memory.publish_file(tmp_path / "unused.json", lockfile=lockfile),
             lambda: memory.materialize(root.ref, lockfile=lockfile),
             lambda: memory.graph.dependency_closure(root.ref, lockfile=lockfile),
+            lambda: memory.graph.resolve_local(root, lockfile=lockfile),
         )
         for operation in operations:
             with pytest.raises(InvalidPublication, match="require a Conan backend"):

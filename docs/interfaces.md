@@ -33,11 +33,20 @@ Find_dependents сначала фильтрует кандидатов по Sear
 | dependencies(ref, filters=SearchQuery()) | Непосредственные зависимости как tuple[Record, ...] |
 | consumers(ref, filters=SearchQuery()) | Непосредственные потребители как tuple[Record, ...] |
 | dependency_closure(ref, *, lockfile=None) | GraphResult с точным графом, включая корень |
+| resolve_local(record, *, dependencies=(), lockfile=None) | GraphResult для локального корня и опубликованных зависимостей; корень не публикуется |
 
-Filters применяются к найденным записям. Отсутствующий корень вызывает NotFound.
+Filters применяются к найденным записям. Отсутствующий опубликованный корень
+в `dependencies`, `consumers` и `dependency_closure` вызывает NotFound.
 Обход Conan использует явно переданный lockfile проекта. Новые пакеты не содержат
 собственного lockfile. Memory возвращает точный сохранённый граф и отклоняет явную
 передачу Conan lockfile через `InvalidPublication`. Разрешение версий hwcatalog из API удалено.
+
+`resolve_local` принимает Record локального проекта и tuple[Ref, ...] его прямых
+зависимостей. Conan получает один общий consumer-граф из временного рецепта через
+`graph info`, без `export`, `export-pkg` или `upload`. Данные локального корня
+имеют приоритет над ранее опубликованным пакетом с таким Ref. Все зависимости
+должны существовать. Циклы и несовместимые требования отклоняются Conan;
+Memory воспроизводит ограничения одного локального графа для тестирования.
 
 Ранее унаследованные RelationKind, Direction, LineageDirection, Relation и Neighbor
 удалены. Публикация принимает ссылки на зависимости без повторения исходного Ref;
