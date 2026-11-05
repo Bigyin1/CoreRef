@@ -11,12 +11,11 @@ from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, InvalidPackage
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import ConanBackend
 from tests.helpers import resolve_published
 
 
 def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
-    backend = ConanBackend(configured_home(tmp_path / "cache"))
+    connection = Catalog(configured_home(tmp_path / "cache"))
     dependency = Record(Ref("cpu", "1.0", "rtl", "soc"))
     result = Ref("cpu", "4.0", "lib-lef", "soc")
     artifact = tmp_path / "cpu.lib"
@@ -31,13 +30,13 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
             }
         )
     )
-    with Catalog(backend) as catalog:
+    with connection as catalog:
         catalog.publish(dependency)
         lockfile = catalog.create_lockfile((dependency.ref,), tmp_path / "project/conan.lock")
         original_lock = lockfile.read_bytes()
         record = catalog.publish_file(description, lockfile=lockfile)
         assert record.files == ("cpu.lib",)
-        _, recipe = backend._locate(result)
+        _, recipe = connection._locate(result)
         assert not (recipe / "conan.lock").exists()
         assert resolve_published(catalog, result, lockfile=lockfile).dependencies == (
             Dependency(result, dependency.ref),
@@ -61,17 +60,17 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
 def test_conan_validates_the_supplied_project_lockfile(
     tmp_path: Path, damage: str, exception: type[Exception]
 ) -> None:
-    backend = ConanBackend(configured_home(tmp_path / "cache"))
+    connection = Catalog(configured_home(tmp_path / "cache"))
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"))
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc"))
-    with Catalog(backend) as catalog:
+    with connection as catalog:
         catalog.publish(rtl)
         catalog.publish(macro, dependencies=(rtl.ref,))
         lockfile = catalog.create_lockfile((rtl.ref,), tmp_path / "project/conan.lock")
         if damage == "missing":
             lockfile.unlink()
         elif damage == "incomplete":
-            backend._client.run(
+            connection._client.run(
                 "lock",
                 "remove",
                 "--requires=soc.cpu.rtl/*",
@@ -88,7 +87,7 @@ def test_conan_validates_the_supplied_project_lockfile(
 
 
 def test_empty_project_lockfile(tmp_path: Path) -> None:
-    with Catalog(ConanBackend(configured_home(tmp_path / "cache"))) as catalog:
+    with Catalog(configured_home(tmp_path / "cache")) as catalog:
         lockfile = catalog.create_lockfile((), tmp_path / "empty/conan.lock")
         empty_lock = lockfile.read_bytes()
         root = Record(Ref("root", "1.0", "rtl", "soc"))

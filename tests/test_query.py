@@ -40,7 +40,7 @@ def test_criteria_are_detached() -> None:
         SearchQuery(name="' OR true //"),
     ],
 )
-def test_query_matching_and_backend_search_agree(catalog: Catalog, query: SearchQuery) -> None:
+def test_query_matching_and_catalog_search_agree(catalog: Catalog, query: SearchQuery) -> None:
     records = (release("rtl"), run("synthesis"))
     for record in records:
         catalog.publish(record)

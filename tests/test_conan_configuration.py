@@ -10,7 +10,6 @@ from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import ConanBackend
 
 
 class _Profile(Protocol):
@@ -29,8 +28,8 @@ def test_configured_profile_defaults_are_used_without_rewriting(tmp_path: Path) 
         "core:default_profile=project-host\ncore:default_build_profile=project-build\n"
     )
     before = {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
-    with Catalog(backend := ConanBackend(home)) as catalog:
-        profiles = cast(Mapping[str, _Profile], backend._client.run("profile", "show"))
+    with (connection := Catalog(str(home))) as catalog:
+        profiles = cast(Mapping[str, _Profile], connection._client.run("profile", "show"))
         assert profiles["host"].settings["build_type"] == "Debug"
         assert profiles["build"].settings["build_type"] == "Release"
         root = Record(Ref("cpu", "1.0", "rtl", "soc"))
@@ -48,7 +47,7 @@ def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path) -> None:
     home = configured_home(tmp_path / "cache")
     (home / "profiles/default").unlink()
     with (
-        Catalog(ConanBackend(home)) as catalog,
+        Catalog(home) as catalog,
         pytest.raises(CatalogError, match="profile"),
     ):
         catalog.resolve_local(Record(Ref("cpu", "1.0", "rtl", "soc")))
@@ -57,12 +56,12 @@ def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path) -> None:
 
 def test_multiple_enabled_remotes_require_an_explicit_selection(tmp_path: Path) -> None:
     home = configured_home(tmp_path / "cache")
-    backend = ConanBackend(home)
-    backend._client.run("remote", "add", "first", "http://127.0.0.1:1")
-    backend._client.run("remote", "add", "second", "http://127.0.0.1:2")
+    connection = Catalog(home)
+    connection._client.run("remote", "add", "first", "http://127.0.0.1:1")
+    connection._client.run("remote", "add", "second", "http://127.0.0.1:2")
     with pytest.raises(CatalogError, match="Multiple enabled Conan remotes"):
-        ConanBackend(home)
-    selected = ConanBackend(home, remote="second")
+        Catalog(home)
+    selected = Catalog(home, remote="second")
     assert selected._client.remote == "second"
     selected.close()
-    backend.close()
+    connection.close()

@@ -69,7 +69,7 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
 def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
     ref = Ref("core", "1.0", "release", "rtl-ip")
     same = Ref("core", "1.0", "release", "rtl-ip")
-    other = replace(ref, namespace="backend-ip")
+    other = replace(ref, namespace="connection-ip")
     assert ref == same
     assert hash(ref) == hash(same)
     assert ref.package_name == replace(ref, version="2.0").package_name

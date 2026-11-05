@@ -7,9 +7,9 @@ from enum import StrEnum
 from pathlib import Path
 
 from hwcatalog._internal.validation import normalize_record
+from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.graph import GraphResult
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.api.protocols import Backend
 from hwcatalog.api.types import JSON
 
 
@@ -76,7 +76,7 @@ def graph_json(result: GraphResult) -> str:
     return json.dumps(asdict(result), sort_keys=True, separators=(",", ":"))
 
 
-def resolve_published(catalog: Backend, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
+def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
     """Inspect saved package data through the same resolver used for local inputs."""
     record = catalog.get(ref)
     dependencies = tuple(item.ref for item in catalog.dependencies(ref))

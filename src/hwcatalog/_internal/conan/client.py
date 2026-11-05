@@ -19,7 +19,7 @@ from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
 from ...api.errors import CatalogError, Conflict, InvalidPackage
-from .conan_types import NativeGraph, NativeReference
+from .types import NativeGraph, NativeReference
 
 _API_LOCK = RLock()
 

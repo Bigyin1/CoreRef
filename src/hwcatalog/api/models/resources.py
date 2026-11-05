@@ -19,7 +19,7 @@ class MaterializedResource:
 
 @dataclass(frozen=True)
 class MaterializedPackage:
-    """Artifact directory and optional SCM checkout, owned by the backend cache."""
+    """Artifact directory and optional SCM checkout, owned by the catalog cache."""
 
     path: Path
     source_path: Path | None = None
@@ -27,7 +27,7 @@ class MaterializedPackage:
 
 @dataclass(frozen=True)
 class GitResource:
-    """Immutable SCM coordinates; source retrieval belongs to the backend."""
+    """Immutable SCM coordinates; source retrieval belongs to the catalog."""
 
     repository_url: str
     requested_ref: str

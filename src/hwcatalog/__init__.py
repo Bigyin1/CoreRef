@@ -1,1 +1,1 @@
-"""Hardware catalog; use api submodules for contracts and backends for adapters."""
+"""Conan-backed hardware catalog; public classes and models live in api submodules."""

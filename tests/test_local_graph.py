@@ -11,13 +11,12 @@ from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import ConanBackend
 
 
 @pytest.fixture
 def local_catalog(tmp_path: Path) -> Iterator[Catalog]:
-    backend = ConanBackend(configured_home(tmp_path / "cache"))
-    with Catalog(backend) as catalog:
+    connection = Catalog(configured_home(tmp_path / "cache"))
+    with connection as catalog:
         yield catalog
 
 
@@ -97,19 +96,19 @@ def test_local_graph_rejects_cycles_and_missing_dependencies(local_catalog: Cata
 def test_conan_resolves_one_consumer_without_exporting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = ConanBackend(configured_home(tmp_path / "cache"))
-    with Catalog(backend) as catalog:
+    connection = Catalog(configured_home(tmp_path / "cache"))
+    with connection as catalog:
         dependencies = tuple(record(name) for name in ("left", "right"))
         for item in dependencies:
             catalog.publish(item)
         operations: list[tuple[str, ...]] = []
-        original_run = backend._client.run
+        original_run = connection._client.run
 
         def track(*arguments: str) -> object:
             operations.append(arguments)
             return original_run(*arguments)
 
-        monkeypatch.setattr(backend._client, "run", track)
+        monkeypatch.setattr(connection._client, "run", track)
         catalog.resolve_local(record("top"), dependencies=tuple(d.ref for d in dependencies))
         graphs = [args for args in operations if args[:2] == ("graph", "info")]
         assert len(graphs) == 1
@@ -120,8 +119,8 @@ def test_conan_resolves_one_consumer_without_exporting(
 
 
 def test_conan_local_consumer_uses_opaque_project_lockfile(tmp_path: Path) -> None:
-    backend = ConanBackend(configured_home(tmp_path / "cache"))
-    with Catalog(backend) as catalog:
+    connection = Catalog(configured_home(tmp_path / "cache"))
+    with connection as catalog:
         leaf, child, root = (record(name) for name in ("leaf", "child", "top"))
         catalog.publish(leaf)
         catalog.publish(child, dependencies=(leaf.ref,))
@@ -130,7 +129,7 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(tmp_path: Path) -> No
         expected = catalog.resolve_local(root, dependencies=(child.ref,))
         assert catalog.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile) == expected
         assert lockfile.read_bytes() == original
-        backend._client.run(
+        connection._client.run(
             "lock",
             "remove",
             "--requires=soc.leaf.rtl/*",

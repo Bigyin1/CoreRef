@@ -30,9 +30,8 @@
 
 ```python
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.backends.conan import ConanBackend
 
-with Catalog(ConanBackend()) as catalog:
+with Catalog() as catalog:
     record = catalog.publish_file("package.json")
     print(record.source, record.files)
     package = catalog.materialize(record.ref, with_sources=True)
@@ -103,7 +102,7 @@ NFS-путь. Такой ресурс не загружается в Conan ав�
 ## Граф и remote
 
 ```python
-backend = ConanBackend(remote="catalog", timeout=60)
+catalog = Catalog(remote="catalog", timeout=60)
 ```
 
 Без аргумента `home` используется стандартный cache Conan (обычно `~/.conan2`).
@@ -160,7 +159,7 @@ Home не копируется, cache save/restore не используется
 автоматического rollback или retry нет.
 
 Рецепт генерируется Jinja-шаблоном
-`src/hwcatalog/_internal/backends/templates/conanfile.py.j2`.
+`src/hwcatalog/_internal/conan/templates/conanfile.py.j2`.
 Шаблон загружается из установленного пакета через PackageLoader; переменные
 проверяются StrictUndefined, Python-литералы выводятся через repr.
 JSON-метаданные и SCM-координаты сериализуются моделями.

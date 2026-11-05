@@ -12,12 +12,11 @@ from dulwich.repo import Repo
 
 from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.backends.conan import ConanBackend
 
 
 @pytest.fixture
 def catalog(tmp_path: Path) -> Iterator[Catalog]:
-    with Catalog(ConanBackend(configured_home(tmp_path / "conan-home"))) as catalog:
+    with Catalog(configured_home(tmp_path / "conan-home")) as catalog:
         yield catalog
 
 

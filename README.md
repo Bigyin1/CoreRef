@@ -22,11 +22,10 @@ Conan должен быть настроен заранее: профили, rem
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import ConanBackend
 
 rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"))
 macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.lib"]})
-with Catalog(ConanBackend()) as catalog:
+with Catalog() as catalog:
     rtl = catalog.publish(rtl)
     macro = catalog.publish(macro, dependencies=(rtl.ref,))
     inputs = catalog.dependencies(macro.ref)  # tuple[Record, ...]
@@ -55,7 +54,7 @@ make integration  # собственный временный Conan server
 Публикация файлов и Git-исходников:
 
 ```python
-with Catalog(ConanBackend()) as catalog:
+with Catalog() as catalog:
     record = catalog.publish_file("package.json")
     package = catalog.materialize(record.ref, with_sources=True)
 ```
@@ -75,7 +74,7 @@ Conan-рецепты и нативный граф создаются внутр�
 Локальный корень не нужно публиковать для получения общего графа зависимостей:
 
 ```python
-with Catalog(ConanBackend()) as catalog:
+with Catalog() as catalog:
     local = Record(Ref("soc", "1.0", "rtl", "soc1"))
     graph = catalog.resolve_local(local, dependencies=(rtl.ref,))
 ```
@@ -89,7 +88,7 @@ with Catalog(ConanBackend()) as catalog:
 Проектный lockfile создаётся штатной командой Conan и передаётся как непрозрачный файл:
 
 ```python
-with Catalog(ConanBackend()) as catalog:
+with Catalog() as catalog:
     lockfile = catalog.create_lockfile((rtl.ref,), "workspace/conan.lock")
     graph = catalog.resolve_local(macro, dependencies=(rtl.ref,), lockfile=lockfile)
 ```

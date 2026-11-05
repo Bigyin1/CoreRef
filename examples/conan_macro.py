@@ -10,7 +10,6 @@ from conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import ConanBackend
 
 
 def main() -> None:
@@ -19,7 +18,7 @@ def main() -> None:
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"))
     with (
         TemporaryDirectory(prefix="hwcatalog-example-") as directory,
-        Catalog(ConanBackend(configured_home(Path(directory)))) as catalog,
+        Catalog(configured_home(Path(directory))) as catalog,
     ):
         catalog.publish(rtl)
         catalog.publish(intermediate, dependencies=(rtl.ref,))

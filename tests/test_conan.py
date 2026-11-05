@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from examples.conan_config import configured_home
-from hwcatalog._internal.backends.conan_format import (
+from hwcatalog._internal.conan.format import (
     from_conan_reference,
     to_conan_reference,
     write_recipe,
@@ -18,15 +18,14 @@ from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFoun
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.backends.conan import ConanBackend
 from tests.helpers import resolve_published
 
 pytestmark = pytest.mark.conan
 
 
 @pytest.fixture
-def conan_backend(tmp_path: Path) -> ConanBackend:
-    return ConanBackend(configured_home(tmp_path / "home"))
+def conan_catalog(tmp_path: Path) -> Catalog:
+    return Catalog(configured_home(tmp_path / "home"))
 
 
 def record(kind: str = "rtl", version: str = "1.0", name: str = "cpu") -> Record:
@@ -55,53 +54,51 @@ def test_reference_round_trip() -> None:
 
 
 def test_publish_uses_one_export_pkg_without_graph_or_export_commands(
-    conan_backend: ConanBackend, monkeypatch: pytest.MonkeyPatch
+    conan_catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     operations: list[tuple[str, ...]] = []
-    original_run = conan_backend._client.run
+    original_run = conan_catalog._client.run
 
     def track(*arguments: str) -> object:
         operations.append(arguments)
         return original_run(*arguments)
 
-    monkeypatch.setattr(conan_backend._client, "run", track)
-    published = conan_backend.publish(record())
+    monkeypatch.setattr(conan_catalog._client, "run", track)
+    published = conan_catalog.publish(record())
     assert published.ref == record().ref
     assert sum(arguments[0] == "export-pkg" for arguments in operations) == 1
     assert not any(arguments[0] == "export" for arguments in operations)
     assert not any(arguments[:2] == ("graph", "info") for arguments in operations)
 
 
-def test_publish_does_not_scan_unrelated_packages(
-    conan_backend: ConanBackend, tmp_path: Path
-) -> None:
+def test_publish_does_not_scan_unrelated_packages(conan_catalog: Catalog, tmp_path: Path) -> None:
     foreign = tmp_path / "foreign"
     foreign.mkdir()
     (foreign / "conanfile.py").write_text(
         "from conan import ConanFile\nclass Foreign(ConanFile):\n"
         '    name = "external.vendor.library.helper"\n    version = "1.0"\n'
     )
-    conan_backend._client.export(foreign)
-    published = conan_backend.publish(record())
-    assert conan_backend.get(published.ref) == published
+    conan_catalog._client.export(foreign)
+    published = conan_catalog.publish(record())
+    assert conan_catalog.get(published.ref) == published
 
 
 def test_publish_rejects_an_invalid_catalog_dependency_before_conan_executes_it(
-    conan_backend: ConanBackend,
+    conan_catalog: Catalog,
 ) -> None:
-    dependency = conan_backend.publish(record())
-    _, directory = conan_backend._locate(dependency.ref)
+    dependency = conan_catalog.publish(record())
+    _, directory = conan_catalog._locate(dependency.ref)
     (directory / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
     with pytest.raises(InvalidPackage, match="canonical"):
-        conan_backend.publish(record("lib-lef"), dependencies=(dependency.ref,))
+        conan_catalog.publish(record("lib-lef"), dependencies=(dependency.ref,))
 
 
 def test_conan_round_trip_search_and_project_lockfile(
-    conan_backend: ConanBackend, tmp_path: Path
+    conan_catalog: Catalog, tmp_path: Path
 ) -> None:
     rtl, be = record(), record("lib-lef", "4.0")
     edge = Dependency(be.ref, rtl.ref)
-    catalog = Catalog(conan_backend)
+    catalog = conan_catalog
     catalog.publish(rtl)
     catalog.publish(be, dependencies=(rtl.ref,))
     stored = catalog.get(rtl.ref)
@@ -125,7 +122,7 @@ def test_conan_round_trip_search_and_project_lockfile(
         == be.ref
     )
     assert not catalog.dependencies(be.ref, filters=SearchQuery(kind="missing"))
-    _, folder = conan_backend._locate(be.ref)
+    _, folder = conan_catalog._locate(be.ref)
     assert not (folder / "conan.lock").exists()
     lockfile = catalog.create_lockfile((be.ref,), tmp_path / "workspace/conan.lock")
     assert lockfile.is_file()
@@ -142,11 +139,11 @@ def test_conan_round_trip_search_and_project_lockfile(
         catalog.search()
 
 
-def test_conan_reverse_search_uses_each_candidates_graph(conan_backend: ConanBackend) -> None:
+def test_conan_reverse_search_uses_each_candidates_graph(conan_catalog: Catalog) -> None:
     rtl, other = record(), record(version="2.0")
     mid = record("intermediate", "3.0", "other-component")
     be, wrong, unrelated = (record("lib-lef", version) for version in ("4.0", "5.0", "6.0"))
-    catalog = Catalog(conan_backend)
+    catalog = conan_catalog
     catalog.publish(rtl)
     catalog.publish(other)
     catalog.publish(mid, dependencies=(rtl.ref,))
@@ -166,34 +163,34 @@ def test_conan_reverse_search_uses_each_candidates_graph(conan_backend: ConanBac
         catalog.find_dependents(record(name="absent").ref, candidates=query)
 
 
-def test_conan_rejects_conflicting_direct_requirements(conan_backend: ConanBackend) -> None:
+def test_conan_rejects_conflicting_direct_requirements(conan_catalog: Catalog) -> None:
     root, first, second = record("lib-lef"), record(), record(version="2.0")
-    first = conan_backend.publish(first)
-    second = conan_backend.publish(second)
+    first = conan_catalog.publish(first)
+    second = conan_catalog.publish(second)
     with pytest.raises(CatalogError):
-        conan_backend.publish(root, dependencies=(first.ref, second.ref))
-    assert (conan_backend.get(first.ref), conan_backend.get(second.ref)) == (first, second)
+        conan_catalog.publish(root, dependencies=(first.ref, second.ref))
+    assert (conan_catalog.get(first.ref), conan_catalog.get(second.ref)) == (first, second)
 
 
-def test_native_conan_diamond_conflict_is_a_domain_error(conan_backend: ConanBackend) -> None:
+def test_native_conan_diamond_conflict_is_a_domain_error(conan_catalog: Catalog) -> None:
     root = record("lib-lef")
     left, right = record(name="left"), record(name="right")
     first, second = record(), record(version="2.0")
-    first = conan_backend.publish(first)
-    second = conan_backend.publish(second)
-    left = conan_backend.publish(left, dependencies=(first.ref,))
-    right = conan_backend.publish(right, dependencies=(second.ref,))
+    first = conan_catalog.publish(first)
+    second = conan_catalog.publish(second)
+    left = conan_catalog.publish(left, dependencies=(first.ref,))
+    right = conan_catalog.publish(right, dependencies=(second.ref,))
     with pytest.raises(Conflict):
-        conan_backend.publish(root, dependencies=(left.ref, right.ref))
-    assert (conan_backend.get(left.ref), conan_backend.get(right.ref)) == (left, right)
+        conan_catalog.publish(root, dependencies=(left.ref, right.ref))
+    assert (conan_catalog.get(left.ref), conan_catalog.get(right.ref)) == (left, right)
 
 
-def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: Path) -> None:
+def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) -> None:
     rtl, be = record(), record("lib-lef", "4.0")
-    conan_backend.publish(rtl)
+    conan_catalog.publish(rtl)
     build = tmp_path / "external-ci"
     write_recipe(build, be, (to_conan_reference(rtl.ref),))
-    cli = conan_backend._client
+    cli = conan_catalog._client
     cli.run(
         "lock",
         "create",
@@ -204,16 +201,16 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
         "--no-remote",
     )
     cli.run("export", str(build), "--no-remote")
-    assert conan_backend.get(be.ref).ref == be.ref
-    assert resolve_published(conan_backend, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
+    assert conan_catalog.get(be.ref).ref == be.ref
+    assert resolve_published(conan_catalog, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
 
 
 @pytest.mark.parametrize("damage", ["missing", "bad-marker", "noncanonical-recipe"])
-def test_corrupt_recipe_is_an_error(conan_backend: ConanBackend, damage: str) -> None:
+def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None:
     rtl, be = record(), record("lib-lef")
-    conan_backend.publish(rtl)
-    conan_backend.publish(be, dependencies=(rtl.ref,))
-    _, folder = conan_backend._locate(be.ref)
+    conan_catalog.publish(rtl)
+    conan_catalog.publish(be, dependencies=(rtl.ref,))
+    _, folder = conan_catalog._locate(be.ref)
     if damage == "missing":
         (folder / "record.json").unlink()
     elif damage == "bad-marker":
@@ -221,24 +218,24 @@ def test_corrupt_recipe_is_an_error(conan_backend: ConanBackend, damage: str) ->
     else:
         (folder / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
     with pytest.raises(InvalidPackage):
-        resolve_published(conan_backend, be.ref)
+        resolve_published(conan_catalog, be.ref)
 
 
 def test_multiple_revisions_are_not_silently_selected(
-    conan_backend: ConanBackend, tmp_path: Path
+    conan_catalog: Catalog, tmp_path: Path
 ) -> None:
     original = record()
-    conan_backend.publish(original)
+    conan_catalog.publish(original)
     folder = tmp_path / "replacement"
     write_recipe(folder, replace(original, payload={"different": True}))
-    conan_backend._client.create_lockfile(folder)
-    conan_backend._client.export(folder)
+    conan_catalog._client.create_lockfile(folder)
+    conan_catalog._client.export(folder)
     with pytest.raises(Conflict):
-        (conan_backend.get(original.ref),)
+        (conan_catalog.get(original.ref),)
 
 
 def test_upload_failure_is_reported_for_the_single_package(
-    conan_backend: ConanBackend, monkeypatch: pytest.MonkeyPatch
+    conan_catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = record()
 
@@ -246,26 +243,26 @@ def test_upload_failure_is_reported_for_the_single_package(
         assert reference.startswith("soc.cpu.rtl/1.0#")
         raise CatalogError("simulated lost response")
 
-    monkeypatch.setattr(conan_backend._client, "upload", fail_upload)
+    monkeypatch.setattr(conan_catalog._client, "upload", fail_upload)
     with pytest.raises(CatalogError, match="simulated lost response"):
-        conan_backend.publish(root)
+        conan_catalog.publish(root)
 
 
 def test_command_os_error_is_not_not_found(
-    conan_backend: ConanBackend, monkeypatch: pytest.MonkeyPatch
+    conan_catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from hwcatalog._internal.backends import conan_client
+    from hwcatalog._internal.conan import client
 
     def fail(*args: object, **kwargs: object) -> object:
         raise OSError("API initialization failed")
 
-    monkeypatch.setattr(conan_client, "ConanAPI", fail)
+    monkeypatch.setattr(client, "ConanAPI", fail)
     with pytest.raises(CatalogError, match="API initialization failed"):
-        (conan_backend.get(record().ref),)
+        (conan_catalog.get(record().ref),)
 
 
 def test_native_graph_exposes_conans_dependencies_and_topological_order(
-    conan_backend: ConanBackend,
+    conan_catalog: Catalog,
 ) -> None:
     # Conan's native runtime class has no typing metadata.
     from conan.internal.graph.graph import DepsGraph  # type: ignore[import-untyped]
@@ -273,11 +270,11 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
     root = record(name="aaa-root")
     left, right = record(name="aaa-left"), record(name="bbb-right")
     shared = record(name="zzz-shared")
-    conan_backend.publish(shared)
-    conan_backend.publish(left, dependencies=(shared.ref,))
-    conan_backend.publish(right, dependencies=(shared.ref,))
-    conan_backend.publish(root, dependencies=(left.ref, right.ref))
-    graph, _ = conan_backend._load_graph(root.ref)
+    conan_catalog.publish(shared)
+    conan_catalog.publish(left, dependencies=(shared.ref,))
+    conan_catalog.publish(right, dependencies=(shared.ref,))
+    conan_catalog.publish(root, dependencies=(left.ref, right.ref))
+    graph, _ = conan_catalog._load_graph(root.ref)
     assert isinstance(graph, DepsGraph)
     assert len(graph.nodes) == 4
     assert "nodes" in graph.serialize()
@@ -300,63 +297,63 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         Dependency(left.ref, shared.ref),
         Dependency(right.ref, shared.ref),
     )
-    assert resolve_published(conan_backend, root.ref).dependencies == tuple(
+    assert resolve_published(conan_catalog, root.ref).dependencies == tuple(
         sorted(edges, key=lambda edge: (edge.source, edge.target))
     )
 
 
 def test_native_graph_uses_explicit_home_without_changing_process_state(
-    conan_backend: ConanBackend,
+    conan_catalog: Catalog,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = record()
-    conan_backend.publish(root)
+    conan_catalog.publish(root)
     ambient_home = tmp_path / "unrelated-home"
     monkeypatch.setenv("CONAN_HOME", str(ambient_home))
     cwd = Path.cwd()
-    graph, _ = conan_backend._load_graph(root.ref)
+    graph, _ = conan_catalog._load_graph(root.ref)
     assert tuple(graph.root.conanfile.dependencies.host.topological_sort.values()) == ()
     assert graph.root.conanfile.recipe_folder is not None
-    assert Path(graph.root.conanfile.recipe_folder).is_relative_to(conan_backend._client.home)
+    assert Path(graph.root.conanfile.recipe_folder).is_relative_to(conan_catalog._client.home)
     assert os.environ["CONAN_HOME"] == str(ambient_home)
     assert Path.cwd() == cwd
     assert not ambient_home.exists()
-    conan_backend.close()
+    conan_catalog.close()
     with pytest.raises(CatalogError):
-        resolve_published(conan_backend, root.ref)
+        resolve_published(conan_catalog, root.ref)
 
 
-def test_native_graph_reports_missing_pinned_dependency(conan_backend: ConanBackend) -> None:
+def test_native_graph_reports_missing_pinned_dependency(conan_catalog: Catalog) -> None:
     rtl, macro = record(), record("lib-lef")
-    conan_backend.publish(rtl)
-    conan_backend.publish(macro, dependencies=(rtl.ref,))
-    conan_backend._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
+    conan_catalog.publish(rtl)
+    conan_catalog.publish(macro, dependencies=(rtl.ref,))
+    conan_catalog._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
     with pytest.raises(CatalogError):
-        conan_backend._load_graph(macro.ref)
+        conan_catalog._load_graph(macro.ref)
 
 
 def test_native_api_failure_is_a_catalog_error(
-    conan_backend: ConanBackend,
+    conan_catalog: Catalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from conan.errors import ConanException  # type: ignore[import-untyped]
 
-    from hwcatalog._internal.backends import conan_client
+    from hwcatalog._internal.conan import client
 
     root = record()
-    conan_backend.publish(root)
+    conan_catalog.publish(root)
 
     def fail(*args: object, **kwargs: object) -> object:
         raise ConanException("simulated API failure")
 
-    monkeypatch.setattr(conan_client, "ConanAPI", fail)
+    monkeypatch.setattr(client, "ConanAPI", fail)
     with pytest.raises(CatalogError, match="simulated API failure"):
-        conan_backend._load_graph(root.ref)
+        conan_catalog._load_graph(root.ref)
 
 
 def test_native_graph_computation_does_not_spawn_a_conan_process(
-    conan_backend: ConanBackend,
+    conan_catalog: Catalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def reject_subprocess(*args: object, **kwargs: object) -> object:
@@ -365,21 +362,21 @@ def test_native_graph_computation_does_not_spawn_a_conan_process(
     monkeypatch.setattr(subprocess, "run", reject_subprocess)
     monkeypatch.setattr(subprocess, "Popen", reject_subprocess)
     root = record()
-    conan_backend.publish(root)
-    assert conan_backend.get(root.ref).ref == root.ref
-    assert conan_backend.search(SearchQuery())[0].ref == root.ref
-    assert len(resolve_published(conan_backend, root.ref).records) == 1
+    conan_catalog.publish(root)
+    assert conan_catalog.get(root.ref).ref == root.ref
+    assert conan_catalog.search(SearchQuery())[0].ref == root.ref
+    assert len(resolve_published(conan_catalog, root.ref).records) == 1
 
 
 def test_native_graph_rejects_an_unlocked_transitive_dependency(
-    conan_backend: ConanBackend, tmp_path: Path
+    conan_catalog: Catalog, tmp_path: Path
 ) -> None:
     root, middle, leaf = (record(name=name) for name in ("root", "middle", "leaf"))
-    conan_backend.publish(leaf)
-    conan_backend.publish(middle, dependencies=(leaf.ref,))
-    conan_backend.publish(root, dependencies=(middle.ref,))
-    lock_path = conan_backend.create_lockfile((root.ref,), tmp_path / "project/conan.lock")
-    conan_backend._client.run(
+    conan_catalog.publish(leaf)
+    conan_catalog.publish(middle, dependencies=(leaf.ref,))
+    conan_catalog.publish(root, dependencies=(middle.ref,))
+    lock_path = conan_catalog.create_lockfile((root.ref,), tmp_path / "project/conan.lock")
+    conan_catalog._client.run(
         "lock",
         "remove",
         "--requires=soc.leaf.rtl/*",
@@ -389,7 +386,7 @@ def test_native_graph_rejects_an_unlocked_transitive_dependency(
         str(lock_path),
     )
     with pytest.raises(InvalidPackage):
-        conan_backend._load_graph(root.ref, lockfile=lock_path)
+        conan_catalog._load_graph(root.ref, lockfile=lock_path)
 
 
 def test_default_cache_uses_conan_home_and_stays_bound_to_it(
@@ -398,11 +395,11 @@ def test_default_cache_uses_conan_home_and_stays_bound_to_it(
     monkeypatch.chdir(tmp_path)
     home = configured_home(tmp_path / "native-home")
     monkeypatch.setenv("CONAN_HOME", str(home))
-    backend = ConanBackend()
-    assert backend._client.home == home.resolve()
+    connection = Catalog()
+    assert connection._client.home == home.resolve()
     other = tmp_path / "later-home"
     monkeypatch.setenv("CONAN_HOME", str(other))
-    with Catalog(backend) as catalog:
+    with connection as catalog:
         catalog.publish(record())
         assert catalog.get(record().ref).ref == record().ref
     assert not other.exists()
@@ -415,9 +412,9 @@ def test_default_cache_uses_native_conanrc_resolution(
     monkeypatch.delenv("CONAN_HOME", raising=False)
     configured_home(tmp_path / "configured-home")
     (tmp_path / ".conanrc").write_text("conan_home=./configured-home\n")
-    backend = ConanBackend()
-    assert backend._client.home == (tmp_path / "configured-home").resolve()
-    backend.close()
+    connection = Catalog()
+    assert connection._client.home == (tmp_path / "configured-home").resolve()
+    connection.close()
 
 
 def test_invalid_default_cache_is_a_domain_error(
@@ -426,4 +423,4 @@ def test_invalid_default_cache_is_a_domain_error(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CONAN_HOME", "relative-path")
     with pytest.raises(CatalogError, match="default home"):
-        ConanBackend()
+        Catalog()

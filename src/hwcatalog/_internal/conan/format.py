@@ -22,7 +22,7 @@ _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 
 _RECIPE_ENV = Environment(
-    loader=PackageLoader("hwcatalog._internal.backends"),
+    loader=PackageLoader("hwcatalog._internal.conan"),
     autoescape=False,  # noqa: S701 - Python literals use repr escaping.
     undefined=StrictUndefined,
     trim_blocks=True,

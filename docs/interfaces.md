@@ -1,7 +1,9 @@
 # Публичный API
 
-Catalog владеет бэкендом и поддерживает контекстный менеджер. Модели находятся
-в hwcatalog.api.models, адаптер — hwcatalog.backends.conan.
+Catalog напрямую работает с Conan и поддерживает контекстный менеджер.
+Конструктор: `Catalog(home=None, *, remote=None, timeout=60)`.
+Профили, remotes и авторизация настраиваются заранее средствами Conan.
+Модели находятся в hwcatalog.api.models.
 
 ## Записи
 
@@ -73,9 +75,10 @@ Dependency(source, target) используется в GraphResult. Вместо
 Причина сбоя сохраняется в сообщении и цепочке исключений. Автоматических повторов
 или rollback удалённой публикации нет.
 
-Backend — единый Protocol с get, search, dependencies, resolve_local,
-find_dependents, publish, publish_file, create_lockfile, materialize и close.
-Catalog предоставляет эти операции напрямую, отдельного CatalogGraph нет.
+Catalog реализует get, search, dependencies, resolve_local, find_dependents,
+publish, publish_file, create_lockfile, materialize и close напрямую.
+Отдельных Backend и CatalogGraph нет. Вспомогательные объекты Conan находятся
+в `_internal/conan`; нативные графы и рецепты остаются внутри каталога.
 JSONSerializable — Protocol с методом to_json() -> str; наследование не требуется.
 
 ## Внешние ресурсы

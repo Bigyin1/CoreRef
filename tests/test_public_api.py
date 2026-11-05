@@ -11,7 +11,7 @@ def test_public_models_import_independently_of_conan() -> None:
         from pathlib import Path
         from tempfile import TemporaryDirectory
 
-        from hwcatalog import api, backends
+        from hwcatalog import api
 
         assert "pydantic" not in sys.modules
         assert "networkx" not in sys.modules
@@ -39,9 +39,8 @@ def test_public_models_import_independently_of_conan() -> None:
         assert "networkx" not in sys.modules
         assert "pydantic" not in sys.modules
 
-        from hwcatalog.api import catalog, protocols, types
+        from hwcatalog.api import catalog, types
         from hwcatalog.api.models import query
-        from hwcatalog.backends.conan import ConanBackend
 
         home = TemporaryDirectory()
         from conan.api.conan_api import ConanAPI
@@ -50,13 +49,12 @@ def test_public_models_import_independently_of_conan() -> None:
         profiles = Path(home.name) / "profiles"
         profiles.mkdir(exist_ok=True)
         (profiles / "default").write_text("[settings]\\nos=Linux\\n")
-        backend: protocols.Backend = ConanBackend(Path(home.name))
         manifest: dict[str, types.JSON] = {"views": ["rtl", "timing"]}
         record = records.Record(
             ref=records.Ref("rtl", "v1", "rtl-project", "public"),
             payload=manifest,
         )
-        with catalog.Catalog(backend) as instance:
+        with catalog.Catalog(Path(home.name)) as instance:
             instance.publish(record=record)
             stored = instance.get(record.ref)
             assert stored.ref == record.ref
