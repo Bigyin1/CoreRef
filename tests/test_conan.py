@@ -26,6 +26,7 @@ from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
+from tests.helpers import resolve_published
 
 pytestmark = pytest.mark.conan
 
@@ -127,7 +128,7 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert not catalog.search(SearchQuery(namespace="with/slash"))
     assert not catalog.search(SearchQuery(name="missing"))
     assert not catalog.search(SearchQuery(name=""))
-    expected = catalog.graph.dependency_closure(be.ref)
+    expected = resolve_published(catalog, be.ref)
     assert expected.dependencies == (edge,)
     assert len(expected.to_networkx()) == 2
     assert catalog.graph.dependencies(be.ref)[0] == stored
@@ -137,9 +138,9 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert not (folder / "conan.lock").exists()
     lockfile = catalog.create_lockfile((be.ref,), tmp_path / "workspace/conan.lock")
     assert lockfile.is_file()
-    assert catalog.graph.dependency_closure(be.ref, lockfile=lockfile) == expected
+    assert resolve_published(catalog, be.ref, lockfile=lockfile) == expected
     catalog.publish(record(version="2.0"))
-    assert catalog.graph.dependency_closure(be.ref) == expected
+    assert resolve_published(catalog, be.ref) == expected
     with pytest.raises(IdentityConflict):
         catalog.publish(be)
     with pytest.raises(NotFound):
@@ -214,9 +215,7 @@ def test_external_ci_recipe_is_readable(conan_backend: ConanBackend, tmp_path: P
     )
     cli.run("export", str(build), "--no-remote")
     assert conan_backend.get_many((be.ref,))[0].ref == be.ref
-    assert conan_backend.graph.dependency_closure(be.ref).dependencies == (
-        Dependency(be.ref, rtl.ref),
-    )
+    assert resolve_published(conan_backend, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
 
 
 @pytest.mark.parametrize("damage", ["missing", "bad-marker", "noncanonical-recipe"])
@@ -232,7 +231,7 @@ def test_corrupt_recipe_is_an_error(conan_backend: ConanBackend, damage: str) ->
     else:
         (folder / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
     with pytest.raises(InvalidPackage):
-        conan_backend.graph.dependency_closure(be.ref)
+        resolve_published(conan_backend, be.ref)
 
 
 def test_multiple_revisions_are_not_silently_selected(
@@ -311,7 +310,7 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         Dependency(left.ref, shared.ref),
         Dependency(right.ref, shared.ref),
     )
-    assert conan_backend.graph.dependency_closure(root.ref).dependencies == tuple(
+    assert resolve_published(conan_backend, root.ref).dependencies == tuple(
         sorted(edges, key=lambda edge: (edge.source, edge.target))
     )
 
@@ -335,7 +334,7 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     assert not ambient_home.exists()
     conan_backend.close()
     with pytest.raises(BackendUnavailable):
-        conan_backend.graph.dependency_closure(root.ref)
+        resolve_published(conan_backend, root.ref)
 
 
 def test_native_graph_reports_missing_pinned_dependency(conan_backend: ConanBackend) -> None:
@@ -379,7 +378,7 @@ def test_native_graph_computation_does_not_spawn_a_conan_process(
     conan_backend.publish(root)
     assert conan_backend.get_many((root.ref,))[0].ref == root.ref
     assert conan_backend.search(SearchQuery())[0].ref == root.ref
-    assert len(conan_backend.graph.dependency_closure(root.ref).records) == 1
+    assert len(resolve_published(conan_backend, root.ref).records) == 1
 
 
 def test_native_graph_rejects_an_unlocked_transitive_dependency(

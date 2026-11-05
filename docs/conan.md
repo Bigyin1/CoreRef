@@ -120,7 +120,8 @@ Conan. Формат, версия схемы и содержимое файла 
 ```python
 lockfile = catalog.create_lockfile((rtl_ref,), "/work/project/conan.lock")
 record = catalog.publish_file("package.json", lockfile=lockfile)
-graph = catalog.graph.dependency_closure(record.ref, lockfile=lockfile)
+dependencies = tuple(item.ref for item in catalog.graph.dependencies(record.ref))
+graph = catalog.graph.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
 package = catalog.materialize(record.ref, with_sources=True, lockfile=lockfile)
 ```
 

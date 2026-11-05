@@ -4,10 +4,12 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict
 from enum import StrEnum
+from pathlib import Path
 
 from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.models.graph import GraphResult
 from hwcatalog.api.models.records import Record, Ref
+from hwcatalog.api.protocols import Backend
 from hwcatalog.api.types import JSON
 
 
@@ -72,3 +74,10 @@ def resources(record: Record) -> tuple[JSON, ...]:
 
 def graph_json(result: GraphResult) -> str:
     return json.dumps(asdict(result), sort_keys=True, separators=(",", ":"))
+
+
+def resolve_published(catalog: Backend, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
+    """Inspect saved package data through the same resolver used for local inputs."""
+    record = catalog.get_many((ref,))[0]
+    dependencies = tuple(item.ref for item in catalog.graph.dependencies(ref))
+    return catalog.graph.resolve_local(record, dependencies=dependencies, lockfile=lockfile)

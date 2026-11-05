@@ -13,6 +13,7 @@ from hwcatalog.api.errors import BackendUnavailable, InvalidPackage
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
+from tests.helpers import resolve_published
 
 
 def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
@@ -39,7 +40,7 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
         assert record.files == ("cpu.lib",)
         _, recipe = backend._locate(result)
         assert not (recipe / "conan.lock").exists()
-        assert catalog.graph.dependency_closure(result, lockfile=lockfile).dependencies == (
+        assert resolve_published(catalog, result, lockfile=lockfile).dependencies == (
             Dependency(result, dependency.ref),
         )
         installed = catalog.materialize(result, lockfile=lockfile)
@@ -47,7 +48,7 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
         assert not (installed.path / "conan.lock").exists()
         assert lockfile.read_bytes() == original_lock
         assert catalog.create_lockfile((result,), lockfile) == lockfile
-        assert catalog.graph.dependency_closure(result, lockfile=lockfile).records
+        assert resolve_published(catalog, result, lockfile=lockfile).records
 
 
 @pytest.mark.parametrize(
@@ -83,7 +84,7 @@ def test_conan_validates_the_supplied_project_lockfile(
         else:
             lockfile.write_text("not a Conan lockfile\n")
         with pytest.raises(exception):
-            catalog.graph.dependency_closure(macro.ref, lockfile=lockfile)
+            resolve_published(catalog, macro.ref, lockfile=lockfile)
         assert catalog.get(macro.ref) == macro
 
 
@@ -93,7 +94,7 @@ def test_empty_project_lockfile(tmp_path: Path) -> None:
         empty_lock = lockfile.read_bytes()
         root = Record(Ref("root", "1.0", "rtl", "soc"))
         catalog.publish(root, lockfile=lockfile)
-        assert catalog.graph.dependency_closure(root.ref, lockfile=lockfile).records == (root,)
+        assert resolve_published(catalog, root.ref, lockfile=lockfile).records == (root,)
         catalog.create_lockfile((root.ref,), lockfile)
         catalog.create_lockfile((), lockfile)
         assert lockfile.read_bytes() == empty_lock
@@ -114,4 +115,4 @@ def test_legacy_recipe_with_embedded_lockfile_remains_readable(
     backend._client.export(recipe)
     with Catalog(backend) as catalog:
         assert catalog.get(record.ref) == record
-        assert catalog.graph.dependency_closure(record.ref).records == (record,)
+        assert resolve_published(catalog, record.ref).records == (record,)

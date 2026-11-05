@@ -24,6 +24,7 @@ from hwcatalog.api.errors import (
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
+from tests.helpers import resolve_published
 
 pytestmark = pytest.mark.conan_remote
 
@@ -97,7 +98,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))[0].ref == be.ref
     with pytest.raises(IdentityConflict):
         catalog.publish(rtl)
-    original_graph = catalog.graph.dependency_closure(be.ref)
+    original_graph = resolve_published(catalog, be.ref)
     native, _ = remote_backend._load_graph(be.ref)
     native_refs = tuple(
         str(dep.ref) for dep in native.root.conanfile.dependencies.host.topological_sort.values()
@@ -110,7 +111,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     remote_backend._client.export(rogue)
     another_be = Record(Ref("cpu", "5.0", "lib-lef", "soc"))
     catalog.publish(another_be, dependencies=(rtl.ref,))
-    assert {r.ref for r in catalog.graph.dependency_closure(another_be.ref).records} == {
+    assert {r.ref for r in resolve_published(catalog, another_be.ref).records} == {
         another_be.ref,
         rtl.ref,
     }
@@ -119,7 +120,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     shutil.copyfile(remote_backend._client.home / "remotes.json", home / "remotes.json")
     with Catalog(ConanBackend(home, remote="catalog")) as reader:
         assert reader.get(be.ref).payload == {"source": "cpu.lib"}
-        assert reader.graph.dependency_closure(be.ref) == original_graph
+        assert resolve_published(reader, be.ref) == original_graph
         new_rtl = Record(Ref("cpu", "2.0", "rtl", "soc"))
         external = tmp_path / "ci"
         write_recipe(external, new_rtl)
@@ -127,7 +128,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
         pinned = remote_backend._client.export(external)
         remote_backend._client.upload(pinned)
         assert reader.get(new_rtl.ref).ref == new_rtl.ref
-        assert reader.graph.dependency_closure(be.ref) == original_graph
+        assert resolve_published(reader, be.ref) == original_graph
     remote_backend._client.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
     with pytest.raises(BackendUnavailable):
         catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))

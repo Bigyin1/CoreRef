@@ -57,7 +57,7 @@ def test_public_models_import_independently_of_conan() -> None:
             assert stored.payload["views"] == ("rtl", "timing")
             assert instance.search(query.SearchQuery()) == (stored,)
             assert instance.graph.dependencies(record.ref) == ()
-            assert instance.graph.dependency_closure(record.ref).records == (stored,)
+            assert instance.graph.resolve_local(stored).records == (stored,)
             try:
                 instance.get(records.Ref("absent", "v1", "rtl-project", "public"))
             except errors.NotFound:

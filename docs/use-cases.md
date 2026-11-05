@@ -5,7 +5,9 @@
 
 ## RTL → LIB/LEF
 
-1. Получить `catalog.graph.dependency_closure(top_ref)` и выбрать RTL-компоненты.
+1. Передать локальный Record и прямые зависимости в `catalog.graph.resolve_local()`
+   и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
+   из опубликованного пакета, его читают через `get(top_ref)` и `graph.dependencies(top_ref)`.
 2. Для выбранного RTL вызвать `catalog.find_dependents(rtl_ref,
    candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"))`.
 3. Из найденных кандидатов приложение выбирает нужную реализацию и читает payload

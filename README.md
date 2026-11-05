@@ -29,7 +29,7 @@ with Catalog(ConanBackend()) as catalog:
         rtl.ref,
         candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"),
     )
-    graph = catalog.graph.dependency_closure(macro.ref)
+    graph = catalog.graph.resolve_local(macro, dependencies=(rtl.ref,))
     print(graph.dependencies)
 ```
 
@@ -85,7 +85,7 @@ with Catalog(ConanBackend()) as catalog:
 ```python
 with Catalog(ConanBackend()) as catalog:
     lockfile = catalog.create_lockfile((rtl.ref,), "workspace/conan.lock")
-    graph = catalog.graph.dependency_closure(macro.ref, lockfile=lockfile)
+    graph = catalog.graph.resolve_local(macro, dependencies=(rtl.ref,), lockfile=lockfile)
 ```
 
 Каталог не разбирает JSON lockfile и не задаёт версию его формата. Новые пакеты

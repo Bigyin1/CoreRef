@@ -50,11 +50,6 @@ class ConanGraph:
     def consumers(self, ref: Ref, filters: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
         return self.find_dependents(ref, candidates=filters, transitive=False)
 
-    def dependency_closure(self, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
-        """Resolve the selected root with an optional project lockfile."""
-        with self.backend._operation():
-            return self.backend._closure(normalize_ref(ref), lockfile=lockfile)
-
     def resolve_local(
         self,
         record: Record,
@@ -171,13 +166,6 @@ class ConanBackend:
             refs = tuple(from_conan_reference(value) for value in candidates)
             records = self.get_many(refs)
             return tuple(sorted((r for r in records if query.matches(r)), key=lambda r: r.ref))
-
-    def _closure(self, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
-        graph, records = self._load_graph(ref, lockfile=lockfile)
-        return GraphResult(
-            tuple(sorted(records.values(), key=lambda record: record.ref)),
-            _graph_dependencies(graph, records),
-        )
 
     def _load_graph(
         self, ref: Ref, *, lockfile: Path | None = None

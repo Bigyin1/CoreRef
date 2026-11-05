@@ -13,7 +13,7 @@ from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.api.types import JSON
-from tests.helpers import graph_json, release
+from tests.helpers import graph_json, release, resolve_published
 
 
 def test_get_many_preserves_order_duplicates_and_missing(catalog: Catalog) -> None:
@@ -72,7 +72,7 @@ def test_dependencies_must_already_exist(catalog: Catalog) -> None:
     assert catalog.publish(first, dependencies=(second.ref,)) == first
     with pytest.raises(IdentityConflict):
         catalog.publish(second, dependencies=(first.ref,))
-    assert catalog.graph.dependency_closure(first.ref).dependencies == (
+    assert resolve_published(catalog, first.ref).dependencies == (
         Dependency(first.ref, second.ref),
     )
 
@@ -89,7 +89,7 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
     catalog.publish(left, dependencies=(shared.ref,))
     catalog.publish(right, dependencies=(shared.ref,))
     catalog.publish(root, dependencies=(left.ref, right.ref))
-    graph = catalog.graph.dependency_closure(root.ref)
+    graph = resolve_published(catalog, root.ref)
     assert {record.ref for record in graph.records} == {root.ref, left.ref, right.ref, shared.ref}
     assert graph.dependencies == tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
     assert catalog.graph.dependencies(root.ref) == (left, right)
@@ -97,28 +97,28 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
     assert catalog.graph.dependencies(root.ref, SearchQuery(name="left")) == (left,)
     assert catalog.graph.consumers(shared.ref, SearchQuery(name="right")) == (right,)
     assert not catalog.graph.dependencies(root.ref, SearchQuery(name="absent"))
-    assert catalog.graph.dependency_closure(shared.ref).records == (shared,)
+    assert resolve_published(catalog, shared.ref).records == (shared,)
 
 
-def test_closure_is_stable_when_new_consumers_are_published(catalog: Catalog) -> None:
+def test_resolution_is_stable_when_new_consumers_are_published(catalog: Catalog) -> None:
     root, leaf, consumer = release("root"), release("leaf"), release("consumer")
     catalog.publish(leaf)
     catalog.publish(root, dependencies=(leaf.ref,))
-    graph = catalog.graph.dependency_closure(root.ref)
+    graph = resolve_published(catalog, root.ref)
     before = graph_json(graph)
     catalog.publish(consumer, dependencies=(root.ref,))
-    assert graph_json(catalog.graph.dependency_closure(root.ref)) == before
+    assert graph_json(resolve_published(catalog, root.ref)) == before
     assert catalog.graph.consumers(root.ref) == (consumer,)
 
 
 @pytest.mark.parametrize("length", [1, 40])
-def test_dependency_closure_returns_the_entire_graph(catalog: Catalog, length: int) -> None:
+def test_resolution_returns_the_entire_graph(catalog: Catalog, length: int) -> None:
     records = tuple(release(f"part-{index:04}") for index in range(length + 1))
     edges = tuple(Dependency(source.ref, target.ref) for source, target in pairwise(records))
     catalog.publish(records[-1])
     for source, target in reversed(tuple(pairwise(records))):
         catalog.publish(source, dependencies=(target.ref,))
-    result = catalog.graph.dependency_closure(records[0].ref)
+    result = resolve_published(catalog, records[0].ref)
     assert result.records == records
     assert set(result.dependencies) == set(edges)
 
@@ -128,7 +128,6 @@ def test_missing_graph_roots_are_errors(catalog: Catalog) -> None:
     methods: tuple[Callable[[Ref], object], ...] = (
         catalog.graph.dependencies,
         catalog.graph.consumers,
-        catalog.graph.dependency_closure,
     )
     for method in methods:
         with pytest.raises(NotFound):

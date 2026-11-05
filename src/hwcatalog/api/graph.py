@@ -19,10 +19,6 @@ class CatalogGraph(Protocol):
         """Find immediate consumers; Conan checks candidate requirements."""
         ...
 
-    def dependency_closure(self, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
-        """Resolve a published root and its complete dependency graph."""
-        ...
-
     def resolve_local(
         self, record: Record, *, dependencies: tuple[Ref, ...] = (), lockfile: Path | None = None
     ) -> GraphResult:

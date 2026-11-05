@@ -23,6 +23,7 @@ from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.api.models.resources import GitResource
 from hwcatalog.backends.conan import ConanBackend
+from tests.helpers import resolve_published
 
 
 @pytest.fixture
@@ -55,7 +56,7 @@ def test_publish_json_dependencies_and_stored_files(packages: Catalog, tmp_path:
     assert record.source is None
     assert packages.get(record.ref) == record
     assert packages.graph.dependencies(record.ref) == (packages.get(rtl.ref),)
-    assert packages.graph.dependency_closure(record.ref).dependencies == (
+    assert resolve_published(packages, record.ref).dependencies == (
         Dependency(record.ref, rtl.ref),
     )
     artifact.unlink()

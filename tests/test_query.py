@@ -5,7 +5,7 @@ import pytest
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
-from tests.helpers import release, run
+from tests.helpers import release, resolve_published, run
 
 
 def test_criteria_are_detached() -> None:
@@ -72,7 +72,7 @@ def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
     for record in records:
         catalog.publish(record)
     catalog.publish(root, dependencies=tuple(record.ref for record in records))
-    assert len(catalog.graph.dependency_closure(root.ref).records) == 5
+    assert len(resolve_published(catalog, root.ref).records) == 5
     assert {record.ref for record in catalog.search(SearchQuery(name="core", version="1.0"))} == {
         record.ref for record in records
     }
@@ -92,7 +92,7 @@ def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) ->
     assert len(set(refs)) == len(refs)
     assert len({ref.package_name for ref in refs}) == len(refs)
     assert len(catalog.search(SearchQuery(name="same", version="1.0"))) == 3
-    assert len(catalog.graph.dependency_closure(root.ref).records) == 4
+    assert len(resolve_published(catalog, root.ref).records) == 4
     for record in records:
         assert catalog.search(SearchQuery(kind=record.ref.kind)) == (record,)
         assert catalog.get(record.ref) == record
