@@ -260,7 +260,7 @@ class ConanBackend:
         """Install artifacts and optionally run Conan source retrieval for this package."""
         with self._operation():
             pinned, directory = self._locate(normalize_ref(ref))
-            record, metadata = read_recipe(directory, ref)
+            record, _ = read_recipe(directory, ref)
             if not record.source and not record.files:
                 raise MaterializationError("Package has no stored source or artifacts")
             with TemporaryDirectory(prefix="hwcatalog-conan-install-") as temporary:
@@ -279,8 +279,7 @@ class ConanBackend:
                 if with_sources and record.source is not None:
                     if package.folders.source_folder is None:
                         raise MaterializationError("Conan did not provide the SCM source folder")
-                    subfolder = "checkout" if metadata.format in (1, 2) else "source"
-                    source_path = Path(package.folders.source_folder) / subfolder
+                    source_path = Path(package.folders.source_folder) / "source"
                 return MaterializedPackage(Path(package.package_folder), source_path)
 
 

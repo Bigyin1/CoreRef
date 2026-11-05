@@ -20,7 +20,6 @@ _TOKEN = re.compile(r"[a-z0-9_-]+\Z")
 _VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
-_RECIPE_FORMAT: Literal[5] = 5
 
 _RECIPE_ENV = Environment(
     loader=PackageLoader("hwcatalog._internal.backends"),
@@ -31,6 +30,7 @@ _RECIPE_ENV = Environment(
     keep_trailing_newline=True,
 )
 _RECIPE_ENV.filters["pyrepr"] = repr
+_RECIPE_TEMPLATE = _RECIPE_ENV.get_template("conanfile.py.j2")
 
 
 def to_conan_reference(ref: Ref) -> str:
@@ -79,17 +79,14 @@ def search_pattern(query: SearchQuery) -> str | None:
 
 class RecipeMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    format: Literal[1, 2, 3, 4, 5] = 1
+    format: Literal[5]
     has_source: bool = False
     requires: tuple[str, ...] = ()
 
 
-def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, format_version: int = 1) -> str:
+def _recipe_text(ref: Ref, requirements: tuple[str, ...]) -> str:
     name, version = to_conan_reference(ref).split("/")
-    template = "conanfile.py.j2" if format_version >= _RECIPE_FORMAT else "legacy_conanfile.py.j2"
-    return _RECIPE_ENV.get_template(template).render(
-        name=name, version=version, requirements=requirements, format_version=format_version
-    )
+    return _RECIPE_TEMPLATE.render(name=name, version=version, requirements=requirements)
 
 
 class _SCM(BaseModel):
@@ -116,14 +113,12 @@ def write_recipe(
     record = normalize_record(record)
     requirements = tuple(sorted(set(requirements)))
     metadata = RecipeMetadata(
-        format=_RECIPE_FORMAT,
+        format=5,
         requires=requirements,
         has_source=bool(record.source or source_path),
     )
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "conanfile.py").write_text(
-        _recipe_text(record.ref, requirements, format_version=metadata.format)
-    )
+    (directory / "conanfile.py").write_text(_recipe_text(record.ref, requirements))
     (directory / "record.json").write_text(replace(record, source=None).to_json())
     (directory / "hwcatalog.json").write_text(metadata.model_dump_json())
     if source_path is not None:
@@ -152,8 +147,6 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata]
         metadata = RecipeMetadata.model_validate_json((directory / "hwcatalog.json").read_text())
         if record.source is not None:
             raise ValueError("Git source must be stored in Conan SCM metadata")
-        if metadata.format == 1 and (record.files or metadata.has_source):
-            raise ValueError("Content requires format two")
         if metadata.has_source:
             data = _ConanData.model_validate(
                 yaml.safe_load((directory / "conandata.yml").read_text())
@@ -169,7 +162,7 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata]
         for dependency in metadata.requires:
             if to_conan_reference(from_conan_reference(dependency)) != dependency.split("#", 1)[0]:
                 raise ValueError("Requirements must use canonical exact references")
-        recipe = _recipe_text(record.ref, metadata.requires, format_version=metadata.format)
+        recipe = _recipe_text(record.ref, metadata.requires)
         if (directory / "conanfile.py").read_text() != recipe:
             raise ValueError("Only canonical catalog recipes are supported")
         return record, metadata

@@ -1,14 +1,12 @@
 """Project-owned Conan lockfiles stay opaque and outside published packages."""
 
 import json
-import shutil
 from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
 from examples.conan_config import configured_home
-from hwcatalog._internal.backends.conan_format import write_recipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import BackendUnavailable, InvalidPackage
 from hwcatalog.api.models.graph import Dependency
@@ -99,21 +97,3 @@ def test_empty_project_lockfile(tmp_path: Path) -> None:
         catalog.create_lockfile((root.ref,), lockfile)
         catalog.create_lockfile((), lockfile)
         assert lockfile.read_bytes() == empty_lock
-
-
-@pytest.mark.parametrize("format_version", [1, 2, 3])
-def test_legacy_recipe_with_embedded_lockfile_remains_readable(
-    tmp_path: Path, format_version: int
-) -> None:
-    backend = ConanBackend(configured_home(tmp_path / "cache"))
-    record = Record(Ref("cpu", "1.0", "rtl", "soc"))
-    recipe = tmp_path / "legacy"
-    write_recipe(recipe, record)
-    (recipe / "hwcatalog.json").write_text(json.dumps({"format": format_version}))
-    fixture = Path(__file__).parent / "fixtures" / "recipes" / f"format-{format_version}.txt"
-    shutil.copyfile(fixture, recipe / "conanfile.py")
-    backend._client.create_lockfile(recipe)
-    backend._client.export(recipe)
-    with Catalog(backend) as catalog:
-        assert catalog.get(record.ref) == record
-        assert resolve_published(catalog, record.ref).records == (record,)

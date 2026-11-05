@@ -1,9 +1,0 @@
-from conan import ConanFile
-
-
-class CatalogRecord(ConanFile):
-    name = 'soc.cpu.rtl'
-    version = '1.0'
-    package_type = "header-library"
-    exports = "record.json", "hwcatalog.json", "conan.lock"
-    requires = ()
