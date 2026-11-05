@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from ...api.errors import Conflict, InvalidPackage
 from ...api.models.records import Record, Ref
+from ...api.protocols import RefCatalog
 from ..manifest import Manifest, read_manifest
 from ..validation import normalize_publication, normalize_ref
 from . import records
@@ -16,10 +17,21 @@ from .format import (
 )
 
 
-def publish_file(client: ConanClient, path: str | Path, *, lockfile: Path | None = None) -> Record:
+def publish_file(
+    client: ConanClient,
+    path: str | Path,
+    *,
+    lockfile: Path | None = None,
+    catalog: RefCatalog | None = None,
+) -> Record:
     manifest = read_manifest(Path(path))
     return publish(
-        client, manifest.record, manifest.dependencies, manifest=manifest, lockfile=lockfile
+        client,
+        manifest.record,
+        manifest.dependencies,
+        manifest=manifest,
+        lockfile=lockfile,
+        catalog=catalog,
     )
 
 
@@ -39,8 +51,9 @@ def publish(
     *,
     manifest: Manifest | None = None,
     lockfile: Path | None = None,
+    catalog: RefCatalog | None = None,
 ) -> Record:
-    record, dependencies = normalize_publication(record, dependencies)
+    record, dependencies = normalize_publication(record, dependencies, catalog=catalog)
     if record.files and manifest is None:
         raise InvalidPackage("Publish stored files using a package JSON document")
     logical = to_conan_reference(record.ref)

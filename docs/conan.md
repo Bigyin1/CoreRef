@@ -34,7 +34,7 @@ from hwcatalog.api.catalog import Catalog
 catalog = Catalog()
 record = catalog.publish_file("package.json")
 print(record.source, record.files)
-package = catalog.materialize(record.ref, with_sources=True)
+package = record.ref.materialize(with_sources=True)
 print(package.source_path)  # SCM checkout in Conan's source cache
 print(package.path / "artifacts" / "timing/cpu.lib")
 ```
@@ -126,9 +126,9 @@ Conan. Формат, версия схемы и содержимое файла 
 ```python
 lockfile = catalog.create_lockfile((rtl_ref,), "/work/project/conan.lock")
 record = catalog.publish_file("package.json", lockfile=lockfile)
-dependencies = tuple(item.ref for item in catalog.dependencies(record.ref))
+dependencies = tuple(item.ref for item in record.ref.dependencies())
 graph = catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
-package = catalog.materialize(record.ref, with_sources=True)
+package = record.ref.materialize(with_sources=True)
 ```
 
 Существующий файл используется как вход при явном обновлении. При обычном чтении

@@ -79,7 +79,7 @@ def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
     assert len(catalog.search(SearchQuery(namespace="rtl"))) == 2
     assert len(catalog.search(SearchQuery(name="core", kind="soc", namespace="physical"))) == 1
     for record in records:
-        assert catalog.get(record.ref) == record
+        assert Ref(**record.ref.to_dict(), catalog=catalog).get() == record
 
 
 def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) -> None:
@@ -95,4 +95,4 @@ def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) ->
     assert len(resolve_published(catalog, root.ref).records) == 4
     for record in records:
         assert catalog.search(SearchQuery(kind=record.ref.kind)) == (record,)
-        assert catalog.get(record.ref) == record
+        assert Ref(**record.ref.to_dict(), catalog=catalog).get() == record

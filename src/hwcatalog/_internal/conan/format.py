@@ -14,6 +14,7 @@ from ...api.errors import InvalidPackage
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
 from ...api.models.resources import GitResource
+from ...api.protocols import RefCatalog
 from ..validation import normalize_record, normalize_ref
 
 _TOKEN = re.compile(r"[a-z0-9_-]+\Z")
@@ -51,12 +52,12 @@ def to_conan_reference(ref: Ref) -> str:
     return value
 
 
-def from_conan_reference(value: str) -> Ref:
+def from_conan_reference(value: str, *, catalog: RefCatalog | None = None) -> Ref:
     """Decode a recipe reference; revisions and timestamps are transport details."""
     try:
         name, version = value.split("#", 1)[0].split("/")
         namespace, component, kind = name.split(".")
-        ref = Ref(component, version, kind, namespace)
+        ref = Ref(component, version, kind, namespace, catalog=catalog)
         if to_conan_reference(ref) != value.split("#", 1)[0]:
             raise ValueError("Noncanonical coordinates")
         return ref
@@ -141,7 +142,12 @@ def write_recipe(
 def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata]:
     """Validate the exported format before allowing Conan to evaluate the recipe."""
     try:
-        record = normalize_record(Record.from_json((directory / "record.json").read_text()))
+        record = normalize_record(
+            Record.from_json(
+                (directory / "record.json").read_text(),
+                catalog=expected.catalog,
+            )
+        )
         metadata = RecipeMetadata.model_validate_json((directory / "hwcatalog.json").read_text())
         if record.source is not None:
             raise ValueError("Git source must be stored in Conan SCM metadata")

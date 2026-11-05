@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from ..api.errors import InvalidPackage
 from ..api.models.query import SearchQuery
 from ..api.models.records import Record, Ref
+from ..api.protocols import RefCatalog
 
 
 def _text(value: str, *, blank: bool = False) -> str:
@@ -20,10 +21,16 @@ def _optional_text(value: str | None) -> str | None:
 
 
 def normalize_ref(value: Ref) -> Ref:
-    return Ref(_text(value.name), _text(value.version), _text(value.kind), _text(value.namespace))
+    return Ref(
+        _text(value.name),
+        _text(value.version),
+        _text(value.kind),
+        _text(value.namespace),
+        catalog=value.catalog,
+    )
 
 
-def normalize_record(value: Record) -> Record:
+def normalize_record(value: Record, *, catalog: RefCatalog | None = None) -> Record:
     if value.source is not None:
         url = _text(value.source.repository_url)
         if url.startswith("-") or any(char in url for char in ('"', "`", "$", "\n", "\r", "\0")):
@@ -37,16 +44,18 @@ def normalize_record(value: Record) -> Record:
     if len(set(value.files)) != len(value.files):
         raise InvalidPackage("Duplicate artifact names")
     record = replace(value, ref=normalize_ref(value.ref))
-    return Record.from_json(record.to_json())
+    return Record.from_json(
+        record.to_json(), catalog=catalog if catalog is not None else value.ref.catalog
+    )
 
 
 def normalize_publication(
-    record: Record, dependencies: tuple[Ref, ...]
+    record: Record, dependencies: tuple[Ref, ...], *, catalog: RefCatalog | None = None
 ) -> tuple[Record, tuple[Ref, ...]]:
     """Validate one new package and its direct dependency references."""
     if not isinstance(record, Record):
         raise InvalidPackage("Publish accepts one Record")
-    record = normalize_record(record)
+    record = normalize_record(record, catalog=catalog)
     if any(not isinstance(ref, Ref) for ref in dependencies):
         raise InvalidPackage("Dependencies must be Ref values")
     dependencies = tuple(normalize_ref(ref) for ref in dependencies)

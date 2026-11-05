@@ -1,7 +1,6 @@
 """Project-owned Conan lockfiles stay opaque and outside published packages."""
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -25,8 +24,8 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
     description.write_text(
         json.dumps(
             {
-                "ref": asdict(result),
-                "dependencies": [asdict(dependency.ref)],
+                "ref": result.to_dict(),
+                "dependencies": [dependency.ref.to_dict()],
                 "files": {"cpu.lib": str(artifact)},
             }
         )
@@ -42,7 +41,7 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
     assert resolve_published(catalog, result, lockfile=lockfile).dependencies == (
         Dependency(result, dependency.ref),
     )
-    installed = catalog.materialize(result)
+    installed = Ref(**result.to_dict(), catalog=catalog).materialize()
     assert (installed.path / "artifacts/cpu.lib").read_text() == artifact.read_text()
     assert not (installed.path / "conan.lock").exists()
     assert lockfile.read_bytes() == original_lock
@@ -84,7 +83,7 @@ def test_conan_validates_the_supplied_project_lockfile(
         lockfile.write_text("not a Conan lockfile\n")
     with pytest.raises(exception):
         resolve_published(catalog, macro.ref, lockfile=lockfile)
-    assert catalog.get(macro.ref) == macro
+    assert Ref(**macro.ref.to_dict(), catalog=catalog).get() == macro
 
 
 def test_empty_project_lockfile(tmp_path: Path) -> None:

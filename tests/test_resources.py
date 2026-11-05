@@ -34,7 +34,7 @@ def test_consumer_decodes_its_own_resource(
         payload=(descriptor,),
     )
     catalog.publish(record)
-    stored = catalog.get(record.ref)
+    stored = Ref(**record.ref.to_dict(), catalog=catalog).get()
     assert isinstance(stored.payload, tuple)
     payload = stored.payload[0]
     assert isinstance(payload, Mapping)

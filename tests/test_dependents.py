@@ -22,13 +22,22 @@ def test_candidate_search_uses_arbitrary_paths_and_exact_versions(catalog: Catal
     catalog.publish(wrong, dependencies=(other.ref,))
     catalog.publish(unrelated)
     query = SearchQuery(namespace="soc", name="cpu", kind="lib-lef")
-    assert catalog.find_dependents(rtl.ref, candidates=query) == (macro,)
-    assert not catalog.find_dependents(rtl.ref, candidates=query, transitive=False)
-    assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(), transitive=False) == (middle,)
-    assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="rtl")) == ()
-    assert catalog.find_dependents(other.ref, candidates=query) == (wrong,)
+    assert Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(candidates=query) == (macro,)
+    assert not Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(
+        candidates=query, transitive=False
+    )
+    assert Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(
+        candidates=SearchQuery(), transitive=False
+    ) == (middle,)
+    assert (
+        Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(
+            candidates=SearchQuery(kind="rtl")
+        )
+        == ()
+    )
+    assert Ref(**other.ref.to_dict(), catalog=catalog).find_dependents(candidates=query) == (wrong,)
     with pytest.raises(NotFound):
-        catalog.find_dependents(Ref("missing", "1.0", "rtl", "soc"), candidates=query)
+        Ref("missing", "1.0", "rtl", "soc", catalog=catalog).find_dependents(candidates=query)
 
 
 def test_conflicting_versions_are_rejected_by_conan(catalog: Catalog) -> None:
@@ -40,5 +49,5 @@ def test_conflicting_versions_are_rejected_by_conan(catalog: Catalog) -> None:
         catalog.publish(
             Record(Ref("top", "1.0", "rtl", "soc")), dependencies=(first.ref, second.ref)
         )
-    assert catalog.get(first.ref) == first
-    assert catalog.get(second.ref) == second
+    assert Ref(**first.ref.to_dict(), catalog=catalog).get() == first
+    assert Ref(**second.ref.to_dict(), catalog=catalog).get() == second

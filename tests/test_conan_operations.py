@@ -1,6 +1,5 @@
 """Conan performs resolution once; direct queries read canonical requirements."""
 
-from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -22,7 +21,7 @@ def test_materialize_uses_published_requirements_without_project_lock(
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     document = description(
-        tmp_path, files={"cpu.lib": str(artifact)}, dependencies=[asdict(rtl.ref)]
+        tmp_path, files={"cpu.lib": str(artifact)}, dependencies=[rtl.ref.to_dict()]
     )
     record = catalog.publish_file(document)
     lock = catalog.create_lockfile((record.ref,), tmp_path / "conan.lock") if locked else None
@@ -46,7 +45,7 @@ def test_materialize_uses_published_requirements_without_project_lock(
         return run(*arguments)
 
     monkeypatch.setattr(connection._client, "run", track)
-    package = catalog.materialize(record.ref)
+    package = record.ref.materialize()
     assert (package.path / "artifacts/cpu.lib").read_text() == artifact.read_text()
     assert sum(args[0] == "install" for args in operations) == 1
     assert not any(args[:2] == ("graph", "info") or args[0] == "lock" for args in operations)
@@ -66,8 +65,8 @@ def test_direct_queries_do_not_resolve_dependency_graphs(
         return run(*arguments)
 
     monkeypatch.setattr(connection._client, "run", track)
-    assert catalog.dependencies(macro.ref) == (rtl,)
-    assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(), transitive=False) == (macro,)
-    assert catalog.find_dependents(
-        rtl.ref, candidates=SearchQuery(kind="lib-lef"), transitive=False
-    ) == (macro,)
+    assert macro.ref.dependencies() == (rtl,)
+    assert rtl.ref.find_dependents(candidates=SearchQuery(), transitive=False) == (macro,)
+    assert rtl.ref.find_dependents(candidates=SearchQuery(kind="lib-lef"), transitive=False) == (
+        macro,
+    )

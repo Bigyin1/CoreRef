@@ -55,15 +55,15 @@ def test_public_models_import_independently_of_conan() -> None:
             payload=manifest,
         )
         instance = catalog.Catalog(Path(home.name))
-        instance.publish(record=record)
-        stored = instance.get(record.ref)
+        record = instance.publish(record=record)
+        stored = record.ref.get()
         assert stored.ref == record.ref
         assert stored.payload["views"] == ("rtl", "timing")
         assert instance.search(query.SearchQuery()) == (stored,)
-        assert instance.dependencies(record.ref) == ()
+        assert record.ref.dependencies() == ()
         assert instance.resolve_local(stored).records == (stored,)
         try:
-            instance.get(records.Ref("absent", "v1", "rtl-project", "public"))
+            records.Ref("absent", "v1", "rtl-project", "public", catalog=instance).get()
         except errors.NotFound:
             pass
         else:

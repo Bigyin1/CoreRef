@@ -1,7 +1,6 @@
 """Run with ``uv run python examples/conan_macro.py``; uses a disposable local cache."""
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,7 +17,7 @@ def main() -> None:
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"))
     with TemporaryDirectory(prefix="hwcatalog-example-") as directory:
         catalog = Catalog(configured_home(Path(directory)))
-        catalog.publish(rtl)
+        rtl = catalog.publish(rtl)
         catalog.publish(intermediate, dependencies=(rtl.ref,))
         inputs = Path(directory) / "inputs"
         inputs.mkdir()
@@ -28,22 +27,22 @@ def main() -> None:
         manifest.write_text(
             json.dumps(
                 {
-                    "ref": asdict(macro.ref),
+                    "ref": macro.ref.to_dict(),
                     "payload": {"corner": "tt"},
-                    "dependencies": [asdict(intermediate.ref)],
+                    "dependencies": [intermediate.ref.to_dict()],
                     "files": {"cpu.lib": "cpu.lib", "cpu.lef": "cpu.lef"},
                 }
             )
         )
         catalog.publish_file(manifest)
         candidates = SearchQuery(namespace="soc1", name="cpu", kind="lib-lef")
-        for result in catalog.find_dependents(rtl.ref, candidates=candidates):
+        for result in rtl.ref.find_dependents(candidates=candidates):
             print(result.ref)
             print(result.to_json())
-            dependencies = tuple(record.ref for record in catalog.dependencies(result.ref))
+            dependencies = tuple(record.ref for record in result.ref.dependencies())
             graph = catalog.resolve_local(result, dependencies=dependencies)
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
-            content = catalog.materialize(result.ref).path
+            content = result.ref.materialize().path
             print((content / "artifacts/cpu.lib").read_text().strip())
 
 

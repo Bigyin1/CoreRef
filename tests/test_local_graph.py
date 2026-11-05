@@ -39,7 +39,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     stored_root = next(item for item in graph.records if item.ref == root.ref)
     assert stored_root.payload == {"local": ("working-tree",)}
     with pytest.raises(NotFound):
-        catalog.get(root.ref)
+        Ref(**root.ref.to_dict(), catalog=catalog).get()
     assert len(catalog.search()) == 3
 
 
@@ -61,8 +61,8 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     graph = catalog.resolve_local(local, dependencies=(current.ref,))
     assert graph.records == (current, local)
     assert graph.dependencies == (Dependency(root.ref, current.ref),)
-    assert catalog.get(root.ref) == root
-    assert catalog.dependencies(root.ref) == (old,)
+    assert Ref(**root.ref.to_dict(), catalog=catalog).get() == root
+    assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies() == (old,)
 
 
 def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> None:
@@ -112,7 +112,7 @@ def test_conan_resolves_one_consumer_without_exporting(
     assert not Path(graphs[0][2]).exists()  # Temporary consumer is removed.
     assert not {args[0] for args in operations} & {"export", "export-pkg", "upload"}
     with pytest.raises(NotFound):
-        catalog.get(record("top").ref)
+        Ref(**record("top").ref.to_dict(), catalog=catalog).get()
 
 
 def test_conan_local_consumer_uses_opaque_project_lockfile(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 """Resolve and validate native Conan dependency graphs."""
 
+from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,6 +8,7 @@ from ...api.errors import InvalidPackage
 from ...api.models.graph import Dependency, GraphResult
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
+from ...api.protocols import RefCatalog
 from ..validation import normalize_publication, normalize_query, normalize_ref
 from . import records
 from .client import ConanClient
@@ -24,9 +26,10 @@ def resolve_local(
     *,
     dependencies: tuple[Ref, ...] = (),
     lockfile: Path | None = None,
+    catalog: RefCatalog | None = None,
 ) -> GraphResult:
     """Resolve local root data independently of its publication status."""
-    record, dependencies = normalize_publication(record, dependencies)
+    record, dependencies = normalize_publication(record, dependencies, catalog=catalog)
     requirements = tuple(records.requirement(client, ref) for ref in dependencies)
     with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
         directory = Path(temporary)
@@ -40,12 +43,17 @@ def resolve_local(
 
 
 def find_dependents(
-    client: ConanClient, ref: Ref, *, candidates: SearchQuery, transitive: bool = True
+    client: ConanClient,
+    ref: Ref,
+    *,
+    candidates: SearchQuery,
+    search: Callable[[SearchQuery], tuple[Record, ...]],
+    transitive: bool = True,
 ) -> tuple[Record, ...]:
     ref = normalize_ref(ref)
     records.get(client, ref)
     result = []
-    for candidate in records.search(client, normalize_query(candidates)):
+    for candidate in search(normalize_query(candidates)):
         if candidate.ref == ref:
             continue
         if transitive:
@@ -77,14 +85,18 @@ def graph_records(client: ConanClient, graph: NativeGraph, root: Record) -> dict
     if _package_ref(root_package) != root.ref:
         raise InvalidPackage("Conan graph root differs from the requested reference")
     _validate_package(root_package)
-    return {root.ref: root, **dependency_records(client, graph)}
+    return {root.ref: root, **dependency_records(client, graph, catalog=root.ref.catalog)}
 
 
-def dependency_records(client: ConanClient, graph: NativeGraph) -> dict[Ref, Record]:
+def dependency_records(
+    client: ConanClient, graph: NativeGraph, *, catalog: RefCatalog | None = None
+) -> dict[Ref, Record]:
     packages = tuple(graph.root.conanfile.dependencies.host.topological_sort.values())
     for package in packages:
         _validate_package(package)
-    return records.read_records(client, tuple(package.ref.repr_notime() for package in packages))
+    return records.read_records(
+        client, tuple(package.ref.repr_notime() for package in packages), catalog=catalog
+    )
 
 
 def _package_ref(package: NativePackage) -> Ref:
@@ -108,5 +120,5 @@ def _graph_dependencies(graph: NativeGraph, records: dict[Ref, Record]) -> tuple
             target_ref = _package_ref(target)
             if source not in records or target_ref not in records:
                 raise InvalidPackage("Conan graph contains an unknown endpoint")
-            edges.add(Dependency(source, target_ref))
+            edges.add(Dependency(records[source].ref, records[target_ref].ref))
     return tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))

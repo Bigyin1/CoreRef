@@ -10,15 +10,30 @@ Catalog — обычный объект для работы с уже настр
 
 | Операция | Результат |
 |---|---|
-| get(ref) | Record; NotFound при отсутствии |
 | search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по Ref |
 | publish(record, *, dependencies=(), lockfile=None) | Публикует один новый пакет и возвращает Record; dependencies — tuple[Ref, ...] |
 | publish_file(path, *, lockfile=None) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
 | create_lockfile(refs, path) | Создаёт или обновляет lockfile проекта штатными средствами Conan; возвращает Path |
-| materialize(ref, *, with_sources=False) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
-| dependencies(ref, filters=SearchQuery()) | Непосредственные зависимости как tuple[Record, ...] |
 | resolve_local(record, *, dependencies=(), lockfile=None) | GraphResult для локального корня и опубликованных зависимостей; корень не публикуется |
-| find_dependents(ref, *, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
+
+Операции одного пакета — методы `Ref`, создаваемого с `catalog=catalog`:
+
+| Операция | Результат |
+|---|---|
+| ref.get() | Record; NotFound при отсутствии |
+| ref.materialize(*, with_sources=False) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
+| ref.dependencies(filters=None) | Непосредственные зависимости как tuple[Record, ...] |
+| ref.find_dependents(*, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
+
+`Ref.catalog` имеет тип `RefCatalog`: это структурный протокол с публичным `search`
+и внутренним контекстом Conan для чтения графов и получения файлов. Сам `Catalog`
+соответствует протоколу; дополнительный объект или поле `view` не нужны.
+Ссылки в результатах `publish`, `publish_file`, `search`, `resolve_local` и методов
+`Ref` сразу создаются с этим контекстом. Отдельного шага привязки нет.
+Контекст не участвует в равенстве, хеше, строковом представлении и JSON.
+`ref.to_dict()` возвращает только координаты; `Record.from_json(data, catalog=catalog)`
+создаёт ссылку с указанным контекстом. Без каталога Ref можно хранить и сравнивать,
+а операции чтения вызывают CatalogError.
 
 Publish принимает один Record. Все зависимости должны уже существовать;
 коллекции новых записей не принимаются. Существующие записи не обновляются.
@@ -47,8 +62,9 @@ Filters в `dependencies` применяются к найденным запи�
 входные данные можно получить теми же операциями чтения:
 
 ```python
-record = catalog.get(ref)
-dependencies = tuple(item.ref for item in catalog.dependencies(ref))
+ref = Ref("cpu", "1.0", "rtl", "soc", catalog=catalog)
+record = ref.get()
+dependencies = tuple(item.ref for item in ref.dependencies())
 graph = catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
 ```
 
@@ -75,8 +91,8 @@ Dependency(source, target) используется в GraphResult. Вместо
 Причина сбоя сохраняется в сообщении и цепочке исключений. Автоматических повторов
 или rollback удалённой публикации нет.
 
-Catalog предоставляет get, search, dependencies, resolve_local, find_dependents,
-publish, publish_file, create_lockfile и materialize. В классе остаются
+Catalog предоставляет search, resolve_local, publish, publish_file и create_lockfile.
+Ref предоставляет get, dependencies, find_dependents и materialize. В классах остаются
 настройка клиента и короткие вызовы внутренних функций.
 Чтение записей, работа с графом, публикация и получение файлов реализованы
 в `_internal/conan/records.py`, `graph.py`, `publication.py` и `materialization.py`.
@@ -86,7 +102,7 @@ JSONSerializable — Protocol с методом to_json() -> str; наследо
 ## Внешние ресурсы
 
 GitResource хранит SCM-координаты без клонирования или собственного кэша.
-Исходники получает `catalog.materialize(ref, with_sources=True)` через штатный
+Исходники получает `ref.materialize(with_sources=True)` через штатный
 `source()` сгенерированного Conan-рецепта. LocatedResource.materialize()
 проверяет внешний путь и возвращает MaterializedResource(path).
 

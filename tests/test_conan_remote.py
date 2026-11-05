@@ -8,7 +8,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from dataclasses import asdict
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -102,7 +101,12 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     catalog = remote_catalog
     catalog.publish(rtl)
     catalog.publish(be, dependencies=(rtl.ref,))
-    assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))[0].ref == be.ref
+    assert (
+        Ref(**rtl.ref.to_dict(), catalog=catalog)
+        .find_dependents(candidates=SearchQuery(kind="lib-lef"))[0]
+        .ref
+        == be.ref
+    )
     with pytest.raises(Conflict):
         catalog.publish(rtl)
     original_graph = resolve_published(catalog, be.ref)
@@ -126,7 +130,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     home.mkdir()
     shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
     reader = Catalog(configured_home(home), remote="catalog")
-    assert reader.get(be.ref).payload == {"source": "cpu.lib"}
+    assert Ref(**be.ref.to_dict(), catalog=reader).get().payload == {"source": "cpu.lib"}
     assert resolve_published(reader, be.ref) == original_graph
     new_rtl = Record(Ref("cpu", "2.0", "rtl", "soc"))
     external = tmp_path / "ci"
@@ -134,11 +138,13 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     remote_catalog._client.create_lockfile(external)
     pinned = remote_catalog._client.export(external)
     remote_catalog._client.upload(pinned)
-    assert reader.get(new_rtl.ref).ref == new_rtl.ref
+    assert Ref(**new_rtl.ref.to_dict(), catalog=reader).get().ref == new_rtl.ref
     assert resolve_published(reader, be.ref) == original_graph
     remote_catalog._client.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
     with pytest.raises(CatalogError):
-        catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))
+        Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(
+            candidates=SearchQuery(kind="lib-lef")
+        )
 
 
 def test_cached_package_is_not_published_until_remote_upload_succeeds(
@@ -160,7 +166,7 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
 
     # A prepared local package must not block another attempt to publish to the server.
     catalog.publish(record)
-    assert catalog.get(record.ref) == record
+    assert Ref(**record.ref.to_dict(), catalog=catalog).get() == record
 
 
 def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
@@ -176,9 +182,9 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     description.write_text(
         json.dumps(
             {
-                "ref": asdict(Ref("cpu", "1.0", "lib-lef", "soc")),
+                "ref": Ref("cpu", "1.0", "lib-lef", "soc").to_dict(),
                 "source": {"path": "checkout"},
-                "dependencies": [asdict(dependency.ref)],
+                "dependencies": [dependency.ref.to_dict()],
                 "files": {"cpu.lib": "cpu.lib"},
                 "payload": {"corner": "tt"},
             }
@@ -192,8 +198,8 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     home.mkdir()
     shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
     reader = Catalog(configured_home(home), remote="catalog")
-    assert reader.get(published.ref) == published
-    installed = reader.materialize(published.ref)
+    assert Ref(**published.ref.to_dict(), catalog=reader).get() == published
+    installed = Ref(**published.ref.to_dict(), catalog=reader).materialize()
     assert installed.source_path is None
     assert not (installed.path / "source").exists()
     assert (installed.path / "artifacts/cpu.lib").read_text() == "library(cpu) {}"
@@ -203,10 +209,10 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     git_origin.rename(offline)
     try:
         with pytest.raises(CatalogError):
-            reader.materialize(published.ref, with_sources=True)
+            Ref(**published.ref.to_dict(), catalog=reader).materialize(with_sources=True)
     finally:
         offline.rename(git_origin)
-    fetched = reader.materialize(published.ref, with_sources=True)
+    fetched = Ref(**published.ref.to_dict(), catalog=reader).materialize(with_sources=True)
     assert fetched.path == installed.path
     assert fetched.source_path is not None
     assert (fetched.source_path / "cpu.sv").read_text() == "module cpu; endmodule\n"
@@ -223,4 +229,4 @@ def test_one_configured_remote_is_used_automatically(
     home = configured_home(tmp_path / "automatic-reader")
     shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
     reader = Catalog(home)
-    assert reader.get(record.ref) == record
+    assert Ref(**record.ref.to_dict(), catalog=reader).get() == record

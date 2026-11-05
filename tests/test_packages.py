@@ -25,35 +25,35 @@ def packages(tmp_path: Path) -> Catalog:
 
 def description(tmp_path: Path, **fields: object) -> Path:
     path = tmp_path / "package.json"
-    document = {"ref": asdict(Ref("cpu", "4.0", "lib-lef", "soc")), **fields}
+    document = {"ref": Ref("cpu", "4.0", "lib-lef", "soc").to_dict(), **fields}
     path.write_text(json.dumps(document))
     return path
 
 
 def test_publish_json_dependencies_and_stored_files(packages: Catalog, tmp_path: Path) -> None:
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"))
-    packages.publish(rtl)
+    rtl = packages.publish(rtl)
     artifact = tmp_path / "cpu.lib"
     artifact.write_bytes(b"library(cpu) {}\n\x00")
     path = description(
         tmp_path,
         payload={"corner": "tt"},
-        dependencies=[asdict(rtl.ref)],
+        dependencies=[rtl.ref.to_dict()],
         files={"timing/cpu.lib": "cpu.lib"},
     )
     record = packages.publish_file(str(path))
     assert record.files == ("timing/cpu.lib",)
     assert record.source is None
-    assert packages.get(record.ref) == record
-    assert packages.dependencies(record.ref) == (packages.get(rtl.ref),)
+    assert record.ref.get() == record
+    assert record.ref.dependencies() == (rtl.ref.get(),)
     assert resolve_published(packages, record.ref).dependencies == (
         Dependency(record.ref, rtl.ref),
     )
     artifact.unlink()
     path.unlink()
-    content = packages.materialize(record.ref).path
+    content = record.ref.materialize().path
     assert (content / "artifacts/timing/cpu.lib").read_bytes() == b"library(cpu) {}\n\x00"
-    assert packages.materialize(record.ref).path == content
+    assert record.ref.materialize().path == content
     with pytest.raises(InvalidPackage):
         packages.publish(record)
 
@@ -67,16 +67,16 @@ def test_local_source_is_captured_once_outside_payload(
     with Repo(checkout) as repository:
         assert record.source.resolved_commit == repository.head().decode()
     assert record.payload == {"tool": "synthesis"}
-    assert packages.get(record.ref) == record
-    artifacts = packages.materialize(record.ref)
+    assert record.ref.get() == record
+    artifacts = record.ref.materialize()
     assert artifacts.source_path is None
     assert not (artifacts.path / "source").exists()
-    fetched = packages.materialize(record.ref, with_sources=True)
+    fetched = record.ref.materialize(with_sources=True)
     assert fetched.source_path is not None
     assert (fetched.source_path / "cpu.sv").read_text() == "module cpu; endmodule\n"
     assert not fetched.source_path.is_relative_to(fetched.path)
     shutil.rmtree(checkout)
-    assert packages.materialize(record.ref, with_sources=True).source_path == fetched.source_path
+    assert record.ref.materialize(with_sources=True).source_path == fetched.source_path
     assert Record.from_json(record.to_json()) == record
 
 
@@ -90,14 +90,14 @@ def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path)
     assert "source" not in json.loads((folder / "record.json").read_text())
     assert "scm" in (folder / "conandata.yml").read_text()
     assert str(checkout) not in (folder / "conanfile.py").read_text()
-    fetched = catalog.materialize(record.ref, with_sources=True)
+    fetched = record.ref.materialize(with_sources=True)
     assert fetched.source_path is not None
     assert (fetched.source_path / "cpu.sv").is_file()
     with pytest.raises(Conflict):
         catalog.publish_file(description(tmp_path, source=asdict(source)))
     (folder / "conandata.yml").write_text("scm: {commit: nope}")
     with pytest.raises(InvalidPackage):
-        catalog.get(record.ref)
+        record.ref.get()
 
 
 def test_dirty_source_fails_before_publication(tmp_path: Path, checkout: Path) -> None:
@@ -150,12 +150,12 @@ def test_invalid_json_and_missing_description(packages: Catalog, tmp_path: Path)
 
 
 def test_missing_content_and_record(packages: Catalog) -> None:
-    record = Record(Ref("cpu", "1.0", "rtl", "soc"))
+    record = Record(Ref("cpu", "1.0", "rtl", "soc", catalog=packages))
     with pytest.raises(NotFound):
-        packages.materialize(record.ref)
+        record.ref.materialize()
     packages.publish(record)
     with pytest.raises(CatalogError):
-        packages.materialize(record.ref)
+        record.ref.materialize()
 
 
 def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
@@ -163,14 +163,14 @@ def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
 ) -> None:
     source = GitResource(str(checkout), "HEAD", _commit(checkout))
     record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
-    packages.publish(record)
+    record = packages.publish(record)
     shutil.rmtree(checkout)
-    assert packages.get(record.ref) == record
-    result = packages.materialize(record.ref)
+    assert record.ref.get() == record
+    result = record.ref.materialize()
     assert result.source_path is None
     assert not (result.path / "source").exists()
     with pytest.raises(CatalogError):
-        packages.materialize(record.ref, with_sources=True)
+        record.ref.materialize(with_sources=True)
 
 
 def test_publishing_pinned_scm_does_not_contact_git(
@@ -186,9 +186,9 @@ def test_publishing_pinned_scm_does_not_contact_git(
     source = GitResource("https://gitlab.example.invalid/rtl/cpu.git", "v1", "a" * 40)
     record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
     catalog = Catalog(configured_home(tmp_path / "home"))
-    catalog.publish(record)
-    assert catalog.get(record.ref) == record
-    package = catalog.materialize(record.ref)
+    record = catalog.publish(record)
+    assert record.ref.get() == record
+    package = record.ref.materialize()
     assert package.source_path is None
     assert not (package.path / "source").exists()
 

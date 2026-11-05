@@ -5,6 +5,7 @@ from pathlib import Path
 from ...api.errors import Conflict, NotFound
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
+from ...api.protocols import RefCatalog
 from ..validation import normalize_query, normalize_ref
 from .client import ConanClient
 from .format import (
@@ -28,13 +29,15 @@ def locate(client: ConanClient, ref: Ref) -> tuple[str, Path]:
 
 def get(client: ConanClient, ref: Ref) -> Record:
     ref = normalize_ref(ref)
-    return read_records(client, (to_conan_reference(ref),))[ref]
+    return read_records(client, (to_conan_reference(ref),), catalog=ref.catalog)[ref]
 
 
-def read_records(client: ConanClient, references: tuple[str, ...]) -> dict[Ref, Record]:
+def read_records(
+    client: ConanClient, references: tuple[str, ...], *, catalog: RefCatalog | None = None
+) -> dict[Ref, Record]:
     records = {}
     for reference in dict.fromkeys(references):
-        ref = from_conan_reference(reference)
+        ref = from_conan_reference(reference, catalog=catalog)
         published, directory = locate(client, ref)
         if "#" in reference and published != reference:
             raise Conflict(f"Locked revision differs from published identity: {reference}")
@@ -42,13 +45,18 @@ def read_records(client: ConanClient, references: tuple[str, ...]) -> dict[Ref, 
     return records
 
 
-def search(client: ConanClient, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
+def search(
+    client: ConanClient,
+    query: SearchQuery = SearchQuery(),
+    *,
+    catalog: RefCatalog | None = None,
+) -> tuple[Record, ...]:
     query = normalize_query(query)
     pattern = search_pattern(query)
     if pattern is None:
         return ()
     candidates = client.index(pattern)
-    records = read_records(client, tuple(candidates)).values()
+    records = read_records(client, tuple(candidates), catalog=catalog).values()
     return tuple(sorted((r for r in records if query.matches(r)), key=lambda r: r.ref))
 
 
@@ -58,7 +66,7 @@ def dependencies(
     ref, filters = normalize_ref(ref), normalize_query(filters)
     _, directory = locate(client, ref)
     requirements = read_recipe(directory, ref)[1].requires
-    records = read_records(client, requirements).values()
+    records = read_records(client, requirements, catalog=ref.catalog).values()
     return tuple(sorted((r for r in records if filters.matches(r)), key=lambda r: r.ref))
 
 

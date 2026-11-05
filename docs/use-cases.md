@@ -7,11 +7,11 @@
 
 1. Передать локальный Record и прямые зависимости в `catalog.resolve_local()`
    и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
-   из опубликованного пакета, его читают через `get(top_ref)` и `dependencies(top_ref)`.
-2. Для выбранного RTL вызвать `catalog.find_dependents(rtl_ref,
+   из опубликованного пакета, его читают через `top_ref.get()` и `top_ref.dependencies()`.
+2. Для выбранного RTL вызвать `rtl_ref.find_dependents(
    candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"))`.
 3. Из найденных кандидатов приложение выбирает нужную реализацию и читает payload
-   с метаданными. Файлы из Conan получают через `catalog.materialize(ref)`,
+   с метаданными. Файлы из Conan получают через `ref.materialize()`,
    внешние ресурсы — через `LocatedResource`.
 4. Приложение исключает заменённые RTL-ветки из собственных входов, сохраняя общие
    зависимости остальных блоков, подготавливает ресурсы и запускает инструмент.
@@ -30,8 +30,8 @@ flowchart TB
 наличие точного CPU в его графе подтверждает связь с выбранным RTL. Версии CPU и BE
 могут различаться. Промежуточный DFT-узел не обязан иметь те же namespace/name/kind.
 
-Прямой поиск `dependencies(ref)` возвращает Record входов узла;
-`find_dependents(ref, candidates=SearchQuery(), transitive=False)` — непосредственных
+Прямой поиск `ref.dependencies()` возвращает Record входов узла;
+`ref.find_dependents(candidates=SearchQuery(), transitive=False)` — непосредственных
 потребителей. Для собственного анализа GraphResult.to_networkx()
 предоставляет DiGraph. Экспорт и обработка выбранного графа не меняют публикации.
 

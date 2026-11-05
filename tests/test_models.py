@@ -37,7 +37,7 @@ def test_minimal_record() -> None:
 def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
     record = Record(Ref("opaque", "1.0", "release", "demo"), UserPayload(value))
     catalog.publish(record)
-    stored = catalog.get(record.ref)
+    stored = Ref(**record.ref.to_dict(), catalog=catalog).get()
     assert stored == Record.from_json(record.to_json())
     assert not isinstance(stored.payload, JSONSerializable)
 
@@ -48,7 +48,7 @@ def test_custom_payload_is_serialized_once_and_frozen(catalog: Catalog) -> None:
     catalog.publish(Record(Ref("core", "1.0", "release", "demo"), payload))
     assert payload.calls == 1
     nested.append(4)
-    stored = catalog.get(Ref("core", "1.0", "release", "demo"))
+    stored = Ref("core", "1.0", "release", "demo", catalog=catalog).get()
     assert isinstance(stored.payload, Mapping)
     assert stored.payload["nested"] == (1, {"ports": (2, 3)})
     with pytest.raises(TypeError):
@@ -77,7 +77,7 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
     assert ref.package_name != other.package_name
     catalog.publish(Record(ref))
     catalog.publish(Record(other))
-    assert catalog.get(same).ref == ref
+    assert Ref(**same.to_dict(), catalog=catalog).get().ref == ref
     with pytest.raises(Conflict):
         catalog.publish(Record(same))
 
@@ -106,7 +106,7 @@ class CustomKind(StrEnum):
 def test_consumer_kinds(catalog: Catalog, kind: str) -> None:
     ref = Ref("core", "1.0", kind, "demo")
     catalog.publish(Record(ref))
-    stored = catalog.get(ref)
+    stored = Ref(**ref.to_dict(), catalog=catalog).get()
     assert stored.ref.kind == kind
     assert type(stored.ref.kind) is str
 

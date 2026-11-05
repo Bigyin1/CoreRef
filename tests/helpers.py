@@ -2,7 +2,6 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import asdict
 from enum import StrEnum
 from pathlib import Path
 
@@ -73,11 +72,19 @@ def resources(record: Record) -> tuple[JSON, ...]:
 
 
 def graph_json(result: GraphResult) -> str:
-    return json.dumps(asdict(result), sort_keys=True, separators=(",", ":"))
+    value = {
+        "records": [json.loads(record.to_json()) for record in result.records],
+        "dependencies": [
+            {"source": edge.source.to_dict(), "target": edge.target.to_dict()}
+            for edge in result.dependencies
+        ],
+    }
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
     """Inspect saved package data through the same resolver used for local inputs."""
-    record = catalog.get(ref)
-    dependencies = tuple(item.ref for item in catalog.dependencies(ref))
+    ref = Ref(**ref.to_dict(), catalog=catalog)
+    record = ref.get()
+    dependencies = tuple(item.ref for item in ref.dependencies())
     return catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)

@@ -28,14 +28,20 @@ macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.
 catalog = Catalog()
 rtl = catalog.publish(rtl)
 macro = catalog.publish(macro, dependencies=(rtl.ref,))
-inputs = catalog.dependencies(macro.ref)  # tuple[Record, ...]
-implementations = catalog.find_dependents(
-    rtl.ref,
+inputs = macro.ref.dependencies()  # tuple[Record, ...]
+implementations = rtl.ref.find_dependents(
     candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"),
 )
 graph = catalog.resolve_local(macro, dependencies=(rtl.ref,))
 print(graph.dependencies)
 ```
+
+Для существующего пакета ссылка создаётся как
+`Ref("cpu", "2.3", "rtl", "soc1", catalog=catalog)`; затем доступны
+`ref.get()`, `ref.dependencies()`, `ref.find_dependents(...)` и `ref.materialize(...)`.
+Ссылки в результатах каталога сразу содержат его контекст, описанный протоколом
+`RefCatalog`; дополнительного объекта `view` или шага привязки нет. Контекст
+не входит в равенство, хеш и JSON координат (`ref.to_dict()`).
 
 Один `publish(record, dependencies=(ref1, ref2, ...))` создаёт один пакет и возвращает
 его сохранённый `Record`. Зависимости должны быть опубликованы заранее. Публикация
@@ -56,7 +62,7 @@ make integration  # собственный временный Conan server
 ```python
 catalog = Catalog()
 record = catalog.publish_file("package.json")
-package = catalog.materialize(record.ref, with_sources=True)
+package = record.ref.materialize(with_sources=True)
 ```
 
 JSON описывает один пакет: `ref`, `payload`, `dependencies`, необязательный один

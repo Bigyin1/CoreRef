@@ -1,24 +1,29 @@
 """Exact references and records with consumer-owned JSON payloads."""
 
 import json
-from dataclasses import asdict, dataclass
-from typing import Self
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Self
 
 from frozendict import deepfreeze
 
-from ..protocols import JSONSerializable
+from ..errors import CatalogError
+from ..protocols import JSONSerializable, RefCatalog
 from ..types import JSON
-from .resources import GitResource
+from .resources import GitResource, MaterializedPackage
+
+if TYPE_CHECKING:
+    from .query import SearchQuery
 
 
 @dataclass(frozen=True)
 class Ref:
-    """Exact name/version and consumer-defined kind within a namespace."""
+    """Package coordinates with an optional catalog excluded from identity and JSON."""
 
     name: str
     version: str
     kind: str
     namespace: str
+    catalog: RefCatalog | None = field(default=None, kw_only=True, repr=False, compare=False)
 
     @property
     def package_name(self) -> str:
@@ -38,6 +43,57 @@ class Ref:
             other.kind,
         )
 
+    def to_dict(self) -> dict[str, str]:
+        """Serialize package coordinates without the runtime catalog context."""
+        return {
+            "name": self.name,
+            "version": self.version,
+            "kind": self.kind,
+            "namespace": self.namespace,
+        }
+
+    def _context(self) -> RefCatalog:
+        if self.catalog is None:
+            raise CatalogError("Ref has no catalog; pass catalog=... when creating it")
+        return self.catalog
+
+    def get(self) -> Record:
+        """Read the published record at these exact coordinates."""
+        from ..._internal.conan import records
+
+        catalog = self._context()
+        return records.get(catalog._client, self)
+
+    def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
+        """Read immediate dependencies, optionally filtered by their coordinates."""
+        from ..._internal.conan import records
+        from .query import SearchQuery
+
+        catalog = self._context()
+        query = SearchQuery() if filters is None else filters
+        return records.dependencies(catalog._client, self, query)
+
+    def find_dependents(
+        self, *, candidates: SearchQuery, transitive: bool = True
+    ) -> tuple[Record, ...]:
+        """Find candidate packages requiring this Ref, directly or transitively."""
+        from ..._internal.conan import graph
+
+        catalog = self._context()
+        return graph.find_dependents(
+            catalog._client,
+            self,
+            candidates=candidates,
+            search=catalog.search,
+            transitive=transitive,
+        )
+
+    def materialize(self, *, with_sources: bool = False) -> MaterializedPackage:
+        """Fetch package artifacts and optionally its pinned SCM sources."""
+        from ..._internal.conan import materialization
+
+        return materialization.materialize(self._context()._client, self, with_sources=with_sources)
+
 
 @dataclass(frozen=True)
 class Record:
@@ -53,7 +109,7 @@ class Record:
         payload = self.payload
         if isinstance(payload, JSONSerializable):
             payload = json.loads(payload.to_json())
-        value = {"ref": asdict(self.ref), "payload": payload}
+        value = {"ref": self.ref.to_dict(), "payload": payload}
         if self.source is not None:
             value["source"] = asdict(self.source)
         if self.files:
@@ -66,14 +122,17 @@ class Record:
         )
 
     @classmethod
-    def from_json(cls, payload: str) -> Self:
+    def from_json(cls, payload: str, *, catalog: RefCatalog | None = None) -> Self:
         """Restore an immutable JSON snapshot; the consumer decodes its own payload."""
         value = json.loads(payload)
         if not isinstance(value, dict):
             raise ValueError("Record must be a JSON object")
         source = GitResource(**value["source"]) if value.get("source") is not None else None
         return cls(
-            Ref(**value["ref"]), deepfreeze(value["payload"]), source, tuple(value.get("files", ()))
+            Ref(**value["ref"], catalog=catalog),
+            deepfreeze(value["payload"]),
+            source,
+            tuple(value.get("files", ())),
         )
 
 
