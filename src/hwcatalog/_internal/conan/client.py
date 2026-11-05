@@ -6,7 +6,6 @@ to this adapter and the protocols describing its actual return objects.
 
 from collections.abc import Mapping
 from pathlib import Path
-from threading import RLock
 from typing import Protocol, cast
 
 from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
@@ -20,8 +19,6 @@ from pydantic import BaseModel, Field, RootModel, ValidationError
 
 from ...api.errors import CatalogError, Conflict, InvalidPackage
 from .types import NativeGraph, NativeReference
-
-_API_LOCK = RLock()
 
 
 class _Commands(Protocol):
@@ -48,8 +45,7 @@ def _resolve_home(home: Path | None) -> Path:
     if home is not None:
         return home.expanduser().resolve()
     try:
-        with _API_LOCK:
-            return Path(cast(_API, ConanAPI()).home_folder).resolve()
+        return Path(cast(_API, ConanAPI()).home_folder).resolve()
     except (ConanException, OSError) as error:
         raise CatalogError(f"Conan could not resolve its default home: {error}") from error
 
@@ -58,8 +54,7 @@ def _configured_remote(home: Path, requested: str | None) -> str | None:
     if requested is not None:
         return requested
     try:
-        with _API_LOCK:
-            remotes = cast(_API, ConanAPI(cache_folder=str(home))).remotes.list()
+        remotes = cast(_API, ConanAPI(cache_folder=str(home))).remotes.list()
     except (ConanException, OSError) as exc:
         raise CatalogError(f"Conan could not read configured remotes: {exc}") from exc
     if len(remotes) > 1:
@@ -89,27 +84,25 @@ class ConanClient:
     def run(self, *arguments: str) -> object:
         """Run a command without spawning Conan or changing environment/cwd."""
         try:
-            # Commands temporarily change Conan's process-global output settings.
-            with _API_LOCK:
-                conan = ConanAPI(cache_folder=str(self.home))
-                Cli(conan).add_commands()
-                result = cast(_API, conan).command.run(
-                    [
-                        *arguments,
-                        "-vquiet",
-                        "-cc",
-                        "core:non_interactive=True",
-                        "-cc",
-                        f"core.net.http:timeout={self.timeout}",
-                    ],
-                    raise_on_errors=False,
-                )
-                if isinstance(result, Mapping):
-                    if "graph" in result:
-                        cast(NativeGraph, result["graph"]).report_graph_error()
-                    if result.get("conan_error") is not None:
-                        raise ConanException(str(result["conan_error"]))
-                return result
+            conan = ConanAPI(cache_folder=str(self.home))
+            Cli(conan).add_commands()
+            result = cast(_API, conan).command.run(
+                [
+                    *arguments,
+                    "-vquiet",
+                    "-cc",
+                    "core:non_interactive=True",
+                    "-cc",
+                    f"core.net.http:timeout={self.timeout}",
+                ],
+                raise_on_errors=False,
+            )
+            if isinstance(result, Mapping):
+                if "graph" in result:
+                    cast(NativeGraph, result["graph"]).report_graph_error()
+                if result.get("conan_error") is not None:
+                    raise ConanException(str(result["conan_error"]))
+            return result
         except GraphConflictError as exc:
             raise Conflict(str(exc)) from exc
         except GraphLoopError as exc:
