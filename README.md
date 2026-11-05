@@ -12,7 +12,6 @@ API описывает записи и точные зависимости па�
 
 ```python
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
@@ -20,7 +19,8 @@ from hwcatalog.backends.conan import ConanBackend
 rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"))
 macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.lib"]})
 with Catalog(ConanBackend()) as catalog:
-    catalog.publish((rtl, macro), dependencies=(Dependency(macro.ref, rtl.ref),))
+    rtl = catalog.publish(rtl)
+    macro = catalog.publish(macro, dependencies=(rtl.ref,))
     inputs = catalog.graph.dependencies(macro.ref)  # tuple[Record, ...]
     implementations = catalog.find_dependents(
         rtl.ref,
@@ -29,6 +29,11 @@ with Catalog(ConanBackend()) as catalog:
     graph = catalog.graph.dependency_closure(macro.ref)
     print(graph.dependencies)
 ```
+
+Один `publish(record, dependencies=(ref1, ref2, ...))` создаёт один пакет и возвращает
+его сохранённый `Record`. Зависимости должны быть опубликованы заранее. Публикация
+использует один `export-pkg`, который экспортирует рецепт, проверяет граф Conan и
+упаковывает файлы, затем `upload` отправляет пакет на сервер.
 
 Устанавливается через Python 3.15 и uv. Dev-окружение включает Conan и тестовый сервер:
 

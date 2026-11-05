@@ -1,14 +1,10 @@
-"""Immutable records and exact, acyclic dependency publications."""
+"""Catalog input normalization, independent of Conan graph resolution."""
 
 import re
-from collections.abc import Collection
 from dataclasses import replace
 from pathlib import PurePosixPath
 
-import networkx as nx
-
-from ..api.errors import DependencyCycle, IdentityConflict, InvalidPublication
-from ..api.models.graph import Dependency
+from ..api.errors import DependencyCycle, InvalidPublication
 from ..api.models.query import SearchQuery
 from ..api.models.records import Record, Ref
 
@@ -44,10 +40,21 @@ def normalize_record(value: Record) -> Record:
     return Record.from_json(record.to_json())
 
 
-def normalize_dependency(value: Dependency) -> Dependency:
-    if not isinstance(value, Dependency):
-        raise InvalidPublication("Expected a dependency")
-    return Dependency(normalize_ref(value.source), normalize_ref(value.target))
+def normalize_publication(
+    record: Record, dependencies: tuple[Ref, ...]
+) -> tuple[Record, tuple[Ref, ...]]:
+    """Validate one new package and its direct dependency references."""
+    if not isinstance(record, Record):
+        raise InvalidPublication("Publish accepts one Record")
+    record = normalize_record(record)
+    if any(not isinstance(ref, Ref) for ref in dependencies):
+        raise InvalidPublication("Dependencies must be Ref values")
+    dependencies = tuple(normalize_ref(ref) for ref in dependencies)
+    if len(dependencies) != len(set(dependencies)):
+        raise InvalidPublication("Duplicate dependency")
+    if record.ref in dependencies:
+        raise DependencyCycle("A package cannot depend on itself")
+    return record, dependencies
 
 
 def normalize_query(value: SearchQuery) -> SearchQuery:
@@ -57,31 +64,6 @@ def normalize_query(value: SearchQuery) -> SearchQuery:
         kind=_optional_text(value.kind),
         namespace=_optional_text(value.namespace),
     )
-
-
-def validate(
-    records: tuple[Record, ...], dependencies: tuple[Dependency, ...], existing: Collection[Ref]
-) -> None:
-    if not records:
-        raise InvalidPublication("Publication requires records")
-    refs = [record.ref for record in records]
-    new, previous = set(refs), set(existing)
-    if len(refs) != len(new):
-        raise InvalidPublication("Duplicate record identities in batch")
-    if new.intersection(previous):
-        raise IdentityConflict("Record identity already published")
-    if len(dependencies) != len(set(dependencies)):
-        raise InvalidPublication("Duplicate dependency")
-    for edge in dependencies:
-        if edge.source not in new:
-            raise InvalidPublication("Dependencies must accompany their new source")
-        if edge.target not in new | previous:
-            raise InvalidPublication("Dependency target does not exist")
-        if edge.source == edge.target:
-            raise InvalidPublication("Self dependencies are forbidden")
-    graph: nx.DiGraph[Ref] = nx.DiGraph((edge.source, edge.target) for edge in dependencies)
-    if not nx.is_directed_acyclic_graph(graph):
-        raise DependencyCycle("Cycle in dependencies")
 
 
 def validate_file_name(name: str) -> None:

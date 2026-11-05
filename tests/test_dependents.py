@@ -4,7 +4,6 @@ import pytest
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import NotFound
-from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 
@@ -16,12 +15,12 @@ def test_candidate_search_uses_arbitrary_paths_and_exact_versions(catalog: Catal
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc"))
     wrong = Record(Ref("cpu", "5.0", "lib-lef", "soc"))
     unrelated = Record(Ref("cpu", "6.0", "lib-lef", "soc"))
-    edges = (
-        Dependency(middle.ref, rtl.ref),
-        Dependency(macro.ref, middle.ref),
-        Dependency(wrong.ref, other.ref),
-    )
-    catalog.publish((rtl, other, middle, macro, wrong, unrelated), dependencies=edges)
+    catalog.publish(rtl)
+    catalog.publish(other)
+    catalog.publish(middle, dependencies=(rtl.ref,))
+    catalog.publish(macro, dependencies=(middle.ref,))
+    catalog.publish(wrong, dependencies=(other.ref,))
+    catalog.publish(unrelated)
     query = SearchQuery(namespace="soc", name="cpu", kind="lib-lef")
     assert catalog.find_dependents(rtl.ref, candidates=query) == (macro,)
     assert not catalog.find_dependents(rtl.ref, candidates=query, transitive=False)
@@ -37,13 +36,9 @@ def test_exact_closure_preserves_published_versions(catalog: Catalog) -> None:
         Record(Ref(name, version, "rtl", "soc"))
         for name, version in (("top", "1.0"), ("cpu", "1.0"), ("cpu", "2.0"))
     )
-    catalog.publish(
-        (root, first, second),
-        dependencies=(
-            Dependency(root.ref, first.ref),
-            Dependency(root.ref, second.ref),
-        ),
-    )
+    catalog.publish(first)
+    catalog.publish(second)
+    catalog.publish(root, dependencies=(first.ref, second.ref))
     assert {record.ref for record in catalog.graph.dependency_closure(root.ref).records} == {
         root.ref,
         first.ref,

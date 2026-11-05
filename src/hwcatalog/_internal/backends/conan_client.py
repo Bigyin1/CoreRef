@@ -179,17 +179,21 @@ class ConanClient:
         result = cast(Mapping[str, object], self.run("export", str(directory), "--no-remote"))
         return cast(NativeReference, result["reference"]).repr_notime()
 
-    def export_package(self, directory: Path, *, lockfile: Path | None = None) -> None:
-        self.run(
-            "export-pkg",
-            str(directory),
-            "--test-folder=",
-            "--skip-binaries",
-            "--lockfile",
-            str(lockfile) if lockfile is not None else "",
-            *self.profile_args,
-            *self.source_args,
+    def export_package(self, directory: Path, *, lockfile: Path | None = None) -> NativeGraph:
+        result = cast(
+            Mapping[str, object],
+            self.run(
+                "export-pkg",
+                str(directory),
+                "--test-folder=",
+                "--skip-binaries",
+                "--lockfile",
+                str(lockfile) if lockfile is not None else "",
+                *self.profile_args,
+                *self.source_args,
+            ),
         )
+        return cast(NativeGraph, result["graph"])
 
     def install(
         self, reference: str, lockfile: Path, output: Path, *, with_sources: bool = False

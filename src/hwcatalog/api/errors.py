@@ -1,10 +1,5 @@
 """Stable domain errors; driver failures never masquerade as missing data."""
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .models.records import Ref
-
 
 class CatalogError(Exception):
     """Base catalog failure."""
@@ -23,7 +18,7 @@ class InvalidPublication(CatalogError):
 
 
 class DependencyCycle(InvalidPublication):
-    """A dependency, compatibility or causal cycle exists."""
+    """A dependency cycle exists."""
 
 
 class VersionConflict(CatalogError):
@@ -36,15 +31,6 @@ class BackendUnavailable(CatalogError):
 
 class InvalidPackage(CatalogError):
     """A stored Conan recipe violates the catalog package format."""
-
-
-class PartialPublicationError(BackendUnavailable):
-    """A nontransactional publication failed; ``uncertain`` may have been written."""
-
-    def __init__(self, published: tuple[Ref, ...], uncertain: Ref) -> None:
-        super().__init__(f"Publication interrupted at {uncertain.identity}")
-        self.published = published
-        self.uncertain = uncertain
 
 
 class GitResolutionError(CatalogError):
@@ -65,6 +51,5 @@ __all__ = [
     "InvalidPublication",
     "MaterializationError",
     "NotFound",
-    "PartialPublicationError",
     "VersionConflict",
 ]

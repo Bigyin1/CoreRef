@@ -4,7 +4,6 @@ from pathlib import Path
 from types import TracebackType
 
 from .._internal.validation import normalize_query, normalize_ref
-from .models.graph import Dependency
 from .models.query import SearchQuery
 from .models.records import Record, Ref
 from .models.resources import MaterializedPackage
@@ -41,13 +40,13 @@ class Catalog:
 
     def publish(
         self,
-        records: tuple[Record, ...],
+        record: Record,
         *,
-        dependencies: tuple[Dependency, ...] = (),
+        dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
-    ) -> None:
-        """Save new records and their outgoing dependencies."""
-        self._backend.publish(records, dependencies=dependencies, lockfile=lockfile)
+    ) -> Record:
+        """Publish one new package requiring already published references."""
+        return self._backend.publish(record, dependencies=dependencies, lockfile=lockfile)
 
     def publish_file(self, path: str | Path, *, lockfile: Path | None = None) -> Record:
         """Publish one package described by JSON; paths are relative to this file."""

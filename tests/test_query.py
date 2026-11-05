@@ -3,7 +3,6 @@
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from tests.helpers import release, run
@@ -43,7 +42,8 @@ def test_criteria_are_detached() -> None:
 )
 def test_query_matching_and_backend_search_agree(catalog: Catalog, query: SearchQuery) -> None:
     records = (release("rtl"), run("synthesis"))
-    catalog.publish(records)
+    for record in records:
+        catalog.publish(record)
     expected = tuple(record for record in records if query.matches(record))
     assert catalog.search(query) == tuple(sorted(expected, key=lambda record: record.ref.identity))
 
@@ -53,7 +53,7 @@ def test_payload_cannot_override_identity(catalog: Catalog) -> None:
         Ref("source", "1", "release", "demo"),
         {"name": "wrong", "version": "wrong", "kind": "payload-kind", "namespace": "payload-ns"},
     )
-    catalog.publish((record,))
+    catalog.publish(record)
     assert catalog.search(SearchQuery(name="source", version="1")) == (record,)
     assert not catalog.search(SearchQuery(name="wrong"))
     assert catalog.search(SearchQuery(kind="release")) == (record,)
@@ -69,10 +69,9 @@ def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
         for kind in ("ip", "soc")
     )
     root = Record(Ref("top", "1", "release", "demo"))
-    catalog.publish(
-        (*records, root),
-        dependencies=tuple(Dependency(root.ref, record.ref) for record in records),
-    )
+    for record in records:
+        catalog.publish(record)
+    catalog.publish(root, dependencies=tuple(record.ref for record in records))
     assert len(catalog.graph.dependency_closure(root.ref).records) == 5
     assert {record.ref for record in catalog.search(SearchQuery(name="core", version="1"))} == {
         record.ref for record in records
@@ -87,10 +86,9 @@ def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) ->
     refs = tuple(Ref("same", "1", kind, "demo") for kind in ("release", "run", "report"))
     records = tuple(Record(ref) for ref in refs)
     root = Record(Ref("top", "1", "package", "demo"))
-    catalog.publish(
-        (*records, root),
-        dependencies=tuple(Dependency(root.ref, ref) for ref in refs),
-    )
+    for record in records:
+        catalog.publish(record)
+    catalog.publish(root, dependencies=refs)
     assert len(set(refs)) == len(refs)
     assert len({ref.family for ref in refs}) == len(refs)
     assert len(catalog.search(SearchQuery(name="same", version="1"))) == 3

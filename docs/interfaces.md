@@ -10,15 +10,16 @@ Catalog владеет бэкендом и поддерживает контек
 | get(ref) | Record; NotFound при отсутствии |
 | get_many(refs) | tuple[Record, ...], сохраняет порядок и дубликаты; отсутствие любого Ref — ошибка |
 | search(query=SearchQuery()) | Все точные AND-совпадения, отсортированные по identity |
-| publish(records, *, dependencies=(), lockfile=None) | Публикует новые Record и исходящие Dependency |
+| publish(record, *, dependencies=(), lockfile=None) | Публикует один новый пакет и возвращает Record; dependencies — tuple[Ref, ...] |
 | publish_file(path, *, lockfile=None) | Публикует пакет из JSON с необязательными source и files; возвращает Record |
 | create_lockfile(refs, path) | Создаёт или обновляет lockfile проекта штатными средствами Conan; возвращает Path |
 | materialize(ref, *, with_sources=False, lockfile=None) | MaterializedPackage(path, source_path); SCM checkout запрашивается флагом |
 | find_dependents(ref, *, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
 | close() | Освобождает ресурсы бэкенда |
 
-Publish не обновляет существующие записи. Издатели одной идентичности координируются
-приложением.
+Publish принимает один Record. Все зависимости должны уже существовать;
+коллекции новых записей не принимаются. Существующие записи не обновляются.
+Издатели одной идентичности координируются приложением.
 
 Find_dependents сначала фильтрует кандидатов по SearchQuery, затем проверяет их
 зависимости. Промежуточные узлы могут быть любыми. При transitive=False учитывается
@@ -39,8 +40,8 @@ Filters применяются к найденным записям. Отсут�
 передачу Conan lockfile через `InvalidPublication`. Разрешение версий hwcatalog из API удалено.
 
 Ранее унаследованные RelationKind, Direction, LineageDirection, Relation и Neighbor
-удалены. Теперь публикация принимает dependencies из Dependency(source, target),
-а GraphResult содержит dependencies. Вместо MultiDiGraph экспортируется DiGraph.
+удалены. Публикация принимает ссылки на зависимости без повторения исходного Ref;
+Dependency(source, target) используется в GraphResult. Вместо MultiDiGraph экспортируется DiGraph.
 Методы neighbors, implementations и lineage, параметр resolve_versions удалены.
 Для поиска RTL → BE используется find_dependents с фильтрами имени и представления.
 
@@ -51,9 +52,9 @@ Filters применяются к найденным записям. Отсут�
 ## Ошибки
 
 Ошибки: NotFound, IdentityConflict, InvalidPublication, DependencyCycle,
-VersionConflict, InvalidPackage, BackendUnavailable, PartialPublicationError.
-Последняя содержит published и uncertain для восстановления после неопределённого
-результата записи. Автоматических повторов или rollback удалённой публикации нет.
+VersionConflict, InvalidPackage, BackendUnavailable.
+Сбой upload сообщается как BackendUnavailable. Автоматических повторов или rollback
+удалённой публикации нет.
 
 Backend — Protocol с graph, get_many, search, publish, publish_file, create_lockfile,
 materialize и close.

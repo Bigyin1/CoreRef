@@ -32,7 +32,7 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
         )
     )
     with Catalog(backend) as catalog:
-        catalog.publish((dependency,))
+        catalog.publish(dependency)
         lockfile = catalog.create_lockfile((dependency.ref,), tmp_path / "project/conan.lock")
         original_lock = lockfile.read_bytes()
         record = catalog.publish_file(description, lockfile=lockfile)
@@ -65,7 +65,8 @@ def test_conan_validates_the_supplied_project_lockfile(
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"))
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc"))
     with Catalog(backend) as catalog:
-        catalog.publish((rtl, macro), dependencies=(Dependency(macro.ref, rtl.ref),))
+        catalog.publish(rtl)
+        catalog.publish(macro, dependencies=(rtl.ref,))
         lockfile = catalog.create_lockfile((rtl.ref,), tmp_path / "project/conan.lock")
         if damage == "missing":
             lockfile.unlink()
@@ -91,7 +92,7 @@ def test_empty_project_and_memory_lockfile_contract(tmp_path: Path) -> None:
         lockfile = catalog.create_lockfile((), tmp_path / "empty/conan.lock")
         empty_lock = lockfile.read_bytes()
         root = Record(Ref("root", "1.0", "rtl", "soc"))
-        catalog.publish((root,), lockfile=lockfile)
+        catalog.publish(root, lockfile=lockfile)
         assert catalog.graph.dependency_closure(root.ref, lockfile=lockfile).records == (root,)
         catalog.create_lockfile((root.ref,), lockfile)
         catalog.create_lockfile((), lockfile)
@@ -99,7 +100,7 @@ def test_empty_project_and_memory_lockfile_contract(tmp_path: Path) -> None:
     with Catalog(MemoryBackend()) as memory:
         operations = (
             lambda: memory.create_lockfile((), tmp_path / "unsupported.lock"),
-            lambda: memory.publish((root,), lockfile=lockfile),
+            lambda: memory.publish(root, lockfile=lockfile),
             lambda: memory.publish_file(tmp_path / "unused.json", lockfile=lockfile),
             lambda: memory.materialize(root.ref, lockfile=lockfile),
             lambda: memory.graph.dependency_closure(root.ref, lockfile=lockfile),

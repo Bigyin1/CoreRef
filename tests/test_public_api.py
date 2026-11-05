@@ -50,7 +50,7 @@ def test_public_api_and_memory_backend_import_independently_of_conan() -> None:
             payload=manifest,
         )
         with catalog.Catalog(backend) as instance:
-            instance.publish(records=(record,))
+            instance.publish(record=record)
             stored = instance.get(record.ref)
             assert stored.ref == record.ref
             assert stored.payload["views"] == ("rtl", "timing")

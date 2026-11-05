@@ -133,7 +133,7 @@ def test_stored_resources_materialize(history: History, catalog: Catalog, tmp_pa
         release("materialize"),
         payload=(asdict(history.resource()), asdict(LocatedResource("nfs", str(tmp_path)))),
     )
-    catalog.publish((record,))
+    catalog.publish(record)
     stored = catalog.get(record.ref)
     assert isinstance(stored, Record)
     from collections.abc import Mapping

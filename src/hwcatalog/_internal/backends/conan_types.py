@@ -76,6 +76,9 @@ class NativePackage(Protocol):
 
 class NativeNode(Protocol):
     @property
+    def ref(self) -> NativeReference | None: ...
+
+    @property
     def conanfile(self) -> NativePackage: ...
 
 

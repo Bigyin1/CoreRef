@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from hwcatalog._internal.validation import normalize_dependency, normalize_record
+from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.records import Record
 from hwcatalog.api.types import JSON
@@ -28,7 +28,6 @@ def test_roundtrip_preserves_content_and_nested_immutability() -> None:
     execution = replace(run("run"), payload=resources)
     edge = Dependency(execution.ref, a.ref)
     original = tuple(normalize_record(record) for record in (a, execution))
-    edge = normalize_dependency(edge)
     records = tuple(type(record).from_json(record.to_json()) for record in original)
     relation = Dependency.from_json(edge.to_json())
     assert records == original

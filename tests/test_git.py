@@ -73,7 +73,7 @@ def test_resolved_resource_can_be_published(repository: Repo, catalog: Catalog) 
         repository.path, repository_url=str(repository.path), requested_ref="annotated"
     )
     record = replace(release("git"), source=resource)
-    catalog.publish((record,))
+    catalog.publish(record)
     assert catalog.get(record.ref) == record
 
 

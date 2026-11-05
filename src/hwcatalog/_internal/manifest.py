@@ -7,7 +7,6 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from ..api.errors import InvalidPublication
-from ..api.models.graph import Dependency
 from ..api.models.records import Record, Ref
 from ..api.models.resources import GitResource
 from ..api.types import JSON
@@ -50,7 +49,7 @@ class _Document(_Model):
 @dataclass(frozen=True)
 class Manifest:
     record: Record
-    dependencies: tuple[Dependency, ...]
+    dependencies: tuple[Ref, ...]
     source_path: Path | None
     files: dict[str, Path]
 
@@ -77,7 +76,7 @@ def read_manifest(path: Path) -> Manifest:
         record = normalize_record(
             Record(document.ref.ref(), cast(JSON, document.payload), git, tuple(sorted(files)))
         )
-        dependencies = tuple(Dependency(record.ref, item.ref()) for item in document.dependencies)
+        dependencies = tuple(item.ref() for item in document.dependencies)
         return Manifest(record, dependencies, checkout, files)
     except (OSError, ValueError, TypeError, ValidationError) as exc:
         raise InvalidPublication(f"Invalid package description {path}: {exc}") from exc

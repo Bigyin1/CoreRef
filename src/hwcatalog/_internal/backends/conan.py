@@ -1,14 +1,10 @@
 """Conan package storage with project-owned lockfiles and nontransactional publication."""
 
-import shutil
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
-import networkx as nx
 
 from ...api.errors import (
     BackendUnavailable,
@@ -17,8 +13,6 @@ from ...api.errors import (
     InvalidPublication,
     MaterializationError,
     NotFound,
-    PartialPublicationError,
-    VersionConflict,
 )
 from ...api.graph import CatalogGraph
 from ...api.models.graph import Dependency, GraphResult
@@ -27,11 +21,9 @@ from ...api.models.records import Record, Ref
 from ...api.models.resources import MaterializedPackage
 from ..manifest import Manifest, read_manifest
 from ..validation import (
-    normalize_dependency,
+    normalize_publication,
     normalize_query,
-    normalize_record,
     normalize_ref,
-    validate,
 )
 from .conan_client import ConanClient
 from .conan_format import (
@@ -42,12 +34,6 @@ from .conan_format import (
     write_recipe,
 )
 from .conan_types import NativeGraph, NativePackage
-
-
-@dataclass(frozen=True)
-class PreparedRecipe:
-    record_ref: Ref
-    reference: str
 
 
 class ConanReader:
@@ -132,7 +118,7 @@ class ConanBackend:
 
     def _locate(self, ref: Ref) -> tuple[str, Path]:
         logical = to_conan_reference(ref)
-        revisions = self._client.index(f"{logical}#*").get(logical)
+        revisions = self._client.index(f"{logical}*#*").get(logical)
         if revisions is None or not revisions.revisions:
             raise NotFound(ref.identity)
         if len(revisions.revisions) != 1:
@@ -191,20 +177,18 @@ class ConanBackend:
 
     def publish(
         self,
-        records: tuple[Record, ...],
+        record: Record,
         *,
-        dependencies: tuple[Dependency, ...] = (),
+        dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
-    ) -> None:
-        self._publish(records, dependencies, lockfile=lockfile)
+    ) -> Record:
+        return self._publish(record, dependencies, lockfile=lockfile)
 
     def publish_file(self, path: Path, *, lockfile: Path | None = None) -> Record:
         manifest = read_manifest(path)
-        with self._read():
-            self._publish(
-                (manifest.record,), manifest.dependencies, manifest=manifest, lockfile=lockfile
-            )
-            return self.get_many((manifest.record.ref,))[0]
+        return self._publish(
+            manifest.record, manifest.dependencies, manifest=manifest, lockfile=lockfile
+        )
 
     def create_lockfile(self, refs: tuple[Ref, ...], path: Path) -> Path:
         """Write a Conan lockfile owned by an RTL repository or BE workspace."""
@@ -217,89 +201,45 @@ class ConanBackend:
             )
         return output
 
+    def _requirement(self, ref: Ref) -> str:
+        pinned, directory = self._locate(ref)
+        read_recipe(directory, ref)
+        return pinned
+
     def _publish(
         self,
-        records: tuple[Record, ...],
-        dependencies: tuple[Dependency, ...],
+        record: Record,
+        dependencies: tuple[Ref, ...],
         *,
         manifest: Manifest | None = None,
         lockfile: Path | None = None,
-    ) -> None:
-        records = tuple(normalize_record(record) for record in records)
-        if any(record.files for record in records) and manifest is None:
+    ) -> Record:
+        record, dependencies = normalize_publication(record, dependencies)
+        if record.files and manifest is None:
             raise InvalidPublication("Publish stored files using a package JSON document")
-        dependencies = tuple(normalize_dependency(edge) for edge in dependencies)
-        _validate_coordinates(records, dependencies)
+        logical = to_conan_reference(record.ref)
         with self._read():
-            existing = {from_conan_reference(value) for value in self._client.index("*.*.*/*#*")}
-            validate(records, dependencies, existing)
-            new_refs = {record.ref for record in records}
-            external = {edge.target for edge in dependencies if edge.target not in new_refs}
-            for ref in sorted(external, key=lambda ref: ref.identity):
-                self._closure(ref)
+            if logical in self._client.index(f"{logical}*#*"):
+                raise IdentityConflict("Record identity already published")
+            requirements = tuple(self._requirement(target) for target in dependencies)
             with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:
-                prepared = self._prepare(Path(temporary), records, dependencies, manifest, lockfile)
-                self._publish_prepared(prepared)
-
-    def _prepare(
-        self,
-        temporary: Path,
-        records: tuple[Record, ...],
-        dependencies: tuple[Dependency, ...],
-        manifest: Manifest | None,
-        lockfile: Path | None,
-    ) -> tuple[PreparedRecipe, ...]:
-        order: nx.DiGraph[Ref] = nx.DiGraph()
-        order.add_nodes_from(record.ref for record in records)
-        new_refs = {record.ref for record in records}
-        order.add_edges_from(
-            (edge.target, edge.source) for edge in dependencies if edge.target in new_refs
-        )
-        by_ref = {record.ref: record for record in records}
-        prepared: dict[Ref, PreparedRecipe] = {}
-        for index, ref in enumerate(
-            nx.lexicographical_topological_sort(order, key=lambda r: r.identity)
-        ):
-            directory = temporary / f"recipe-{index}"
-            targets = tuple(edge.target for edge in dependencies if edge.source == ref)
-            # Pin published revisions while keeping each project's lockfile external.
-            requirements = tuple(
-                prepared[target].reference if target in prepared else self._locate(target)[0]
-                for target in targets
-            )
-            write_recipe(
-                directory,
-                by_ref[ref],
-                requirements,
-                source_path=manifest.source_path if manifest else None,
-                files=manifest.files if manifest else None,
-            )
-            prepared[ref] = self._build_recipe(directory, ref, lockfile=lockfile)
-        return tuple(prepared.values())
-
-    def _build_recipe(
-        self, directory: Path, ref: Ref, *, lockfile: Path | None = None
-    ) -> PreparedRecipe:
-        self._client.graph(directory, lockfile=lockfile)
-        pinned = self._client.export(directory)
-        exported = self._client.cache_path(pinned, download=False)
-        _, metadata = read_recipe(exported, ref)
-        if metadata.has_source:
-            shutil.copyfile(exported / "conandata.yml", directory / "conandata.yml")
-        # The first export captured SCM. Reuse those coordinates during binary export.
-        (directory / "source-path.txt").unlink(missing_ok=True)
-        self._client.graph(directory, lockfile=lockfile)
-        self._client.export_package(directory, lockfile=lockfile)
-        return PreparedRecipe(ref, pinned)
-
-    def _publish_prepared(self, prepared: tuple[PreparedRecipe, ...]) -> None:
-        published: list[Ref] = []
-        for recipe in prepared:
-            try:
-                self._client.upload(recipe.reference)
-            except (BackendUnavailable, InvalidPackage) as exc:
-                raise PartialPublicationError(tuple(published), recipe.record_ref) from exc
-            published.append(recipe.record_ref)
+                directory = Path(temporary)
+                write_recipe(
+                    directory,
+                    record,
+                    requirements,
+                    source_path=manifest.source_path if manifest else None,
+                    files=manifest.files if manifest else None,
+                )
+                graph = self._client.export_package(directory, lockfile=lockfile)
+                reference = graph.root.ref
+                if reference is None:
+                    raise InvalidPackage("Conan did not return the exported recipe reference")
+                pinned = reference.repr_notime()
+                exported = self._client.cache_path(pinned, download=False)
+                stored, _ = read_recipe(exported, record.ref)
+                self._client.upload(pinned)
+                return stored
 
     def materialize(
         self, ref: Ref, *, with_sources: bool = False, lockfile: Path | None = None
@@ -327,20 +267,6 @@ class ConanBackend:
                     subfolder = "checkout" if metadata.format in (1, 2) else "source"
                     source_path = Path(package.folders.source_folder) / subfolder
                 return MaterializedPackage(Path(package.package_folder), source_path)
-
-
-def _validate_coordinates(
-    records: tuple[Record, ...], dependencies: tuple[Dependency, ...]
-) -> None:
-    versions: dict[tuple[Ref, str], Ref] = {}
-    for record in records:
-        to_conan_reference(record.ref)
-    for edge in dependencies:
-        to_conan_reference(edge.source)
-        to_conan_reference(edge.target)
-        key = (edge.source, edge.target.family)
-        if versions.setdefault(key, edge.target) != edge.target:
-            raise VersionConflict("Conan requires one version per direct dependency family")
 
 
 def _package_ref(package: NativePackage) -> Ref:

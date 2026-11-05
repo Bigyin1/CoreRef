@@ -9,14 +9,14 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ...api.errors import InvalidPublication, MaterializationError, NotFound
+from ...api.errors import IdentityConflict, InvalidPublication, MaterializationError, NotFound
 from ...api.graph import CatalogGraph
 from ...api.models.graph import Dependency
 from ...api.models.query import SearchQuery
 from ...api.models.records import Record, Ref
 from ...api.models.resources import GitResource, MaterializedPackage
 from ..manifest import read_manifest
-from ..validation import normalize_dependency, normalize_record, validate
+from ..validation import normalize_publication
 
 
 class MemoryReader:
@@ -75,22 +75,16 @@ class MemoryBackend:
 
     def publish(
         self,
-        records: tuple[Record, ...],
+        record: Record,
         *,
-        dependencies: tuple[Dependency, ...] = (),
+        dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
-    ) -> None:
+    ) -> Record:
         _require_no_lockfile(lockfile)
-        records = tuple(normalize_record(record) for record in records)
-        if any(record.files for record in records):
+        record, dependencies = normalize_publication(record, dependencies)
+        if record.files:
             raise InvalidPublication("Publish stored files using a package JSON document")
-        dependencies = tuple(normalize_dependency(edge) for edge in dependencies)
-        with self._lock:
-            validate(records, dependencies, self._records.keys())
-            for record in records:
-                self._store_content(record, {})
-            self._records.update((record.ref, record) for record in records)
-            self._dependencies += dependencies
+        return self._save(record, dependencies, {})
 
     def publish_file(self, path: Path, *, lockfile: Path | None = None) -> Record:
         _require_no_lockfile(lockfile)
@@ -103,12 +97,20 @@ class MemoryBackend:
                     manifest.source_path, repository_url=str(manifest.source_path)
                 ),
             )
+        record, dependencies = normalize_publication(record, manifest.dependencies)
+        return self._save(record, dependencies, manifest.files)
+
+    def _save(
+        self, record: Record, dependencies: tuple[Ref, ...], files: dict[str, Path]
+    ) -> Record:
         with self._lock:
-            validate((record,), manifest.dependencies, self._records.keys())
-            self._store_content(record, manifest.files)
-            self._records[record.ref] = normalize_record(record)
-            self._dependencies += manifest.dependencies
-            return self._records[record.ref]
+            if record.ref in self._records:
+                raise IdentityConflict("Record identity already published")
+            self.get_many(dependencies)
+            self._store_content(record, files)
+            self._records[record.ref] = record
+            self._dependencies += tuple(Dependency(record.ref, target) for target in dependencies)
+            return record
 
     def create_lockfile(self, refs: tuple[Ref, ...], path: Path) -> Path:
         raise InvalidPublication("Project lockfiles require a Conan backend")

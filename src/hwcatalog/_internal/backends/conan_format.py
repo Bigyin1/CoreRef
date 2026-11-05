@@ -26,7 +26,9 @@ _LEGACY_CONTENT_FORMAT = 2
 def to_conan_reference(ref: Ref) -> str:
     """Encode a reference, rejecting names that cannot be represented without loss."""
     ref = normalize_ref(ref)
-    if not all(_TOKEN.fullmatch(value) for value in (ref.namespace, ref.name, ref.kind)):
+    if ref.namespace.startswith("-") or not all(
+        _TOKEN.fullmatch(value) for value in (ref.namespace, ref.name, ref.kind)
+    ):
         raise InvalidPublication(
             "Conan coordinates require lowercase tokens without dots or slashes"
         )

@@ -6,7 +6,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
@@ -20,7 +19,8 @@ def main() -> None:
         TemporaryDirectory(prefix="hwcatalog-example-") as directory,
         Catalog(ConanBackend(Path(directory))) as catalog,
     ):
-        catalog.publish((rtl, intermediate), dependencies=(Dependency(intermediate.ref, rtl.ref),))
+        catalog.publish(rtl)
+        catalog.publish(intermediate, dependencies=(rtl.ref,))
         inputs = Path(directory) / "inputs"
         inputs.mkdir()
         (inputs / "cpu.lib").write_text("library(cpu) {}\n")

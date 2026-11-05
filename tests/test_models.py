@@ -36,7 +36,7 @@ def test_minimal_record() -> None:
 @pytest.mark.parametrize("value", [None, True, 12, "custom", [1, {"size": -10}], {"schema": False}])
 def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
     record = Record(Ref("opaque", "1", "release", "demo"), UserPayload(value))
-    catalog.publish((record,))
+    catalog.publish(record)
     stored = catalog.get(record.ref)
     assert stored == Record.from_json(record.to_json())
     assert not isinstance(stored.payload, JSONSerializable)
@@ -45,7 +45,7 @@ def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
 def test_custom_payload_is_serialized_once_and_frozen(catalog: Catalog) -> None:
     nested: list[JSON] = [1, {"ports": [2, 3]}]
     payload = UserPayload({"nested": nested})
-    catalog.publish((Record(Ref("core", "1", "release", "demo"), payload),))
+    catalog.publish(Record(Ref("core", "1", "release", "demo"), payload))
     assert payload.calls == 1
     nested.append(4)
     stored = catalog.get(Ref("core", "1", "release", "demo"))
@@ -62,12 +62,7 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
             return "{"
 
     with pytest.raises(json.JSONDecodeError):
-        catalog.publish(
-            (
-                Record(Ref("valid", "1", "release", "demo")),
-                Record(Ref("invalid", "1", "release", "demo"), InvalidPayload()),
-            )
-        )
+        catalog.publish(Record(Ref("invalid", "1", "release", "demo"), InvalidPayload()))
     assert not catalog.search()
 
 
@@ -80,10 +75,11 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
     assert ref.family == replace(ref, version="2").family
     assert ref != other
     assert ref.family != other.family
-    catalog.publish((Record(ref), Record(other)))
+    catalog.publish(Record(ref))
+    catalog.publish(Record(other))
     assert catalog.get(same).ref == ref
     with pytest.raises(IdentityConflict):
-        catalog.publish((Record(same),))
+        catalog.publish(Record(same))
 
 
 @pytest.mark.parametrize(
@@ -109,7 +105,7 @@ class CustomKind(StrEnum):
 @pytest.mark.parametrize("kind", ["artifact", "execution", CustomKind.REPORT, "custom"])
 def test_consumer_kinds(catalog: Catalog, kind: str) -> None:
     ref = Ref("core", "1", kind, "demo")
-    catalog.publish((Record(ref),))
+    catalog.publish(Record(ref))
     stored = catalog.get(ref)
     assert stored.ref.kind == kind
     assert type(stored.ref.kind) is str
@@ -123,8 +119,3 @@ def test_kind_is_required() -> None:
 def test_namespace_is_required() -> None:
     with pytest.raises(TypeError):
         Ref("core", "1", "artifact")  # type: ignore[call-arg]
-
-
-def test_empty_batch(catalog: Catalog) -> None:
-    with pytest.raises(InvalidPublication):
-        catalog.publish(())

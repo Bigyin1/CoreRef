@@ -20,9 +20,7 @@ from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
     BackendUnavailable,
     IdentityConflict,
-    PartialPublicationError,
 )
-from hwcatalog.api.models.graph import Dependency
 from hwcatalog.api.models.query import SearchQuery
 from hwcatalog.api.models.records import Record, Ref
 from hwcatalog.backends.conan import ConanBackend
@@ -94,10 +92,11 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"), {"source": "cpu.sv"})
     be = Record(Ref("cpu", "4.0", "lib-lef", "soc"), {"source": "cpu.lib"})
     catalog = Catalog(remote_backend)
-    catalog.publish((be, rtl), dependencies=(Dependency(be.ref, rtl.ref),))
+    catalog.publish(rtl)
+    catalog.publish(be, dependencies=(rtl.ref,))
     assert catalog.find_dependents(rtl.ref, candidates=SearchQuery(kind="lib-lef"))[0].ref == be.ref
     with pytest.raises(IdentityConflict):
-        catalog.publish((rtl,))
+        catalog.publish(rtl)
     original_graph = catalog.graph.dependency_closure(be.ref)
     native, _ = remote_backend._load_graph(be.ref)
     native_refs = tuple(
@@ -110,7 +109,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     remote_backend._client.create_lockfile(rogue)
     remote_backend._client.export(rogue)
     another_be = Record(Ref("cpu", "5.0", "lib-lef", "soc"))
-    catalog.publish((another_be,), dependencies=(Dependency(another_be.ref, rtl.ref),))
+    catalog.publish(another_be, dependencies=(rtl.ref,))
     assert {r.ref for r in catalog.graph.dependency_closure(another_be.ref).records} == {
         another_be.ref,
         rtl.ref,
@@ -145,16 +144,14 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
 
     with monkeypatch.context() as patch:
         patch.setattr(remote_backend._client, "upload", reject_upload)
-        with pytest.raises(PartialPublicationError) as caught:
-            catalog.publish((record,))
-    assert caught.value.published == ()
-    assert caught.value.uncertain == record.ref
+        with pytest.raises(BackendUnavailable, match="Simulated upload failure"):
+            catalog.publish(record)
     with Catalog(ConanBackend(remote_backend._client.home)) as cached:
         assert cached.get(record.ref) == record
     assert catalog.search() == ()
 
     # A prepared local package must not block another attempt to publish to the server.
-    catalog.publish((record,))
+    catalog.publish(record)
     assert catalog.get(record.ref) == record
 
 
@@ -164,7 +161,7 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     # The isolated test server deliberately accepts a local SCM URL.
     (remote_backend._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
     dependency = Record(Ref("flow", "1.0", "run", "tools"))
-    Catalog(remote_backend).publish((dependency,))
+    Catalog(remote_backend).publish(dependency)
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     description = tmp_path / "package.json"

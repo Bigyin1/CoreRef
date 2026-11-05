@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .graph import CatalogGraph
-    from .models.graph import Dependency
     from .models.query import SearchQuery
     from .models.records import Record, Ref
     from .models.resources import MaterializedPackage
@@ -37,12 +36,12 @@ class Backend(Protocol):
 
     def publish(
         self,
-        records: tuple[Record, ...],
+        record: Record,
         *,
-        dependencies: tuple[Dependency, ...] = (),
+        dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
-    ) -> None:
-        """Save a batch of new records and dependencies; existing refs raise IdentityConflict.
+    ) -> Record:
+        """Publish one new package; dependencies must already exist.
 
         There is no publication tracking or retry guarantee in the PoC API.
         """

@@ -42,7 +42,7 @@ def description(tmp_path: Path, **fields: object) -> Path:
 
 def test_publish_json_dependencies_and_stored_files(packages: Catalog, tmp_path: Path) -> None:
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"))
-    packages.publish((rtl,))
+    packages.publish(rtl)
     artifact = tmp_path / "cpu.lib"
     artifact.write_bytes(b"library(cpu) {}\n\x00")
     path = description(
@@ -65,7 +65,7 @@ def test_publish_json_dependencies_and_stored_files(packages: Catalog, tmp_path:
     assert (content / "artifacts/timing/cpu.lib").read_bytes() == b"library(cpu) {}\n\x00"
     assert packages.materialize(record.ref).path == content
     with pytest.raises(InvalidPublication):
-        packages.publish((record,))
+        packages.publish(record)
 
 
 def test_local_source_is_captured_once_outside_payload(
@@ -164,7 +164,7 @@ def test_missing_content_and_record(packages: Catalog) -> None:
     record = Record(Ref("cpu", "1.0", "rtl", "soc"))
     with pytest.raises(NotFound):
         packages.materialize(record.ref)
-    packages.publish((record,))
+    packages.publish(record)
     with pytest.raises(MaterializationError):
         packages.materialize(record.ref)
 
@@ -174,7 +174,7 @@ def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
 ) -> None:
     source = GitResource.from_repository(checkout, repository_url=str(checkout))
     record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
-    packages.publish((record,))
+    packages.publish(record)
     shutil.rmtree(checkout)
     assert packages.get(record.ref) == record
     result = packages.materialize(record.ref)
@@ -197,7 +197,7 @@ def test_publishing_pinned_scm_does_not_contact_git(
     source = GitResource("https://gitlab.example.invalid/rtl/cpu.git", "v1", "a" * 40)
     record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
     with Catalog(ConanBackend(tmp_path / "home")) as catalog:
-        catalog.publish((record,))
+        catalog.publish(record)
         assert catalog.get(record.ref) == record
         package = catalog.materialize(record.ref)
         assert package.source_path is None
