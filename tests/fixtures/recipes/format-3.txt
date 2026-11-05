@@ -1,0 +1,32 @@
+from conan import ConanFile
+
+
+class CatalogRecord(ConanFile):
+    name = 'soc.cpu.rtl'
+    version = '1.0'
+    package_type = "header-library"
+    exports = "record.json", "hwcatalog.json", "conan.lock"
+    requires = ()
+
+    exports_sources = "artifacts/*"
+
+    def export(self):
+        from pathlib import Path
+        from conan.tools.scm import Git
+        marker = Path(self.recipe_folder) / "source-path.txt"
+        if marker.is_file():
+            Git(self, marker.read_text()).coordinates_to_conandata(repository=True)
+
+    def source(self):
+        import os
+        from conan.tools.scm import Git
+        if self.conan_data and "scm" in self.conan_data:
+            checkout = os.path.join(self.source_folder, "source")
+            os.makedirs(checkout, exist_ok=True)
+            Git(self, checkout).checkout_from_conandata_coordinates()
+
+    def package(self):
+        import os
+        from conan.tools.files import copy
+        copy(self, "*", src=os.path.join(self.source_folder, "artifacts"),
+             dst=os.path.join(self.package_folder, "artifacts"))

@@ -148,6 +148,12 @@ Home не копируется, cache save/restore не используется
 могут остаться рецепт или пакет. Сбой upload сообщается как BackendUnavailable;
 автоматического rollback или retry нет.
 
+Рецепт генерируется Jinja-шаблоном
+`src/hwcatalog/_internal/backends/templates/conanfile.py.j2`.
+Шаблон загружается из установленного пакета через PackageLoader; переменные
+проверяются StrictUndefined, Python-литералы выводятся через repr.
+JSON-метаданные и SCM-координаты сериализуются моделями.
+
 Канонические рецепты форматов 1–3 остаются читаемыми. Новые рецепты используют
 четвёртую версию: requirements фиксируют recipe revisions прямых зависимостей,
 а lockfile не экспортируется. `package()` копирует только артефакты,

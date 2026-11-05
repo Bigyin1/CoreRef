@@ -62,7 +62,7 @@ class ConanGraph:
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> GraphResult:
-        """Resolve a temporary consumer recipe; leave the local root unpublished."""
+        """Resolve local root data independently of its publication status."""
         record, dependencies = normalize_publication(record, dependencies)
         with self.backend._operation():
             requirements = tuple(self.backend._requirement(ref) for ref in dependencies)

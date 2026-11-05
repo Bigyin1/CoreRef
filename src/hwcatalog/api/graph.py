@@ -26,7 +26,10 @@ class CatalogGraph(Protocol):
     def resolve_local(
         self, record: Record, *, dependencies: tuple[Ref, ...] = (), lockfile: Path | None = None
     ) -> GraphResult:
-        """Resolve a local root and published dependencies without publishing the root."""
+        """Resolve local data regardless of whether the root Ref is published.
+
+        Local root data takes precedence; only its dependencies must be published.
+        """
         ...
 
     def find_dependents(

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml  # type: ignore[import-untyped]  # Validated by models at this boundary.
+from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ...api.errors import InvalidPackage, InvalidPublication
@@ -20,7 +21,17 @@ _VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 _RECIPE_FORMAT: Literal[4] = 4
-_LEGACY_CONTENT_FORMAT = 2
+
+_RECIPE_ENV = Environment(
+    loader=PackageLoader("hwcatalog._internal.backends"),
+    autoescape=False,  # noqa: S701 - Python literals use repr escaping.
+    undefined=StrictUndefined,
+    trim_blocks=True,
+    lstrip_blocks=True,
+    keep_trailing_newline=True,
+)
+_RECIPE_ENV.filters["pyrepr"] = repr
+_RECIPE_TEMPLATE = _RECIPE_ENV.get_template("conanfile.py.j2")
 
 
 def to_conan_reference(ref: Ref) -> str:
@@ -76,76 +87,9 @@ class RecipeMetadata(BaseModel):
 
 def _recipe_text(ref: Ref, requirements: tuple[str, ...], *, format_version: int = 1) -> str:
     name, version = to_conan_reference(ref).split("/")
-    exports = '"record.json", "hwcatalog.json"'
-    if format_version < _RECIPE_FORMAT:
-        exports += ', "conan.lock"'
-    text = (
-        "from conan import ConanFile\n\n\n"
-        "class CatalogRecord(ConanFile):\n"
-        f"    name = {name!r}\n"
-        f"    version = {version!r}\n"
-        '    package_type = "header-library"\n'
-        f"    exports = {exports}\n"
-        f"    requires = {requirements!r}\n"
+    return _RECIPE_TEMPLATE.render(
+        name=name, version=version, requirements=requirements, format_version=format_version
     )
-    if format_version != 1:
-        text += _CONTENT_METHODS if format_version == _LEGACY_CONTENT_FORMAT else _SCM_METHODS
-    return text
-
-
-_CONTENT_METHODS = """
-    exports_sources = "artifacts/*"
-
-    def export(self):
-        from pathlib import Path
-        from conan.tools.scm import Git
-        marker = Path(self.recipe_folder) / "source-path.txt"
-        if marker.is_file():
-            Git(self, marker.read_text()).coordinates_to_conandata(repository=True)
-
-    def source(self):
-        import os
-        from conan.tools.scm import Git
-        if self.conan_data and "scm" in self.conan_data:
-            checkout = os.path.join(self.source_folder, "checkout")
-            os.makedirs(checkout, exist_ok=True)
-            Git(self, checkout).checkout_from_conandata_coordinates()
-
-    def package(self):
-        import os
-        from conan.tools.files import copy
-        copy(self, "*", src=os.path.join(self.source_folder, "artifacts"),
-             dst=os.path.join(self.package_folder, "artifacts"))
-        if self.conan_data and "scm" in self.conan_data:
-            copy(self, "*", src=os.path.join(self.source_folder, "checkout"),
-                 dst=os.path.join(self.package_folder, "source"), excludes=(".git", ".git/*"))
-"""
-
-
-_SCM_METHODS = """
-    exports_sources = "artifacts/*"
-
-    def export(self):
-        from pathlib import Path
-        from conan.tools.scm import Git
-        marker = Path(self.recipe_folder) / "source-path.txt"
-        if marker.is_file():
-            Git(self, marker.read_text()).coordinates_to_conandata(repository=True)
-
-    def source(self):
-        import os
-        from conan.tools.scm import Git
-        if self.conan_data and "scm" in self.conan_data:
-            checkout = os.path.join(self.source_folder, "source")
-            os.makedirs(checkout, exist_ok=True)
-            Git(self, checkout).checkout_from_conandata_coordinates()
-
-    def package(self):
-        import os
-        from conan.tools.files import copy
-        copy(self, "*", src=os.path.join(self.source_folder, "artifacts"),
-             dst=os.path.join(self.package_folder, "artifacts"))
-"""
 
 
 class _SCM(BaseModel):
