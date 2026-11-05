@@ -2,7 +2,6 @@
 
 import json
 import shutil
-from collections.abc import Iterator
 from dataclasses import asdict
 from pathlib import Path
 
@@ -20,10 +19,8 @@ from tests.helpers import resolve_published
 
 
 @pytest.fixture
-def packages(tmp_path: Path) -> Iterator[Catalog]:
-    connection = Catalog(configured_home(tmp_path / "home"))
-    with connection as catalog:
-        yield catalog
+def packages(tmp_path: Path) -> Catalog:
+    return Catalog(configured_home(tmp_path / "home"))
 
 
 def description(tmp_path: Path, **fields: object) -> Path:
@@ -85,30 +82,30 @@ def test_local_source_is_captured_once_outside_payload(
 
 def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path) -> None:
     source = GitResource(str(checkout), "main", _commit(checkout))
-    with (connection := Catalog(configured_home(tmp_path / "home"))) as catalog:
-        record = catalog.publish_file(description(tmp_path, source=asdict(source)))
-        assert record.source == source
-        _, folder = conan_records.locate(connection._client, record.ref)
-        assert "exports_sources" not in (folder / "conanfile.py").read_text()
-        assert "source" not in json.loads((folder / "record.json").read_text())
-        assert "scm" in (folder / "conandata.yml").read_text()
-        assert str(checkout) not in (folder / "conanfile.py").read_text()
-        fetched = catalog.materialize(record.ref, with_sources=True)
-        assert fetched.source_path is not None
-        assert (fetched.source_path / "cpu.sv").is_file()
-        with pytest.raises(Conflict):
-            catalog.publish_file(description(tmp_path, source=asdict(source)))
-        (folder / "conandata.yml").write_text("scm: {commit: nope}")
-        with pytest.raises(InvalidPackage):
-            catalog.get(record.ref)
+    catalog = Catalog(configured_home(tmp_path / "home"))
+    record = catalog.publish_file(description(tmp_path, source=asdict(source)))
+    assert record.source == source
+    _, folder = conan_records.locate(catalog._client, record.ref)
+    assert "exports_sources" not in (folder / "conanfile.py").read_text()
+    assert "source" not in json.loads((folder / "record.json").read_text())
+    assert "scm" in (folder / "conandata.yml").read_text()
+    assert str(checkout) not in (folder / "conanfile.py").read_text()
+    fetched = catalog.materialize(record.ref, with_sources=True)
+    assert fetched.source_path is not None
+    assert (fetched.source_path / "cpu.sv").is_file()
+    with pytest.raises(Conflict):
+        catalog.publish_file(description(tmp_path, source=asdict(source)))
+    (folder / "conandata.yml").write_text("scm: {commit: nope}")
+    with pytest.raises(InvalidPackage):
+        catalog.get(record.ref)
 
 
 def test_dirty_source_fails_before_publication(tmp_path: Path, checkout: Path) -> None:
     (checkout / "cpu.sv").write_text("uncommitted")
-    with Catalog(configured_home(tmp_path / "home")) as catalog:
-        with pytest.raises(CatalogError, match="dirty"):
-            catalog.publish_file(description(tmp_path, source={"path": "checkout"}))
-        assert not catalog.search()
+    catalog = Catalog(configured_home(tmp_path / "home"))
+    with pytest.raises(CatalogError, match="dirty"):
+        catalog.publish_file(description(tmp_path, source={"path": "checkout"}))
+    assert not catalog.search()
 
 
 @pytest.mark.parametrize(
@@ -188,12 +185,12 @@ def test_publishing_pinned_scm_does_not_contact_git(
     monkeypatch.setattr(subprocess, "Popen", reject)
     source = GitResource("https://gitlab.example.invalid/rtl/cpu.git", "v1", "a" * 40)
     record = Record(Ref("cpu", "1.0", "rtl", "soc"), source=source)
-    with Catalog(configured_home(tmp_path / "home")) as catalog:
-        catalog.publish(record)
-        assert catalog.get(record.ref) == record
-        package = catalog.materialize(record.ref)
-        assert package.source_path is None
-        assert not (package.path / "source").exists()
+    catalog = Catalog(configured_home(tmp_path / "home"))
+    catalog.publish(record)
+    assert catalog.get(record.ref) == record
+    package = catalog.materialize(record.ref)
+    assert package.source_path is None
+    assert not (package.path / "source").exists()
 
 
 def _commit(checkout: Path) -> str:

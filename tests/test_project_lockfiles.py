@@ -31,23 +31,23 @@ def test_project_lock_pins_publication_and_installation(tmp_path: Path) -> None:
             }
         )
     )
-    with connection as catalog:
-        catalog.publish(dependency)
-        lockfile = catalog.create_lockfile((dependency.ref,), tmp_path / "project/conan.lock")
-        original_lock = lockfile.read_bytes()
-        record = catalog.publish_file(description, lockfile=lockfile)
-        assert record.files == ("cpu.lib",)
-        _, recipe = conan_records.locate(connection._client, result)
-        assert not (recipe / "conan.lock").exists()
-        assert resolve_published(catalog, result, lockfile=lockfile).dependencies == (
-            Dependency(result, dependency.ref),
-        )
-        installed = catalog.materialize(result)
-        assert (installed.path / "artifacts/cpu.lib").read_text() == artifact.read_text()
-        assert not (installed.path / "conan.lock").exists()
-        assert lockfile.read_bytes() == original_lock
-        assert catalog.create_lockfile((result,), lockfile) == lockfile
-        assert resolve_published(catalog, result, lockfile=lockfile).records
+    catalog = connection
+    catalog.publish(dependency)
+    lockfile = catalog.create_lockfile((dependency.ref,), tmp_path / "project/conan.lock")
+    original_lock = lockfile.read_bytes()
+    record = catalog.publish_file(description, lockfile=lockfile)
+    assert record.files == ("cpu.lib",)
+    _, recipe = conan_records.locate(connection._client, result)
+    assert not (recipe / "conan.lock").exists()
+    assert resolve_published(catalog, result, lockfile=lockfile).dependencies == (
+        Dependency(result, dependency.ref),
+    )
+    installed = catalog.materialize(result)
+    assert (installed.path / "artifacts/cpu.lib").read_text() == artifact.read_text()
+    assert not (installed.path / "conan.lock").exists()
+    assert lockfile.read_bytes() == original_lock
+    assert catalog.create_lockfile((result,), lockfile) == lockfile
+    assert resolve_published(catalog, result, lockfile=lockfile).records
 
 
 @pytest.mark.parametrize(
@@ -64,36 +64,36 @@ def test_conan_validates_the_supplied_project_lockfile(
     connection = Catalog(configured_home(tmp_path / "cache"))
     rtl = Record(Ref("cpu", "1.0", "rtl", "soc"))
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc"))
-    with connection as catalog:
-        catalog.publish(rtl)
-        catalog.publish(macro, dependencies=(rtl.ref,))
-        lockfile = catalog.create_lockfile((rtl.ref,), tmp_path / "project/conan.lock")
-        if damage == "missing":
-            lockfile.unlink()
-        elif damage == "incomplete":
-            connection._client.run(
-                "lock",
-                "remove",
-                "--requires=soc.cpu.rtl/*",
-                "--lockfile",
-                str(lockfile),
-                "--lockfile-out",
-                str(lockfile),
-            )
-        else:
-            lockfile.write_text("not a Conan lockfile\n")
-        with pytest.raises(exception):
-            resolve_published(catalog, macro.ref, lockfile=lockfile)
-        assert catalog.get(macro.ref) == macro
+    catalog = connection
+    catalog.publish(rtl)
+    catalog.publish(macro, dependencies=(rtl.ref,))
+    lockfile = catalog.create_lockfile((rtl.ref,), tmp_path / "project/conan.lock")
+    if damage == "missing":
+        lockfile.unlink()
+    elif damage == "incomplete":
+        connection._client.run(
+            "lock",
+            "remove",
+            "--requires=soc.cpu.rtl/*",
+            "--lockfile",
+            str(lockfile),
+            "--lockfile-out",
+            str(lockfile),
+        )
+    else:
+        lockfile.write_text("not a Conan lockfile\n")
+    with pytest.raises(exception):
+        resolve_published(catalog, macro.ref, lockfile=lockfile)
+    assert catalog.get(macro.ref) == macro
 
 
 def test_empty_project_lockfile(tmp_path: Path) -> None:
-    with Catalog(configured_home(tmp_path / "cache")) as catalog:
-        lockfile = catalog.create_lockfile((), tmp_path / "empty/conan.lock")
-        empty_lock = lockfile.read_bytes()
-        root = Record(Ref("root", "1.0", "rtl", "soc"))
-        catalog.publish(root, lockfile=lockfile)
-        assert resolve_published(catalog, root.ref, lockfile=lockfile).records == (root,)
-        catalog.create_lockfile((root.ref,), lockfile)
-        catalog.create_lockfile((), lockfile)
-        assert lockfile.read_bytes() == empty_lock
+    catalog = Catalog(configured_home(tmp_path / "cache"))
+    lockfile = catalog.create_lockfile((), tmp_path / "empty/conan.lock")
+    empty_lock = lockfile.read_bytes()
+    root = Record(Ref("root", "1.0", "rtl", "soc"))
+    catalog.publish(root, lockfile=lockfile)
+    assert resolve_published(catalog, root.ref, lockfile=lockfile).records == (root,)
+    catalog.create_lockfile((root.ref,), lockfile)
+    catalog.create_lockfile((), lockfile)
+    assert lockfile.read_bytes() == empty_lock

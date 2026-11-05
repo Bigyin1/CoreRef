@@ -31,12 +31,12 @@
 ```python
 from hwcatalog.api.catalog import Catalog
 
-with Catalog() as catalog:
-    record = catalog.publish_file("package.json")
-    print(record.source, record.files)
-    package = catalog.materialize(record.ref, with_sources=True)
-    print(package.source_path)  # SCM checkout in Conan's source cache
-    print(package.path / "artifacts" / "timing/cpu.lib")
+catalog = Catalog()
+record = catalog.publish_file("package.json")
+print(record.source, record.files)
+package = catalog.materialize(record.ref, with_sources=True)
+print(package.source_path)  # SCM checkout in Conan's source cache
+print(package.path / "artifacts" / "timing/cpu.lib")
 ```
 
 `publish_file()` возвращает сохранённый `Record`. Каталог автоматически создаёт

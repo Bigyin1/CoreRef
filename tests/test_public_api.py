@@ -54,20 +54,20 @@ def test_public_models_import_independently_of_conan() -> None:
             ref=records.Ref("rtl", "v1", "rtl-project", "public"),
             payload=manifest,
         )
-        with catalog.Catalog(Path(home.name)) as instance:
-            instance.publish(record=record)
-            stored = instance.get(record.ref)
-            assert stored.ref == record.ref
-            assert stored.payload["views"] == ("rtl", "timing")
-            assert instance.search(query.SearchQuery()) == (stored,)
-            assert instance.dependencies(record.ref) == ()
-            assert instance.resolve_local(stored).records == (stored,)
-            try:
-                instance.get(records.Ref("absent", "v1", "rtl-project", "public"))
-            except errors.NotFound:
-                pass
-            else:
-                raise AssertionError("Domain errors must use the public error contract")
+        instance = catalog.Catalog(Path(home.name))
+        instance.publish(record=record)
+        stored = instance.get(record.ref)
+        assert stored.ref == record.ref
+        assert stored.payload["views"] == ("rtl", "timing")
+        assert instance.search(query.SearchQuery()) == (stored,)
+        assert instance.dependencies(record.ref) == ()
+        assert instance.resolve_local(stored).records == (stored,)
+        try:
+            instance.get(records.Ref("absent", "v1", "rtl-project", "public"))
+        except errors.NotFound:
+            pass
+        else:
+            raise AssertionError("Domain errors must use the public error contract")
 
         with TemporaryDirectory() as directory:
             local = resources.LocatedResource("nfs", directory).materialize()

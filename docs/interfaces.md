@@ -1,6 +1,7 @@
 # Публичный API
 
-Catalog напрямую работает с Conan и поддерживает контекстный менеджер.
+Catalog — обычный объект для работы с уже настроенным Conan.
+Он хранит настройки клиента; открывать и закрывать соединение не требуется.
 Конструктор: `Catalog(home=None, *, remote=None, timeout=60)`.
 Профили, remotes и авторизация настраиваются заранее средствами Conan.
 Модели находятся в hwcatalog.api.models.
@@ -18,7 +19,6 @@ Catalog напрямую работает с Conan и поддерживает �
 | dependencies(ref, filters=SearchQuery()) | Непосредственные зависимости как tuple[Record, ...] |
 | resolve_local(record, *, dependencies=(), lockfile=None) | GraphResult для локального корня и опубликованных зависимостей; корень не публикуется |
 | find_dependents(ref, *, candidates, transitive=True) | Кандидаты, зависящие от точного ref |
-| close() | Освобождает ресурсы бэкенда |
 
 Publish принимает один Record. Все зависимости должны уже существовать;
 коллекции новых записей не принимаются. Существующие записи не обновляются.
@@ -76,8 +76,8 @@ Dependency(source, target) используется в GraphResult. Вместо
 или rollback удалённой публикации нет.
 
 Catalog предоставляет get, search, dependencies, resolve_local, find_dependents,
-publish, publish_file, create_lockfile, materialize и close. В классе остаются
-настройка клиента, управление временем жизни и короткие вызовы внутренних функций.
+publish, publish_file, create_lockfile и materialize. В классе остаются
+настройка клиента и короткие вызовы внутренних функций.
 Чтение записей, работа с графом, публикация и получение файлов реализованы
 в `_internal/conan/records.py`, `graph.py`, `publication.py` и `materialization.py`.
 Отдельных Backend и CatalogGraph нет; нативные графы и рецепты остаются внутренними.

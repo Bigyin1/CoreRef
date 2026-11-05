@@ -1,6 +1,5 @@
 """Real Conan instances and Git fixtures use owned temporary directories."""
 
-from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -15,9 +14,8 @@ from hwcatalog.api.catalog import Catalog
 
 
 @pytest.fixture
-def catalog(tmp_path: Path) -> Iterator[Catalog]:
-    with Catalog(configured_home(tmp_path / "conan-home")) as catalog:
-        yield catalog
+def catalog(tmp_path: Path) -> Catalog:
+    return Catalog(configured_home(tmp_path / "conan-home"))
 
 
 @pytest.fixture

@@ -25,16 +25,16 @@ from hwcatalog.api.models.records import Record, Ref
 
 rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"))
 macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.lib"]})
-with Catalog() as catalog:
-    rtl = catalog.publish(rtl)
-    macro = catalog.publish(macro, dependencies=(rtl.ref,))
-    inputs = catalog.dependencies(macro.ref)  # tuple[Record, ...]
-    implementations = catalog.find_dependents(
-        rtl.ref,
-        candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"),
-    )
-    graph = catalog.resolve_local(macro, dependencies=(rtl.ref,))
-    print(graph.dependencies)
+catalog = Catalog()
+rtl = catalog.publish(rtl)
+macro = catalog.publish(macro, dependencies=(rtl.ref,))
+inputs = catalog.dependencies(macro.ref)  # tuple[Record, ...]
+implementations = catalog.find_dependents(
+    rtl.ref,
+    candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"),
+)
+graph = catalog.resolve_local(macro, dependencies=(rtl.ref,))
+print(graph.dependencies)
 ```
 
 Один `publish(record, dependencies=(ref1, ref2, ...))` создаёт один пакет и возвращает
@@ -54,9 +54,9 @@ make integration  # собственный временный Conan server
 Публикация файлов и Git-исходников:
 
 ```python
-with Catalog() as catalog:
-    record = catalog.publish_file("package.json")
-    package = catalog.materialize(record.ref, with_sources=True)
+catalog = Catalog()
+record = catalog.publish_file("package.json")
+package = catalog.materialize(record.ref, with_sources=True)
 ```
 
 JSON описывает один пакет: `ref`, `payload`, `dependencies`, необязательный один
@@ -74,9 +74,9 @@ Conan-рецепты и нативный граф создаются внутр�
 Локальный корень не нужно публиковать для получения общего графа зависимостей:
 
 ```python
-with Catalog() as catalog:
-    local = Record(Ref("soc", "1.0", "rtl", "soc1"))
-    graph = catalog.resolve_local(local, dependencies=(rtl.ref,))
+catalog = Catalog()
+local = Record(Ref("soc", "1.0", "rtl", "soc1"))
+graph = catalog.resolve_local(local, dependencies=(rtl.ref,))
 ```
 
 Адаптер создаёт временный consumer-рецепт и получает весь граф одним `graph info`
@@ -88,9 +88,9 @@ with Catalog() as catalog:
 Проектный lockfile создаётся штатной командой Conan и передаётся как непрозрачный файл:
 
 ```python
-with Catalog() as catalog:
-    lockfile = catalog.create_lockfile((rtl.ref,), "workspace/conan.lock")
-    graph = catalog.resolve_local(macro, dependencies=(rtl.ref,), lockfile=lockfile)
+catalog = Catalog()
+lockfile = catalog.create_lockfile((rtl.ref,), "workspace/conan.lock")
+graph = catalog.resolve_local(macro, dependencies=(rtl.ref,), lockfile=lockfile)
 ```
 
 Каталог не разбирает JSON lockfile и не задаёт версию его формата. Новые пакеты

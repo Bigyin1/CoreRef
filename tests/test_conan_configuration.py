@@ -28,13 +28,13 @@ def test_configured_profile_defaults_are_used_without_rewriting(tmp_path: Path) 
         "core:default_profile=project-host\ncore:default_build_profile=project-build\n"
     )
     before = {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
-    with (connection := Catalog(str(home))) as catalog:
-        profiles = cast(Mapping[str, _Profile], connection._client.run("profile", "show"))
-        assert profiles["host"].settings["build_type"] == "Debug"
-        assert profiles["build"].settings["build_type"] == "Release"
-        root = Record(Ref("cpu", "1.0", "rtl", "soc"))
-        assert catalog.resolve_local(root).records == (root,)
-        catalog.publish(root)
+    catalog = Catalog(str(home))
+    profiles = cast(Mapping[str, _Profile], catalog._client.run("profile", "show"))
+    assert profiles["host"].settings["build_type"] == "Debug"
+    assert profiles["build"].settings["build_type"] == "Release"
+    root = Record(Ref("cpu", "1.0", "rtl", "soc"))
+    assert catalog.resolve_local(root).records == (root,)
+    catalog.publish(root)
     assert before == {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
     assert config.read_text() == (
         "core:default_profile=project-host\ncore:default_build_profile=project-build\n"
@@ -46,10 +46,8 @@ def test_configured_profile_defaults_are_used_without_rewriting(tmp_path: Path) 
 def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path) -> None:
     home = configured_home(tmp_path / "cache")
     (home / "profiles/default").unlink()
-    with (
-        Catalog(home) as catalog,
-        pytest.raises(CatalogError, match="profile"),
-    ):
+    catalog = Catalog(home)
+    with pytest.raises(CatalogError, match="profile"):
         catalog.resolve_local(Record(Ref("cpu", "1.0", "rtl", "soc")))
     assert not (home / "profiles/default").exists()
 
@@ -63,5 +61,3 @@ def test_multiple_enabled_remotes_require_an_explicit_selection(tmp_path: Path) 
         Catalog(home)
     selected = Catalog(home, remote="second")
     assert selected._client.remote == "second"
-    selected.close()
-    connection.close()

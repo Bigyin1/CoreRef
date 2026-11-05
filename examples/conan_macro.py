@@ -16,10 +16,8 @@ def main() -> None:
     rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"), {"files": ["/project/cpu.sv"]})
     intermediate = Record(Ref("dft-run", "3.0", "result", "tools"))
     macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"))
-    with (
-        TemporaryDirectory(prefix="hwcatalog-example-") as directory,
-        Catalog(configured_home(Path(directory))) as catalog,
-    ):
+    with TemporaryDirectory(prefix="hwcatalog-example-") as directory:
+        catalog = Catalog(configured_home(Path(directory)))
         catalog.publish(rtl)
         catalog.publish(intermediate, dependencies=(rtl.ref,))
         inputs = Path(directory) / "inputs"

@@ -135,10 +135,6 @@ def test_conan_round_trip_search_and_project_lockfile(
         catalog.publish(be)
     with pytest.raises(NotFound):
         catalog.get(record(name="missing").ref)
-    catalog.close()
-    catalog.close()
-    with pytest.raises(CatalogError):
-        catalog.search()
 
 
 def test_conan_reverse_search_uses_each_candidates_graph(conan_catalog: Catalog) -> None:
@@ -309,8 +305,7 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = record()
-    conan_catalog.publish(root)
+    root = conan_catalog.publish(record())
     ambient_home = tmp_path / "unrelated-home"
     monkeypatch.setenv("CONAN_HOME", str(ambient_home))
     cwd = Path.cwd()
@@ -321,9 +316,7 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     assert os.environ["CONAN_HOME"] == str(ambient_home)
     assert Path.cwd() == cwd
     assert not ambient_home.exists()
-    conan_catalog.close()
-    with pytest.raises(CatalogError):
-        resolve_published(conan_catalog, root.ref)
+    assert resolve_published(conan_catalog, root.ref).records == (root,)
 
 
 def test_native_graph_reports_missing_pinned_dependency(conan_catalog: Catalog) -> None:
@@ -401,9 +394,9 @@ def test_default_cache_uses_conan_home_and_stays_bound_to_it(
     assert connection._client.home == home.resolve()
     other = tmp_path / "later-home"
     monkeypatch.setenv("CONAN_HOME", str(other))
-    with connection as catalog:
-        catalog.publish(record())
-        assert catalog.get(record().ref).ref == record().ref
+    catalog = connection
+    catalog.publish(record())
+    assert catalog.get(record().ref).ref == record().ref
     assert not other.exists()
 
 
@@ -416,7 +409,6 @@ def test_default_cache_uses_native_conanrc_resolution(
     (tmp_path / ".conanrc").write_text("conan_home=./configured-home\n")
     connection = Catalog()
     assert connection._client.home == (tmp_path / "configured-home").resolve()
-    connection.close()
 
 
 def test_invalid_default_cache_is_a_domain_error(

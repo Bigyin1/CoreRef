@@ -1,6 +1,5 @@
 """Resolve unpublished consumers using the native Conan graph API."""
 
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,10 +13,8 @@ from hwcatalog.api.models.records import Record, Ref
 
 
 @pytest.fixture
-def local_catalog(tmp_path: Path) -> Iterator[Catalog]:
-    connection = Catalog(configured_home(tmp_path / "cache"))
-    with connection as catalog:
-        yield catalog
+def local_catalog(tmp_path: Path) -> Catalog:
+    return Catalog(configured_home(tmp_path / "cache"))
 
 
 def record(name: str, version: str = "1.0") -> Record:
@@ -97,48 +94,48 @@ def test_conan_resolves_one_consumer_without_exporting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connection = Catalog(configured_home(tmp_path / "cache"))
-    with connection as catalog:
-        dependencies = tuple(record(name) for name in ("left", "right"))
-        for item in dependencies:
-            catalog.publish(item)
-        operations: list[tuple[str, ...]] = []
-        original_run = connection._client.run
+    catalog = connection
+    dependencies = tuple(record(name) for name in ("left", "right"))
+    for item in dependencies:
+        catalog.publish(item)
+    operations: list[tuple[str, ...]] = []
+    original_run = connection._client.run
 
-        def track(*arguments: str) -> object:
-            operations.append(arguments)
-            return original_run(*arguments)
+    def track(*arguments: str) -> object:
+        operations.append(arguments)
+        return original_run(*arguments)
 
-        monkeypatch.setattr(connection._client, "run", track)
-        catalog.resolve_local(record("top"), dependencies=tuple(d.ref for d in dependencies))
-        graphs = [args for args in operations if args[:2] == ("graph", "info")]
-        assert len(graphs) == 1
-        assert not Path(graphs[0][2]).exists()  # Temporary consumer is removed.
-        assert not {args[0] for args in operations} & {"export", "export-pkg", "upload"}
-        with pytest.raises(NotFound):
-            catalog.get(record("top").ref)
+    monkeypatch.setattr(connection._client, "run", track)
+    catalog.resolve_local(record("top"), dependencies=tuple(d.ref for d in dependencies))
+    graphs = [args for args in operations if args[:2] == ("graph", "info")]
+    assert len(graphs) == 1
+    assert not Path(graphs[0][2]).exists()  # Temporary consumer is removed.
+    assert not {args[0] for args in operations} & {"export", "export-pkg", "upload"}
+    with pytest.raises(NotFound):
+        catalog.get(record("top").ref)
 
 
 def test_conan_local_consumer_uses_opaque_project_lockfile(tmp_path: Path) -> None:
     connection = Catalog(configured_home(tmp_path / "cache"))
-    with connection as catalog:
-        leaf, child, root = (record(name) for name in ("leaf", "child", "top"))
-        catalog.publish(leaf)
-        catalog.publish(child, dependencies=(leaf.ref,))
-        lockfile = catalog.create_lockfile((child.ref,), tmp_path / "project/conan.lock")
-        original = lockfile.read_bytes()
-        expected = catalog.resolve_local(root, dependencies=(child.ref,))
-        assert catalog.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile) == expected
-        assert lockfile.read_bytes() == original
-        connection._client.run(
-            "lock",
-            "remove",
-            "--requires=soc.leaf.rtl/*",
-            "--lockfile",
-            str(lockfile),
-            "--lockfile-out",
-            str(lockfile),
-        )
-        incomplete = lockfile.read_bytes()
-        with pytest.raises(InvalidPackage, match="absent from its lockfile"):
-            catalog.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile)
-        assert lockfile.read_bytes() == incomplete
+    catalog = connection
+    leaf, child, root = (record(name) for name in ("leaf", "child", "top"))
+    catalog.publish(leaf)
+    catalog.publish(child, dependencies=(leaf.ref,))
+    lockfile = catalog.create_lockfile((child.ref,), tmp_path / "project/conan.lock")
+    original = lockfile.read_bytes()
+    expected = catalog.resolve_local(root, dependencies=(child.ref,))
+    assert catalog.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile) == expected
+    assert lockfile.read_bytes() == original
+    connection._client.run(
+        "lock",
+        "remove",
+        "--requires=soc.leaf.rtl/*",
+        "--lockfile",
+        str(lockfile),
+        "--lockfile-out",
+        str(lockfile),
+    )
+    incomplete = lockfile.read_bytes()
+    with pytest.raises(InvalidPackage, match="absent from its lockfile"):
+        catalog.resolve_local(root, dependencies=(child.ref,), lockfile=lockfile)
+    assert lockfile.read_bytes() == incomplete
