@@ -26,16 +26,6 @@ class JSONSerializable(Protocol):
 class Ref:
     """Package coordinates with a required private catalog excluded from identity and JSON."""
 
-    __slots__ = (
-        "_catalog",
-        "_component",
-        "_namespace",
-        "_subcomponent",
-        "_type",
-        "_version",
-        "_view",
-    )
-
     def __init__(  # noqa: PLR0913, PLR0917 - One argument per coordinate and context.
         self,
         namespace: str,

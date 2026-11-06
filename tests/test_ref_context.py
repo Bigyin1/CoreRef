@@ -78,7 +78,7 @@ def test_reference_requires_a_private_catalog(catalog: Catalog) -> None:
     assert ref._catalog is catalog
     assert not hasattr(ref, "catalog")
     assert not is_dataclass(ref)
-    assert tuple(name for name in Ref.__slots__ if "catalog" in name) == ("_catalog",)
+    assert tuple(name for name in vars(ref) if "catalog" in name) == ("_catalog",)
     with pytest.raises(AttributeError):
         ref.component = "changed"  # type: ignore[misc]
     with pytest.raises(TypeError):
