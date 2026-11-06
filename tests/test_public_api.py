@@ -31,7 +31,7 @@ def test_public_models_import_independently_of_conan() -> None:
         from hwcatalog.api.graph import Graph
         assert "conan" not in sys.modules
 
-        from hwcatalog.api import catalog, types
+        from hwcatalog.api import catalog
         from hwcatalog.api import query
 
         home = TemporaryDirectory()
@@ -41,7 +41,7 @@ def test_public_models_import_independently_of_conan() -> None:
         profiles = Path(home.name) / "profiles"
         profiles.mkdir(exist_ok=True)
         (profiles / "default").write_text("[settings]\\nos=Linux\\n")
-        manifest: dict[str, types.JSON] = {"views": ["rtl", "timing"]}
+        manifest: dict[str, records.JSON] = {"views": ["rtl", "timing"]}
         instance = catalog.Catalog(Path(home.name))
         local = records.LocalRecord(
             ref=records.Ref("public", "rtl", "rtl", "default", "v1", catalog=instance),

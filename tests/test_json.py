@@ -9,7 +9,7 @@ import pytest
 from frozendict import deepfreeze
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.types import JSON
+from hwcatalog.api.records import JSON
 from tests.helpers import local_record, release, run
 
 

@@ -7,8 +7,7 @@ from pathlib import Path
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import LocalRecord, Record, Ref
-from hwcatalog.api.types import JSON
+from hwcatalog.api.records import JSON, LocalRecord, Record, Ref
 
 
 class ProjectTypeId(StrEnum):

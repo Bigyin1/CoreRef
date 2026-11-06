@@ -29,7 +29,8 @@ Record.from_json(data, *, catalog) восстанавливает inspection-с�
 Record.to_dict() даёт inspection-представление с локальными путями.
 
 Payload — произвольное JSON-значение или пользовательский JSONSerializable с to_json().
-Протокол импортируется из hwcatalog.api.records вместе с классами записей.
+Тип JSON и протокол JSONSerializable импортируются из hwcatalog.api.records
+вместе с классами записей.
 При чтении и подготовке публикации он становится независимым immutable-снимком:
 объекты — frozendict, массивы — tuple. Классы потребителя не сохраняются; NaN/Infinity
 отклоняются. Сериализация payload остаётся ответственностью потребителя. SDK не интерпретирует

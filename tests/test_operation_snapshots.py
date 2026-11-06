@@ -7,8 +7,7 @@ import pytest
 from hwcatalog._internal.conan.types import NativeGraph
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import LocalRecord, Ref
-from hwcatalog.api.types import JSON
+from hwcatalog.api.records import JSON, LocalRecord, Ref
 from tests.test_models import UserPayload
 
 

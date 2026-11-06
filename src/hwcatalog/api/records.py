@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING, Protocol, Self, cast, runtime_checkable
 
 from frozendict import deepfreeze, frozendict
 
-from .types import JSON
-
 if TYPE_CHECKING:
     from .catalog import Catalog
     from .query import SearchQuery
+
+
+type JSON = bool | int | float | str | Mapping[str, JSON] | list[JSON] | tuple[JSON, ...] | None
 
 
 @runtime_checkable
@@ -158,4 +159,4 @@ class Record:
         )
 
 
-__all__ = ["JSONSerializable", "LocalRecord", "Record", "Ref"]
+__all__ = ["JSON", "JSONSerializable", "LocalRecord", "Record", "Ref"]

@@ -77,7 +77,7 @@ inspection-снимок с явными путями. Метаданные па�
 для просмотра готовых данных, включая пути cache; отдельного Record.to_json() нет.
 
 Публичные модули находятся прямо в hwcatalog.api: catalog, graph, records, query,
-errors, types. Протокол JSONSerializable находится в records.
+errors. Тип JSON и протокол JSONSerializable находятся в records.
 Ref — неизменяемые координаты с обязательным приватным _catalog;
 контекст исключён из равенства, хеша и сериализации. Ссылки результатов уже содержат
 этот контекст. Ref и Record неизменяемы, LocalRecord можно редактировать. Graph — готовый снимок.

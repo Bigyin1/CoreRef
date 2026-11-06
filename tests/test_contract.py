@@ -10,8 +10,7 @@ from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency
 from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Record, Ref
-from hwcatalog.api.types import JSON
+from hwcatalog.api.records import JSON, LocalRecord, Record, Ref
 from tests.helpers import graph_json, local_record, release, resolve_published
 
 
