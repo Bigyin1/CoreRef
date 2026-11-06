@@ -54,9 +54,7 @@ class StoredPackage:
 
     def dependencies(self, query: SearchQuery) -> tuple[Record, ...]:
         records = self._read_records(self.recipe().metadata.requires)
-        return tuple(
-            sorted((record for record in records if query.matches(record)), key=lambda r: r.ref)
-        )
+        return query.select(records)
 
     def find_dependents(self, query: SearchQuery, *, transitive: bool) -> tuple[Record, ...]:
         recipes = tuple(package.recipe() for package in self._catalog._packages(query))

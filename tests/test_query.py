@@ -4,7 +4,7 @@ import pytest
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record, release, resolve_published, run
 
 
@@ -124,3 +124,37 @@ def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catal
     assert catalog.search(SearchQuery(type="gate")) == (alternate,)
     assert catalog.search(SearchQuery(view="be", type="lib-lef")) == (be,)
     assert catalog.search(SearchQuery(view="rtl", type="lib-lef")) == ()
+
+
+@pytest.mark.parametrize(
+    "query, pattern",
+    [
+        (SearchQuery(), "*.*.*.*/*#*"),
+        (
+            SearchQuery(namespace="soc", component="cpu", view="be", type="lib-lef"),
+            "soc.cpu.be.lib-lef/*#*",
+        ),
+        (SearchQuery(version="1.0"), "*.*.*.*/1.0#*"),
+        (SearchQuery(component="cpu*"), None),
+        (SearchQuery(version="[>=1.0]"), None),
+    ],
+)
+def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str | None) -> None:
+    assert query.conan_pattern == pattern
+
+
+def test_selection_supports_local_and_stored_records_without_mutating_inputs(
+    catalog: Catalog,
+) -> None:
+    local = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    leaf = Record(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
+    macro = Record(Ref("soc", "leaf", "be", "lib-lef", "4.0", catalog=catalog))
+    records: list[LocalRecord | Record] = [local, macro, leaf]
+    query = SearchQuery(namespace="soc", view="rtl")
+    selected = query.select(iter(records))
+    assert records == [local, macro, leaf]
+    assert selected == (leaf, local)
+    assert selected[0] is leaf and selected[1] is local
+    records.clear()
+    assert selected == (leaf, local)
+    assert SearchQuery(version="2.0").select(selected) == ()

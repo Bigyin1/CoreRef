@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .._internal.conan.client import ConanClient
 from .._internal.conan.package import LocalPackage, StoredPackage
-from .._internal.conan.references import from_conan_reference, search_pattern
+from .._internal.conan.references import from_conan_reference
 from .query import SearchQuery
 from .records import LocalRecord, Record, Ref
 
@@ -20,7 +20,7 @@ class Catalog:
     def search(self, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
         """Find records matching the exact coordinate filters."""
         records = (package.recipe().record for package in self._packages(query))
-        return tuple(sorted((r for r in records if query.matches(r)), key=lambda r: r.ref))
+        return query.select(records)
 
     def publish(
         self,
@@ -41,7 +41,7 @@ class Catalog:
         return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)
 
     def _packages(self, query: SearchQuery) -> tuple[StoredPackage, ...]:
-        pattern = search_pattern(query)
+        pattern = query.conan_pattern
         if pattern is None:
             return ()
         return tuple(
