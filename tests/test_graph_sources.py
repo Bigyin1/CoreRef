@@ -276,3 +276,21 @@ def test_source_only_metadata_get_does_not_install(
     monkeypatch.setattr(catalog._client, "run", reject)
     assert graph.get((dependency.ref,)) == (dependency,)
     assert graph.get(()) == ()
+
+
+def test_published_graph_does_not_fetch_scm_enabled_by_profile(
+    catalog: Catalog, checkout: Path, tmp_path: Path
+) -> None:
+    leaf = catalog.publish(
+        LocalRecord(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog), source=checkout)
+    )
+    parent = catalog.publish(
+        LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        dependencies=(leaf.ref,),
+    )
+    checkout.rename(tmp_path / "offline-checkout")
+    profile = catalog._client.home / "profiles/default"
+    profile.write_text(profile.read_text() + "\n[conf]\nsoc.*:tools.build:download_source=True\n")
+    graph = parent.ref.graph()
+    assert graph.requirements == (leaf.ref,)
+    assert graph.get((leaf.ref,))[0].source is None

@@ -199,6 +199,8 @@ class ConanClient:
             self.run(
                 "graph",
                 "info",
+                "--conf:host",
+                "*:tools.build:download_source=False",
                 str(directory / "conanfile.py"),
                 "--lockfile",
                 str(lockfile) if lockfile is not None else "",
