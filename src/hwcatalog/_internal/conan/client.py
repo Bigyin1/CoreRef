@@ -41,28 +41,6 @@ class _API(Protocol):
     def home_folder(self) -> str: ...
 
 
-def _resolve_home(home: Path | None) -> Path:
-    if home is not None:
-        return home.expanduser().resolve()
-    try:
-        return Path(cast(_API, ConanAPI()).home_folder).resolve()
-    except (ConanException, OSError) as error:
-        raise CatalogError(f"Conan could not resolve its default home: {error}") from error
-
-
-def _configured_remote(home: Path, requested: str | None) -> str | None:
-    if requested is not None:
-        return requested
-    try:
-        remotes = cast(_API, ConanAPI(cache_folder=str(home))).remotes.list()
-    except (ConanException, OSError) as exc:
-        raise CatalogError(f"Conan could not read configured remotes: {exc}") from exc
-    if len(remotes) > 1:
-        names = ", ".join(remote.name for remote in remotes)
-        raise CatalogError(f"Multiple enabled Conan remotes ({names}); specify remote=...")
-    return remotes[0].name if remotes else None
-
-
 class RecipeRevisions(BaseModel):
     revisions: dict[str, object] = Field(default_factory=dict)
 
@@ -73,8 +51,8 @@ class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
 
 class ConanClient:
     def __init__(self, home: Path | None, remote: str | None, timeout: float) -> None:
-        self.home = _resolve_home(home)
-        self.remote = _configured_remote(self.home, remote)
+        self.home = self._resolve_home(home)
+        self.remote = self._configured_remote(remote)
         self.timeout = timeout
 
     @property
@@ -124,9 +102,12 @@ class ConanClient:
             )
         return entries
 
-    def cache_path(self, reference: str, *, download: bool = True) -> Path:
-        if self.remote and download:
+    def download_recipe(self, reference: str) -> Path:
+        if self.remote:
             self.run("download", reference, "--only-recipe", "--remote", self.remote)
+        return self.cache_path(reference)
+
+    def cache_path(self, reference: str) -> Path:
         result = self.run("cache", "path", reference)
         if not isinstance(result, str):
             raise CatalogError("Conan returned an invalid cache path")
@@ -231,3 +212,24 @@ class ConanClient:
         if "not in lockfile" in str(error):
             return InvalidPackage("Recipe dependency is absent from its lockfile")
         return CatalogError(f"Conan command {arguments[:2]} failed: {error}")
+
+    @staticmethod
+    def _resolve_home(home: Path | None) -> Path:
+        if home is not None:
+            return home.expanduser().resolve()
+        try:
+            return Path(cast(_API, ConanAPI()).home_folder).resolve()
+        except (ConanException, OSError) as error:
+            raise CatalogError(f"Conan could not resolve its default home: {error}") from error
+
+    def _configured_remote(self, requested: str | None) -> str | None:
+        if requested is not None:
+            return requested
+        try:
+            remotes = cast(_API, ConanAPI(cache_folder=str(self.home))).remotes.list()
+        except (ConanException, OSError) as exc:
+            raise CatalogError(f"Conan could not read configured remotes: {exc}") from exc
+        if len(remotes) > 1:
+            names = ", ".join(remote.name for remote in remotes)
+            raise CatalogError(f"Multiple enabled Conan remotes ({names}); specify remote=...")
+        return remotes[0].name if remotes else None

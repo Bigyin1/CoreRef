@@ -31,7 +31,7 @@ Conan выполняет разрешение своего графа и фик�
 канонический, без settings/options, overrides и диапазонов. Record сериализуется
 в JSON; имя Python-класса пользователя и пользовательские декодеры не хранятся.
 Git source хранится в SCM-метаданных Conan; код остаётся в GitLab и получается
-через tools.build:download_source=True при Ref.get(with_sources=True).
+через tools.build:download_source=True при Ref.get_with_sources().
 В binaries копируются только обычные файлы. Внешние ресурсы описывает
 пользовательский payload; их обработку определяет flow.
 

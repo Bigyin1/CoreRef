@@ -8,7 +8,6 @@ import pytest
 from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.protocols import RefCatalog
 from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import Record, Ref
 from tests.helpers import local_record
@@ -83,24 +82,13 @@ def test_reference_requires_a_private_catalog(catalog: Catalog) -> None:
         Ref("soc", "cpu", "rtl", "default", "1.0", catalog=None)  # type: ignore[arg-type]
 
 
-def test_dependent_lookup_uses_protocol_search(
-    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    context: RefCatalog = catalog
-    rtl = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=context)
+def test_dependent_lookup_filters_candidates(catalog: Catalog) -> None:
+    rtl = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
     catalog.publish(local_record(Record(rtl)))
     macro = catalog.publish(
         local_record(Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))),
         dependencies=(rtl,),
     )
-    queries: list[SearchQuery] = []
-    search = catalog.search
-
-    def track(query: SearchQuery) -> tuple[Record, ...]:
-        queries.append(query)
-        return search(query)
-
-    monkeypatch.setattr(catalog, "search", track)
     query = SearchQuery(namespace="soc", component="cpu", type="lib-lef", view="be")
     assert rtl.find_dependents(candidates=query, transitive=False) == (macro,)
-    assert queries == [query]
+    assert rtl.find_dependents(candidates=SearchQuery(view="rtl"), transitive=False) == ()

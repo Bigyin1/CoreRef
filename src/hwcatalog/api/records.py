@@ -6,12 +6,12 @@ from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
-from frozendict import deepfreeze, frozendict
-
-from .protocols import JSONSerializable, RefCatalog
+from .._internal.validation import checked_text, snapshot_files, snapshot_payload
+from .protocols import JSONSerializable
 from .types import JSON
 
 if TYPE_CHECKING:
+    from .catalog import Catalog
     from .query import SearchQuery
 
 
@@ -24,13 +24,15 @@ class Ref:
     view: str
     type: str
     version: str
-    catalog: InitVar[RefCatalog] = field(kw_only=True)
-    _catalog: RefCatalog = field(init=False, repr=False, compare=False)
+    catalog: InitVar[Catalog] = field(kw_only=True)
+    _catalog: Catalog = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self, catalog: RefCatalog) -> None:
+    def __post_init__(self, catalog: Catalog) -> None:
         if catalog is None:
             raise TypeError("Ref requires a catalog")
         object.__setattr__(self, "_catalog", catalog)
+        for name, value in self.to_dict().items():
+            object.__setattr__(self, name, checked_text(value))
 
     @property
     def package_name(self) -> str:
@@ -61,39 +63,29 @@ class Ref:
             "version": self.version,
         }
 
-    def get(self, *, with_sources: bool = False) -> Record:
-        """Read the published record at these exact coordinates."""
-        from .._internal.conan import records
+    def get(self) -> Record:
+        """Get package metadata and stored files without fetching Git sources."""
+        return self._catalog._package(self).get()
 
-        catalog = self._catalog
-        return records.get(catalog._client, self, with_sources=with_sources)
+    def get_with_sources(self) -> Record:
+        """Get package files and its Git checkout when the recipe declares one."""
+        return self._catalog._package(self).get_with_sources()
 
     def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
         """Read immediate dependencies, optionally filtered by their coordinates."""
-        from .._internal.conan import records
         from .query import SearchQuery
 
-        catalog = self._catalog
         query = SearchQuery() if filters is None else filters
-        return records.dependencies(catalog._client, self, query)
+        return self._catalog._package(self).dependencies(query)
 
     def find_dependents(
         self, *, candidates: SearchQuery, transitive: bool = True
     ) -> tuple[Record, ...]:
         """Find candidate packages requiring this Ref, directly or transitively."""
-        from .._internal.conan import graph
-
-        catalog = self._catalog
-        return graph.find_dependents(
-            catalog._client,
-            self,
-            candidates=candidates,
-            search=catalog.search,
-            transitive=transitive,
-        )
+        return self._catalog._package(self).find_dependents(candidates, transitive=transitive)
 
 
-@dataclass(frozen=True)
+@dataclass
 class LocalRecord:
     """Project metadata with already available source and package file paths."""
 
@@ -104,9 +96,7 @@ class LocalRecord:
 
     def to_json(self) -> str:
         """Prepare portable package metadata, excluding local source and artifact paths."""
-        payload = self.payload
-        if isinstance(payload, JSONSerializable):
-            payload = json.loads(payload.to_json())
+        payload = snapshot_payload(self.payload)
         value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
         if self.files:
             value["files"] = tuple(sorted(self.files))
@@ -122,11 +112,13 @@ class Record:
     source: Path | None = field(default=None, compare=False)
     files: Mapping[str, Path] = field(default_factory=dict, compare=False)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", snapshot_payload(self.payload))
+        object.__setattr__(self, "files", snapshot_files(self.files))
+
     def to_dict(self) -> dict[str, JSON]:
         """Expose downloaded metadata and paths, for inspection or CLI output."""
-        payload = self.payload
-        if isinstance(payload, JSONSerializable):
-            payload = json.loads(payload.to_json())
+        payload = snapshot_payload(self.payload)
         value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
         if self.source is not None:
             value["source"] = str(self.source)
@@ -135,39 +127,22 @@ class Record:
         return value
 
     @classmethod
-    def from_json(
-        cls, payload: str, *, catalog: RefCatalog, package_dir: Path | None = None
-    ) -> Self:
-        """Read a package's metadata or an inspection snapshot and attach its local paths."""
+    def from_json(cls, payload: str, *, catalog: Catalog) -> Self:
+        """Restore an inspection snapshot with explicit local paths."""
         value = json.loads(payload)
         if not isinstance(value, dict):
             raise ValueError("Record must be a JSON object")
-        if "scm" in value or (
-            package_dir is not None and any(name in value for name in ("source", "source_path"))
-        ):
+        if "scm" in value:
             raise ValueError("Git source must be stored in Conan SCM metadata")
+        files = value.get("files", {})
+        if not isinstance(files, dict):
+            raise ValueError("Snapshot files must be a path dictionary")
         return cls(
             ref=Ref(**value["ref"], catalog=catalog),
-            payload=deepfreeze(value["payload"]),
+            payload=value["payload"],
             source=Path(value["source"]) if value.get("source") else None,
-            files=cls._file_paths(value.get("files", {}), package_dir),
+            files={name: Path(path) for name, path in files.items()},
         )
-
-    @staticmethod
-    def _file_paths(value: object, package_dir: Path | None) -> Mapping[str, Path]:
-        if isinstance(value, list):
-            if value and package_dir is None:
-                raise ValueError("Package directory is required for stored file names")
-            return frozendict[str, Path](
-                {
-                    name: package_dir / "artifacts" / name
-                    for name in value
-                    if package_dir is not None
-                }
-            )
-        if not isinstance(value, dict):
-            raise ValueError("Record files must be a path dictionary or stored name list")
-        return frozendict[str, Path]({name: Path(path) for name, path in value.items()})
 
 
 __all__ = ["LocalRecord", "Record", "Ref"]

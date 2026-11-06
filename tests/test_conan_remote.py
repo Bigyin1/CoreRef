@@ -6,7 +6,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -16,15 +16,15 @@ from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 
 from examples.conan_config import configured_home
-from hwcatalog._internal.conan import graph as conan_graph
-from hwcatalog._internal.conan.format import read_recipe, write_recipe
+from hwcatalog._internal.conan.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
     CatalogError,
     Conflict,
 )
+from hwcatalog.api.graph import Graph
 from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record, resolve_published
 
 pytestmark = pytest.mark.conan_remote
@@ -113,7 +113,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     with pytest.raises(Conflict):
         remote_catalog.publish(local_record(rtl))
     original_graph = resolve_published(remote_catalog, be.ref)
-    native, _ = conan_graph.load_graph(remote_catalog._client, be.ref)
+    native = remote_catalog._client.graph(remote_catalog._package(be.ref).recipe().directory)
     assert tuple(
         str(dep.ref) for dep in native.root.conanfile.dependencies.host.topological_sort.values()
     ) == ("soc.cpu.rtl.default/1.0",)
@@ -125,7 +125,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     assert resolve_published(reader, be.ref) == original_graph
     new_rtl = Record(Ref("soc", "cpu", "rtl", "default", "2.0", catalog=remote_catalog))
     external = tmp_path / "ci"
-    write_recipe(external, local_record(new_rtl))
+    LocalRecipe(local_record(new_rtl)).write(external)
     remote_catalog._client.create_lockfile(external)
     pinned = remote_catalog._client.export(external)
     remote_catalog._client.upload(pinned)
@@ -153,8 +153,8 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
         patch.setattr(remote_catalog._client, "upload", reject_upload)
         with pytest.raises(CatalogError, match="Simulated upload failure"):
             catalog.publish(local_record(record))
-    directory = remote_catalog._client.cache_path(str(record.ref), download=False)
-    assert read_recipe(directory, record.ref)[0] == record
+    directory = remote_catalog._client.cache_path(str(record.ref))
+    assert StoredRecipe.read(directory, record.ref, reference=str(record.ref)).record == record
     assert catalog.search() == ()
 
     # A prepared local package must not block another attempt to publish to the server.
@@ -199,10 +199,10 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     git_origin.rename(offline)
     try:
         with pytest.raises(CatalogError):
-            Ref(**published.ref.to_dict(), catalog=reader).get(with_sources=True)
+            Ref(**published.ref.to_dict(), catalog=reader).get_with_sources()
     finally:
         offline.rename(git_origin)
-    fetched = Ref(**published.ref.to_dict(), catalog=reader).get(with_sources=True)
+    fetched = Ref(**published.ref.to_dict(), catalog=reader).get_with_sources()
     assert fetched.files == installed.files
     assert fetched.source is not None
     assert (fetched.source / "cpu.sv").read_text() == "module cpu; endmodule\n"
@@ -229,7 +229,7 @@ def test_local_revision_does_not_override_remote_dependency(
     remote_catalog.publish(local_record(rtl))
     # A conflicting local-only revision must never enter published requirements.
     rogue = tmp_path / "local-only-revision"
-    write_recipe(rogue, local_record(Record(rtl.ref, {"local-only": True})))
+    LocalRecipe(local_record(Record(rtl.ref, {"local-only": True}))).write(rogue)
     remote_catalog._client.create_lockfile(rogue)
     remote_catalog._client.export(rogue)
     another_be = Record(Ref("soc", "cpu", "be", "lib-lef", "5.0", catalog=remote_catalog))
@@ -238,3 +238,43 @@ def test_local_revision_does_not_override_remote_dependency(
         another_be.ref,
         rtl.ref,
     }
+
+
+@pytest.mark.parametrize("operation", ["get", "resolve", "dependents", "transitive", "search"])
+def test_recipes_are_downloaded_once_per_operation(
+    remote_catalog: Catalog, tmp_path: Path, operation: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = tmp_path / "report.txt"
+    artifact.write_text("report")
+    leaf = remote_catalog.publish(
+        LocalRecord(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=remote_catalog))
+    )
+    root = remote_catalog.publish(
+        LocalRecord(
+            Ref("soc", "root", "rtl", "default", "1.0", catalog=remote_catalog),
+            files={"report": artifact},
+        ),
+        dependencies=(leaf.ref,),
+    )
+    calls: list[tuple[str, ...]] = []
+    run = remote_catalog._client.run
+
+    def track(*arguments: str) -> object:
+        calls.append(arguments)
+        return run(*arguments)
+
+    monkeypatch.setattr(remote_catalog._client, "run", track)
+    actions: dict[str, Callable[[], object]] = {
+        "get": root.ref.get,
+        "resolve": Graph(remote_catalog, local_record(root), dependencies=(leaf.ref,)).resolve,
+        "dependents": lambda: leaf.ref.find_dependents(candidates=SearchQuery(), transitive=False),
+        "transitive": lambda: leaf.ref.find_dependents(candidates=SearchQuery()),
+        "search": remote_catalog.search,
+    }
+    actions[operation]()
+    downloads = [args[1] for args in calls if args[0] == "download"]
+    assert downloads and len(downloads) == len(set(downloads))
+    assert sum(args[:2] == ("graph", "info") for args in calls) == (
+        operation in ("resolve", "transitive")
+    )
+    assert sum(args[0] == "install" for args in calls) == (operation == "get")

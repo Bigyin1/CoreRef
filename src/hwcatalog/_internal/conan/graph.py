@@ -1,137 +1,61 @@
-"""Resolve and validate native Conan dependency graphs."""
+"""Validation and projection of a native Conan graph, without package I/O."""
 
-from collections.abc import Callable
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from collections.abc import Mapping
 
 from ...api.errors import InvalidPackage
 from ...api.graph import Dependency, GraphResult
-from ...api.protocols import RefCatalog
-from ...api.query import SearchQuery
 from ...api.records import LocalRecord, Record, Ref
-from ..validation import normalize_publication, normalize_query, normalize_ref
-from . import records
-from .client import ConanClient
-from .format import (
-    from_conan_reference,
-    read_recipe,
-    write_recipe,
-)
 from .types import NativeGraph, NativePackage
 
 
-def resolve_local(
-    client: ConanClient,
-    record: LocalRecord,
-    *,
-    dependencies: tuple[Ref, ...] = (),
-    lockfile: Path | None = None,
-    catalog: RefCatalog | None = None,
-) -> GraphResult:
-    """Resolve local root data independently of its publication status."""
-    record, dependencies = normalize_publication(record, dependencies, catalog=catalog)
-    requirements = tuple(records.requirement(client, ref) for ref in dependencies)
-    with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
-        directory = Path(temporary)
-        write_recipe(directory, record, requirements)
-        graph = client.graph(directory, lockfile=lockfile)
-        record_map = graph_records(client, graph, record)
+class ResolvedConanGraph:
+    """A native resolution with checked host dependencies and exact references."""
+
+    def __init__(self, graph: NativeGraph) -> None:
+        self._graph = graph
+        self._packages = tuple(graph.root.conanfile.dependencies.host.topological_sort.values())
+        for package in self._packages:
+            self._validate_package(package)
+
+    @property
+    def references(self) -> tuple[str, ...]:
+        return tuple(package.ref.repr_notime() for package in self._packages)
+
+    def package(self, ref: Ref) -> NativePackage:
+        return self._graph.root.conanfile.dependencies.host[str(ref)]
+
+    def contains(self, ref: Ref) -> bool:
+        return any(reference.split("#", 1)[0] == str(ref) for reference in self.references)
+
+    def result(self, root: LocalRecord | Record, dependencies: tuple[Record, ...]) -> GraphResult:
+        package = self._graph.root.conanfile
+        if self._logical(package) != str(root.ref):
+            raise InvalidPackage("Conan graph root differs from the requested reference")
+        self._validate_package(package)
+        records = {str(record.ref): record for record in (root, *dependencies)}
         return GraphResult(
-            tuple(sorted(record_map.values(), key=lambda item: item.ref)),
-            _graph_dependencies(graph, record_map, record.ref._catalog),
+            tuple(sorted(records.values(), key=lambda record: record.ref)),
+            self._edges(records),
         )
 
+    def _edges(self, records: Mapping[str, LocalRecord | Record]) -> tuple[Dependency, ...]:
+        edges: set[Dependency] = set()
+        for package in (self._graph.root.conanfile, *self._packages):
+            source = self._logical(package)
+            for target in package.dependencies.direct_host.values():
+                destination = self._logical(target)
+                if source not in records or destination not in records:
+                    raise InvalidPackage("Conan graph contains an unknown endpoint")
+                edges.add(Dependency(records[source].ref, records[destination].ref))
+        return tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
 
-def create_lockfile(client: ConanClient, refs: tuple[Ref, ...], path: str | Path) -> Path:
-    """Write a native Conan lockfile for the project's direct dependencies."""
-    output = Path(path).expanduser().resolve()
-    references = tuple(records.locate(client, normalize_ref(ref))[0] for ref in dict.fromkeys(refs))
-    output.parent.mkdir(parents=True, exist_ok=True)
-    client.create_project_lockfile(references, output, seed=output if output.is_file() else None)
-    return output
+    @staticmethod
+    def _logical(package: NativePackage) -> str:
+        return package.ref.repr_notime().split("#", 1)[0]
 
-
-def find_dependents(
-    client: ConanClient,
-    ref: Ref,
-    *,
-    candidates: SearchQuery,
-    search: Callable[[SearchQuery], tuple[Record, ...]],
-    transitive: bool = True,
-) -> tuple[Record, ...]:
-    ref = normalize_ref(ref)
-    records.get(client, ref)
-    result = []
-    for candidate in search(normalize_query(candidates)):
-        if candidate.ref == ref:
-            continue
-        if transitive:
-            graph, _ = load_graph(client, candidate.ref)
-            matches = any(
-                _package_ref(package, ref._catalog) == ref
-                for package in graph.root.conanfile.dependencies.host.values()
-            )
-        else:
-            matches = any(
-                record.ref == ref for record in records.dependencies(client, candidate.ref)
-            )
-        if matches:
-            result.append(candidate)
-    return tuple(sorted(result, key=lambda record: record.ref))
-
-
-def load_graph(
-    client: ConanClient, ref: Ref, *, lockfile: Path | None = None
-) -> tuple[NativeGraph, dict[Ref, LocalRecord | Record]]:
-    _, directory = records.locate(client, ref)
-    root, _ = read_recipe(directory, ref)
-    graph = client.graph(directory, lockfile=lockfile)
-    return graph, graph_records(client, graph, root)
-
-
-def graph_records(
-    client: ConanClient, graph: NativeGraph, root: LocalRecord | Record
-) -> dict[Ref, LocalRecord | Record]:
-    root_package = graph.root.conanfile
-    if _package_ref(root_package, root.ref._catalog) != root.ref:
-        raise InvalidPackage("Conan graph root differs from the requested reference")
-    _validate_package(root_package)
-    return {root.ref: root, **dependency_records(client, graph, catalog=root.ref._catalog)}
-
-
-def dependency_records(
-    client: ConanClient, graph: NativeGraph, *, catalog: RefCatalog
-) -> dict[Ref, Record]:
-    packages = tuple(graph.root.conanfile.dependencies.host.topological_sort.values())
-    for package in packages:
-        _validate_package(package)
-    return records.read_records(
-        client, tuple(package.ref.repr_notime() for package in packages), catalog=catalog
-    )
-
-
-def _package_ref(package: NativePackage, catalog: RefCatalog) -> Ref:
-    return from_conan_reference(package.ref.repr_notime(), catalog=catalog)
-
-
-def _validate_package(package: NativePackage) -> None:
-    if package.context != "host" or package.settings.dumps() or package.options.dumps():
-        raise InvalidPackage("Configurable recipes and build dependencies are unsupported")
-    if tuple(package.dependencies.build.values()):
-        raise InvalidPackage("Build requirements are unsupported")
-
-
-def _graph_dependencies(
-    graph: NativeGraph, records: dict[Ref, LocalRecord | Record], catalog: RefCatalog
-) -> tuple[Dependency, ...]:
-    root = graph.root.conanfile
-    packages = (root, *root.dependencies.host.values())
-    edges: set[Dependency] = set()
-    for package in packages:
-        source = _package_ref(package, catalog)
-        for target in package.dependencies.direct_host.values():
-            target_ref = _package_ref(target, catalog)
-            if source not in records or target_ref not in records:
-                raise InvalidPackage("Conan graph contains an unknown endpoint")
-            edges.add(Dependency(records[source].ref, records[target_ref].ref))
-    return tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
+    @staticmethod
+    def _validate_package(package: NativePackage) -> None:
+        if package.context != "host" or package.settings.dumps() or package.options.dumps():
+            raise InvalidPackage("Configurable recipes and build dependencies are unsupported")
+        if tuple(package.dependencies.build.values()):
+            raise InvalidPackage("Build requirements are unsupported")

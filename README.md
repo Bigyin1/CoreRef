@@ -35,7 +35,7 @@ local = LocalRecord(
     files={"report": Path("/work/cpu/out/report.txt")},
 )
 published = catalog.publish(local)
-record = published.ref.get(with_sources=True)
+record = published.ref.get_with_sources()
 print(record.files["report"], record.source, record.payload)
 implementations = published.ref.find_dependents(
     candidates=SearchQuery(namespace="soc", component="cpu", view="be", type="lib-lef"),
@@ -53,8 +53,8 @@ Conan: SDK не клонирует Git самостоятельно. Файлы 
 содержимое payload сохраняется как JSON.
 
 `Ref.get()` возвращает готовый Record, заполняя files путями скачанных файлов.
-`with_sources=True` дополнительно получает исходники из GitLab штатным source() Conan
-и заполняет Record.source. Без этого флага source=None.
+`get_with_sources()` дополнительно получает исходники из GitLab штатным source() Conan
+и заполняет Record.source. При обычном get() source=None.
 Публичного materialize у Ref, Record и LocalRecord нет. При обходе графа исходники
 зависимостей запрашиваются отдельно; рабочее дерево локального корня уже доступно.
 
@@ -66,14 +66,22 @@ Graph.create_lockfile() использует dependencies и запоминае�
 Lockfile остаётся непрозрачным файлом проекта и явно передаётся при публикации.
 
 LocalRecord.to_json() готовит переносимые метаданные: ref, payload и имена files.
-Рабочие source/files-пути туда не попадают. Record.from_json() читает скачанные
-метаданные, привязывая имена файлов к package_dir. Record.to_dict() предназначен
+Рабочие source/files-пути туда не попадают. Record.from_json(data, *, catalog) восстанавливает
+inspection-снимок с явными путями. Метаданные пакета читает внутренний StoredRecipe
+с обязательной директорией рецепта. Record.to_dict() предназначен
 для просмотра готовых данных, включая пути cache; отдельного Record.to_json() нет.
 
 Публичные модули находятся прямо в hwcatalog.api: catalog, graph, records, query,
 protocols, errors, types. Ref — неизменяемые координаты с обязательным приватным _catalog;
 контекст исключён из равенства, хеша и сериализации. Ссылки результатов уже содержат
-этот контекст. Frozen dataclass сохранены для значений, Catalog и Graph — обычные классы.
+этот контекст. Ref и Record неизменяемы, LocalRecord и Graph можно редактировать.
+Publish и resolve создают независимые снимки входов; пользовательский payload
+сериализуется один раз за операцию. Create_lockfile запоминает путь только после успеха.
+
+Внутренние LocalPackage и StoredPackage выполняют операции над пакетами, LocalRecipe
+и StoredRecipe готовят и проверяют рецепты. ResolvedConanGraph разбирает нативный граф
+без загрузки пакетов; ConanClient выполняет команды. Загруженный рецепт повторно
+используется в пределах одной операции.
 
 Conan должен быть настроен заранее: профили, remotes и аутентификация.
 Catalog() использует стандартный cache с учётом CONAN_HOME и .conanrc. Один remote

@@ -7,11 +7,10 @@ from enum import StrEnum
 
 import pytest
 
-from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import Conflict, InvalidPackage
 from hwcatalog.api.protocols import JSONSerializable
-from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 from hwcatalog.api.types import JSON
 from tests.helpers import local_record
 
@@ -53,9 +52,7 @@ def test_custom_payload_is_serialized_once_and_frozen(catalog: Catalog) -> None:
     nested: list[JSON] = [1, {"ports": [2, 3]}]
     payload = UserPayload({"nested": nested})
     catalog.publish(
-        local_record(
-            Record(Ref("demo", "core", "release", "default", "1.0", catalog=catalog), payload)
-        )
+        LocalRecord(Ref("demo", "core", "release", "default", "1.0", catalog=catalog), payload)
     )
     assert payload.calls == 1
     nested.append(4)
@@ -117,7 +114,7 @@ def test_required_reference_fields(
     coordinates: tuple[str, str, str, str, str], catalog: Catalog
 ) -> None:
     with pytest.raises(InvalidPackage):
-        normalize_record(Record(Ref(*coordinates, catalog=catalog)))
+        Record(Ref(*coordinates, catalog=catalog))
 
 
 class CustomKind(StrEnum):

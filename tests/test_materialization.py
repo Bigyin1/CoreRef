@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from hwcatalog._internal.conan.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.records import LocalRecord, Record, Ref
@@ -27,7 +28,7 @@ def test_files_are_available_on_fetch_and_source_is_optional(
     assert published.files["timing.lib"].read_text() == artifact.read_text()
     fetched = published.ref.get()
     assert fetched.files["timing.lib"].read_text() == artifact.read_text()
-    materialized = fetched.ref.get(with_sources=True)
+    materialized = fetched.ref.get_with_sources()
     assert isinstance(materialized, Record)
     assert materialized.source is not None
     assert (materialized.source / "cpu.sv").is_file()
@@ -54,8 +55,8 @@ def test_payload_only_record_does_not_install_a_binary(
         return run(*arguments)
 
     monkeypatch.setattr(catalog._client, "run", track)
-    for with_sources in (False, True):
-        local = record.ref.get(with_sources=with_sources)
+    for fetch in (record.ref.get, record.ref.get_with_sources):
+        local = fetch()
         assert local.payload == {"paths": paths}
         assert local.files == {}
         assert local.source is None
@@ -81,9 +82,11 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
     metadata = local.to_json()
     assert "working-tree" not in metadata
     assert "output.lib" not in metadata
-    with pytest.raises(ValueError, match="Package directory"):
+    with pytest.raises(ValueError, match="Snapshot files"):
         Record.from_json(metadata, catalog=catalog)
-    record = Record.from_json(metadata, package_dir=tmp_path / "downloaded", catalog=catalog)
+    local.source = None
+    LocalRecipe(local).write(tmp_path / "downloaded")
+    record = StoredRecipe.read(tmp_path / "downloaded", local.ref, reference=str(local.ref)).record
     assert record.files == {"timing/cpu.lib": tmp_path / "downloaded/artifacts/timing/cpu.lib"}
     assert record.payload == local.payload
     assert record.source is None
@@ -98,5 +101,7 @@ def test_package_source_metadata_belongs_to_conan(
     local = LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
     value = json.loads(local.to_json())
     value[field] = "unexpected"
-    with pytest.raises(ValueError, match="Conan SCM"):
-        Record.from_json(json.dumps(value), package_dir=tmp_path, catalog=catalog)
+    LocalRecipe(local).write(tmp_path)
+    (tmp_path / "record.json").write_text(json.dumps(value))
+    with pytest.raises(InvalidPackage, match="Conan SCM"):
+        StoredRecipe.read(tmp_path, local.ref, reference=str(local.ref))

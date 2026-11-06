@@ -14,7 +14,7 @@ Flow формирует этот объект до публикации
 
 Record представляет полученный пакет с теми же полями. Files уже содержит локальные
 пути. Координаты Git остаются во внутренних метаданных Conan. Source заполняется
-по запросу исходников в Ref.get(with_sources=True), до этого равен None.
+по запросу исходников в Ref.get_with_sources(), до этого равен None.
 Физические files/source могут различаться между cache и исключены из сравнения Record.
 Ref и payload сохраняют сравнение по содержимому.
 
@@ -24,7 +24,8 @@ Ref и payload сохраняют сравнение по содержимому
 
 LocalRecord.to_json() подготавливает ref/payload и имена files.
 Пути рабочего checkout и исходных файлов в пакет не попадают. SCM фиксирует Conan.
-Record.from_json() читает метаданные пакета, сопоставляя имена files путям package_dir.
+Record.from_json(data, *, catalog) восстанавливает inspection-снимок с локальными путями.
+Внутренний StoredRecipe читает метаданные пакета из обязательной директории рецепта.
 Record.to_dict() даёт inspection-представление с локальными путями.
 
 Payload — произвольное JSON-значение или пользовательский JSONSerializable с to_json().
@@ -38,6 +39,11 @@ SearchQuery — точные AND-фильтры всех пяти координ
 опубликованные зависимости и точные рёбра. to_networkx() создаёт независимый DiGraph
 с Ref-ключами и объектами записей в атрибутах.
 
-Ref, Record, LocalRecord, Dependency и GraphResult — frozen dataclass значений.
+Ref, Record, Dependency и оболочка GraphResult — frozen dataclass.
+LocalRecord и Graph изменяемы: flow может редактировать описание проекта.
+При publish() и resolve() SDK отделяет payload, files, Ref и зависимости от входов;
+пользовательский to_json() вызывается один раз за операцию.
+LocalRecord корня в GraphResult — отдельный снимок; изменение проекта или этого корня
+не меняет другие результаты. Payload снимков рекурсивно заморожен.
 Catalog и Graph — обычные классы с операциями и контекстом. Graph отвечает за одно
 описание проекта и его lockfile; несколько Graph могут работать в одной директории.

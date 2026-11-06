@@ -5,7 +5,6 @@ from dataclasses import replace
 
 import pytest
 
-from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.records import Record
 from hwcatalog.api.types import JSON
@@ -27,7 +26,7 @@ def test_roundtrip_preserves_content_and_nested_immutability(*, catalog: Catalog
         },
     )
     execution = replace(run("run", catalog=catalog), payload=resources)
-    original = tuple(normalize_record(record) for record in (a, execution))
+    original = tuple(record for record in (a, execution))
     records = tuple(
         type(record).from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
         for record in original

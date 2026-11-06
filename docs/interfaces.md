@@ -17,12 +17,13 @@ Source и files принадлежат LocalRecord. Source — рабочий Gi
 ## Ref и Record
 
 `Ref(namespace, component, view, type, version, *, catalog)` задаёт координаты
-namespace.component.view.type/version. Контекст RefCatalog не участвует в identity,
+namespace.component.view.type/version. Приватный конкретный Catalog не участвует в identity,
 хеше или JSON. Ссылки результатов создаются сразу с нужным контекстом.
 
 | Метод Ref | Контракт |
 |---|---|
-| get(*, with_sources=False) | Готовый Record; files содержит пути cache, source заполняется при запросе исходников |
+| get() | Record с метаданными и доступными файлами пакета; source=None |
+| get_with_sources() | Дополнительно получает Git-исходники средствами Conan, если они объявлены |
 | dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
 | find_dependents(*, candidates, transitive=True) | Кандидаты, зависящие от точного Ref |
 | to_dict() | Только координаты |
@@ -35,11 +36,11 @@ Record — представление уже полученного пакета
 files (Mapping[str, Path]).
 URL/commit остаются внутри Conan; отдельного поля или класса Git-ресурса нет.
 
-Record.from_json(data, *, catalog, package_dir=None) читает метаданные пакета.
-Для списка имён файлов нужен package_dir; локальные пути будут заполнены под artifacts/.
-Также поддерживается словарь уже полученных путей из inspection-снимка.
+Record.from_json(data, *, catalog) восстанавливает inspection-снимок с явными путями
+source/files. Метаданные скачанного пакета читает внутренний StoredRecipe: он требует
+директорию рецепта и проверяет метаданные вместе с кодом рецепта.
 Record.to_dict() возвращает данные для просмотра или CLI. Публичных to_json и materialize
-у Record нет; получение исходников выполняется через Ref.get(with_sources=True).
+у Record нет; получение исходников выполняется через Ref.get_with_sources().
 Физические пути files/source не участвуют в равенстве опубликованных записей:
 один пакет может находиться в разных cache. Ref и payload сравниваются по содержимому.
 
@@ -57,6 +58,10 @@ source и исходные пути files исключаются, сохраня
 |---|---|
 | resolve() | GraphResult с LocalRecord корня и Record опубликованных зависимостей |
 | create_lockfile(path=None) | Создаёт/обновляет lockfile dependencies, запоминает путь и возвращает Path |
+
+LocalRecord и Graph можно редактировать между вызовами. Publish и resolve получают
+независимые снимки входов; опубликованный Record и Ref неизменяемы.
+Create_lockfile обновляет настроенный путь только после успешного выполнения Conan.
 
 Корень не требуется публиковать; его локальные данные имеют приоритет над реестром.
 Conan проверяет циклы и конфликты requirements. Разрешение использует временный рецепт

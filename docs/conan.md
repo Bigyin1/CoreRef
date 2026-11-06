@@ -19,7 +19,7 @@ local = LocalRecord(
     files={"report": Path("/work/cpu/out/report.txt")},
 )
 published = catalog.publish(local, dependencies=())
-record = published.ref.get(with_sources=True)
+record = published.ref.get_with_sources()
 print(record.source, record.files, record.payload)
 ```
 
@@ -37,7 +37,7 @@ conanfile.py не требуется. Files копируются под artifact
 ## Готовые пути
 
 Ref.get() заполняет Record.files путями доступных файлов пакета.
-Ref.get(with_sources=True) дополнительно передаёт scoped-конфигурацию
+Ref.get_with_sources() дополнительно передаёт scoped-конфигурацию
 `tools.build:download_source=True` в Conan install. Встроенный source() вызывает
 Git.checkout_from_conandata_coordinates() и возвращает точный commit из GitLab.
 Record.source содержит Path checkout. URL/commit остаются во внутренних метаданных Conan.
@@ -65,7 +65,7 @@ result = project.resolve()
 Graph соответствует одному описанию проекта. Парсинг deps.toml и добавление зависимостей
 по результатам поиска выполняет flow. Локальный корень не публикуется для разрешения:
 GraphResult содержит LocalRecord корня и Record зависимостей. Source локального
-корня уже доступен, для зависимостей flow вызывает Ref.get(with_sources=True).
+корня уже доступен, для зависимостей flow вызывает Ref.get_with_sources().
 
 Lockfile принадлежит проекту и передаётся явно при публикации и разрешении. SDK не
 парсит его JSON и не задаёт версию схемы. Создание/обновление выполняет Conan;

@@ -1,11 +1,6 @@
-"""Payload serialization and the catalog context required by package references."""
+"""Consumer payload serialization."""
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
-
-if TYPE_CHECKING:
-    from .._internal.conan.client import ConanClient
-    from .query import SearchQuery
-    from .records import Record
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -15,12 +10,4 @@ class JSONSerializable(Protocol):
     def to_json(self) -> str: ...
 
 
-class RefCatalog(Protocol):
-    """Search access and the internal Conan context used by package references."""
-
-    _client: ConanClient
-
-    def search(self, query: SearchQuery) -> tuple[Record, ...]: ...
-
-
-__all__ = ["JSONSerializable", "RefCatalog"]
+__all__ = ["JSONSerializable"]

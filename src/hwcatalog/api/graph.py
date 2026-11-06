@@ -1,4 +1,4 @@
-"""Project dependency resolution, exact edges and immutable graph results."""
+"""Project dependency resolution, exact edges and detached graph results."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 import networkx as nx
 
 from .errors import CatalogError
-from .protocols import RefCatalog
 from .records import LocalRecord, Record, Ref
 
 # NetworkX generics are provided by stubs, not its runtime classes.
 if TYPE_CHECKING:
+    from .catalog import Catalog
+
     type _RefGraph = nx.DiGraph[Ref]
 else:
     _RefGraph = nx.DiGraph
@@ -31,7 +32,7 @@ class GraphResult:
     dependencies: tuple[Dependency, ...]
 
     def to_networkx(self) -> _RefGraph:
-        """Export a detached directed graph with frozen record and dependency attributes."""
+        """Export graph structure with record snapshots and exact dependency attributes."""
         graph: nx.DiGraph[Ref] = nx.DiGraph()
         graph.add_nodes_from((record.ref, {"record": record}) for record in self.records)
         graph.add_edges_from(
@@ -45,7 +46,7 @@ class Graph:
 
     def __init__(
         self,
-        catalog: RefCatalog,
+        catalog: Catalog,
         record: LocalRecord,
         *,
         dependencies: tuple[Ref, ...] = (),
@@ -58,24 +59,16 @@ class Graph:
 
     def resolve(self) -> GraphResult:
         """Resolve the local root and published dependencies using this project's lockfile."""
-        from .._internal.conan import graph
-
-        return graph.resolve_local(
-            self.catalog._client,
-            self.record,
-            dependencies=self.dependencies,
-            lockfile=self.lockfile,
-            catalog=self.catalog,
-        )
+        return self.catalog._local_package(self.record, self.dependencies, self.lockfile).resolve()
 
     def create_lockfile(self, path: str | Path | None = None) -> Path:
         """Create or update the dependency lockfile and use it for subsequent resolution."""
-        from .._internal.conan import graph
-
         output = path if path is not None else self.lockfile
         if output is None:
             raise CatalogError("Provide a lockfile path in Graph or create_lockfile")
-        self.lockfile = graph.create_lockfile(self.catalog._client, self.dependencies, output)
+        self.lockfile = self.catalog._local_package(
+            self.record, self.dependencies, self.lockfile
+        ).create_lockfile(output)
         return self.lockfile
 
 

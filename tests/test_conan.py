@@ -8,12 +8,10 @@ from pathlib import Path
 import pytest
 
 from examples.conan_config import configured_home
-from hwcatalog._internal.conan import graph as conan_graph
-from hwcatalog._internal.conan import records as conan_records
-from hwcatalog._internal.conan.format import (
+from hwcatalog._internal.conan.recipe import LocalRecipe
+from hwcatalog._internal.conan.references import (
     from_conan_reference,
     to_conan_reference,
-    write_recipe,
 )
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
@@ -103,7 +101,7 @@ def test_publish_rejects_an_invalid_catalog_dependency_before_conan_executes_it(
     conan_catalog: Catalog,
 ) -> None:
     dependency = conan_catalog.publish(local_record(record(catalog=conan_catalog)))
-    _, directory = conan_records.locate(conan_catalog._client, dependency.ref)
+    directory = conan_catalog._package(dependency.ref).recipe().directory
     (directory / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
     with pytest.raises(InvalidPackage, match="canonical"):
         conan_catalog.publish(
@@ -148,7 +146,7 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert not Ref(**be.ref.to_dict(), catalog=catalog).dependencies(
         filters=SearchQuery(view="missing")
     )
-    _, folder = conan_records.locate(conan_catalog._client, be.ref)
+    folder = conan_catalog._package(be.ref).recipe().directory
     assert not (folder / "conan.lock").exists()
     lockfile = Graph(
         catalog,
@@ -244,7 +242,7 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
     )
     conan_catalog.publish(local_record(rtl))
     build = tmp_path / "external-ci"
-    write_recipe(build, local_record(be), (to_conan_reference(rtl.ref),))
+    LocalRecipe(local_record(be), (to_conan_reference(rtl.ref),)).write(build)
     cli = conan_catalog._client
     cli.run(
         "lock",
@@ -268,7 +266,7 @@ def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None
     )
     conan_catalog.publish(local_record(rtl))
     conan_catalog.publish(local_record(be), dependencies=(rtl.ref,))
-    _, folder = conan_records.locate(conan_catalog._client, be.ref)
+    folder = conan_catalog._package(be.ref).recipe().directory
     if damage == "missing":
         (folder / "record.json").unlink()
     elif damage == "bad-marker":
@@ -285,7 +283,7 @@ def test_multiple_revisions_are_not_silently_selected(
     original = record(catalog=conan_catalog)
     conan_catalog.publish(local_record(original))
     folder = tmp_path / "replacement"
-    write_recipe(folder, local_record(replace(original, payload={"different": True})))
+    LocalRecipe(local_record(replace(original, payload={"different": True}))).write(folder)
     conan_catalog._client.create_lockfile(folder)
     conan_catalog._client.export(folder)
     with pytest.raises(Conflict):
@@ -335,7 +333,7 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
     conan_catalog.publish(local_record(left), dependencies=(shared.ref,))
     conan_catalog.publish(local_record(right), dependencies=(shared.ref,))
     conan_catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
-    graph, _ = conan_graph.load_graph(conan_catalog._client, root.ref)
+    graph = conan_catalog._client.graph(conan_catalog._package(root.ref).recipe().directory)
     assert isinstance(graph, DepsGraph)
     assert len(graph.nodes) == 4
     assert "nodes" in graph.serialize()
@@ -375,7 +373,7 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     ambient_home = tmp_path / "unrelated-home"
     monkeypatch.setenv("CONAN_HOME", str(ambient_home))
     cwd = Path.cwd()
-    graph, _ = conan_graph.load_graph(conan_catalog._client, root.ref)
+    graph = conan_catalog._client.graph(conan_catalog._package(root.ref).recipe().directory)
     assert tuple(graph.root.conanfile.dependencies.host.topological_sort.values()) == ()
     assert graph.root.conanfile.recipe_folder is not None
     assert Path(graph.root.conanfile.recipe_folder).is_relative_to(conan_catalog._client.home)
@@ -394,7 +392,7 @@ def test_native_graph_reports_missing_pinned_dependency(conan_catalog: Catalog) 
     conan_catalog.publish(local_record(macro), dependencies=(rtl.ref,))
     conan_catalog._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
     with pytest.raises(CatalogError):
-        conan_graph.load_graph(conan_catalog._client, macro.ref)
+        conan_catalog._client.graph(conan_catalog._package(macro.ref).recipe().directory)
 
 
 def test_native_api_failure_is_a_catalog_error(
@@ -413,7 +411,7 @@ def test_native_api_failure_is_a_catalog_error(
 
     monkeypatch.setattr(client, "ConanAPI", fail)
     with pytest.raises(CatalogError, match="simulated API failure"):
-        conan_graph.load_graph(conan_catalog._client, root.ref)
+        resolve_published(conan_catalog, root.ref)
 
 
 def test_native_graph_computation_does_not_spawn_a_conan_process(
@@ -456,7 +454,7 @@ def test_native_graph_rejects_an_unlocked_transitive_dependency(
         str(lock_path),
     )
     with pytest.raises(InvalidPackage):
-        conan_graph.load_graph(conan_catalog._client, root.ref, lockfile=lock_path)
+        resolve_published(conan_catalog, root.ref, lockfile=lock_path)
 
 
 def test_default_cache_uses_conan_home_and_stays_bound_to_it(

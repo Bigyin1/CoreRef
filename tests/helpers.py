@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 
-from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph, GraphResult
 from hwcatalog.api.records import LocalRecord, Record, Ref
@@ -25,32 +24,28 @@ class RunTypeId(StrEnum):
 def release(
     name: str, version: str = "v1", *, manifest: Mapping[str, JSON] | None = None, catalog: Catalog
 ) -> Record:
-    return normalize_record(
-        Record(
-            Ref("demo-ip", name, "release", "default", version, catalog=catalog),
-            {
-                "resources": [
-                    {
-                        "provider": "git",
-                        "repository_url": "https://example.invalid/rtl.git",
-                        "requested_ref": "demo-tag",
-                        "resolved_commit": "a" * 40,
-                    }
-                ],
-                "type_id": ProjectTypeId.RTL_PROJECT,
-                "team_id": "demo",
-                "manifest": manifest or {},
-            },
-        )
+    return Record(
+        Ref("demo-ip", name, "release", "default", version, catalog=catalog),
+        {
+            "resources": [
+                {
+                    "provider": "git",
+                    "repository_url": "https://example.invalid/rtl.git",
+                    "requested_ref": "demo-tag",
+                    "resolved_commit": "a" * 40,
+                }
+            ],
+            "type_id": ProjectTypeId.RTL_PROJECT,
+            "team_id": "demo",
+            "manifest": manifest or {},
+        },
     )
 
 
 def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS, catalog: Catalog) -> Record:
-    return normalize_record(
-        Record(
-            Ref("flow", name, "run", "default", "1.0", catalog=catalog),
-            {"type_id": type_id, "purpose": "synthesis", "details": {"array": [3, 1, 2]}},
-        )
+    return Record(
+        Ref("flow", name, "run", "default", "1.0", catalog=catalog),
+        {"type_id": type_id, "purpose": "synthesis", "details": {"array": [3, 1, 2]}},
     )
 
 

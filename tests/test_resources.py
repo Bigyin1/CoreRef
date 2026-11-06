@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.records import LocalRecord, Record, Ref
@@ -13,13 +12,11 @@ from hwcatalog.api.records import LocalRecord, Record, Ref
 
 def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Catalog) -> None:
     paths = {"lib": str(tmp_path / "cpu.lib")}
-    record = normalize_record(
-        Record(
-            Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
-            payload={"external": paths},
-            source=tmp_path / "source",
-            files={"report": tmp_path / "report.txt"},
-        )
+    record = Record(
+        Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+        payload={"external": paths},
+        source=tmp_path / "source",
+        files={"report": tmp_path / "report.txt"},
     )
     paths.clear()
     restored = Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)

@@ -15,9 +15,8 @@ from tests.helpers import local_record, release, run
 
 @pytest.mark.parametrize("value", [nan, inf, -inf])
 def test_nonfinite_numbers_cannot_be_written_as_json(value: float, *, catalog: Catalog) -> None:
-    record = replace(release("nonfinite", catalog=catalog), payload={"value": value})
     with pytest.raises(ValueError):
-        json.dumps(record.to_dict(), allow_nan=False)
+        replace(release("nonfinite", catalog=catalog), payload={"value": value})
 
 
 def test_large_integers_are_consumer_data(*, catalog: Catalog) -> None:
