@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import networkx as nx
 
-from .errors import CatalogError, InvalidPackage
+from .errors import CatalogError, Conflict, InvalidPackage
 from .records import InstalledRecord, LocalRecord, Record, Ref
 
 # NetworkX generics are provided by stubs, not its runtime classes.
@@ -45,11 +45,11 @@ class Graph:
         workspace: Workspace | None = None,
     ) -> None:
         self._catalog = catalog
-        if workspace is not None:
-            dependencies = workspace._pin(dependencies)
-            if isinstance(record, Ref):
-                record = workspace._pin((record,))[0]
+        members = workspace.members if workspace is not None else {}
+        bases = {ref.without_revision(): ref for ref in members}
+        dependencies = tuple(bases.get(ref, ref) for ref in dependencies)
         if isinstance(record, Ref):
+            record = bases.get(record, record)
             if dependencies:
                 raise InvalidPackage("Published graph requirements come from its recipe")
             self._package = catalog._package(record).resolved_graph(lockfile)
@@ -57,12 +57,28 @@ class Graph:
             self._package = catalog._local_package(record, dependencies, lockfile).resolved
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result
-        published = (item for item in self._records if isinstance(item, Record))
-        self._editables = workspace._select(published) if workspace is not None else {}
+        self._editables = self._editable_records(members) if members else {}
         self._requirements = tuple(
             edge.target for edge in self._dependencies if edge.source == self._package.record.ref
         )
         self._orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = {}
+
+    def _editable_records(self, members: dict[Ref, Path]) -> dict[Ref, InstalledRecord]:
+        entries = {ref.without_revision(): (ref, source) for ref, source in members.items()}
+        selected = {}
+        published = (record for record in self._records if isinstance(record, Record))
+        for record in published:
+            member = entries.get(record.ref.without_revision())
+            if member is not None:
+                ref, source = member
+                if ref != record.ref:
+                    raise Conflict(f"Workspace uses {ref}; graph requires {record.ref}")
+                if not record.has_source or record.file_names or not source.is_dir():
+                    raise InvalidPackage(
+                        "Workspace requires an existing SCM source-only working copy"
+                    )
+                selected[ref] = InstalledRecord(record, source=source)
+        return selected
 
     @property
     def catalog(self) -> Catalog:

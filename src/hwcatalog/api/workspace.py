@@ -1,13 +1,12 @@
 """Project-owned editable Git dependencies, independent of Conan's file formats."""
 
-from collections.abc import Iterable
 from pathlib import Path
 
-from .._internal.recipe import EditableRecipe, StoredRecipe
+from .._internal.recipe import EditableRecipe
 from .._internal.workspace import WorkspaceFile
 from .catalog import Catalog
-from .errors import Conflict, InvalidPackage, NotFound
-from .records import InstalledRecord, Record, Ref
+from .errors import Conflict, NotFound
+from .records import InstalledRecord, Ref
 
 
 class Workspace:
@@ -20,11 +19,16 @@ class Workspace:
     def path(self) -> Path:
         return self._file.path
 
+    @property
+    def members(self) -> dict[Ref, Path]:
+        """Return a detached snapshot of registered refs and working-copy paths."""
+        return self._file.read()
+
     def add(self, ref: Ref, *, directory: str | Path | None = None) -> InstalledRecord:
         """Open one SCM package, or reuse its existing working copy without resetting edits."""
         entries = self._file.read()
-        chosen = self._match(ref, {item.without_revision(): item for item in entries})
-        recipe = self._recipe(chosen)
+        chosen = self._file.find(ref, entries)
+        recipe = self._file.recipe(chosen)
         parent = (
             Path(directory).expanduser().resolve()
             if directory is not None
@@ -48,45 +52,11 @@ class Workspace:
     def remove(self, ref: Ref) -> None:
         """Unregister one package, keeping its Git working copy and local changes."""
         entries = self._file.read()
-        chosen = self._match(ref, {item.without_revision(): item for item in entries})
+        chosen = self._file.find(ref, entries)
         if chosen not in entries:
             raise NotFound(f"Package is not editable in this workspace: {ref}")
         entries.pop(chosen)
         self._file.save(entries)
-
-    def _recipe(self, ref: Ref) -> StoredRecipe:
-        directory = self._file.recipe_directory(ref)
-        if ref.revision is not None and (directory / "record.json").is_file():
-            return StoredRecipe(directory, ref, reference=str(ref))
-        return self._file.catalog._package(ref).recipe()
-
-    def _match(self, ref: Ref, entries: dict[Ref, Ref]) -> Ref:
-        selected = entries.get(ref.without_revision(), ref)
-        if ref.revision is not None and selected != ref:
-            raise Conflict(f"Workspace uses {selected}; requested {ref}")
-        return selected
-
-    def _pin(self, refs: tuple[Ref, ...]) -> tuple[Ref, ...]:
-        entries = {ref.without_revision(): ref for ref in self._file.read()}
-        return tuple(self._match(ref, entries) for ref in refs)
-
-    def _select(self, records: Iterable[Record]) -> dict[Ref, InstalledRecord]:
-        entries = {
-            ref.without_revision(): (ref, source) for ref, source in self._file.read().items()
-        }
-        selected = {}
-        for record in records:
-            member = entries.get(record.ref.without_revision())
-            if member is not None:
-                ref, source = member
-                if ref != record.ref:
-                    raise Conflict(f"Workspace uses {ref}; graph requires {record.ref}")
-                if not record.has_source or record.file_names or not source.is_dir():
-                    raise InvalidPackage(
-                        "Workspace requires an existing SCM source-only working copy"
-                    )
-                selected[ref] = InstalledRecord(record, source=source)
-        return selected
 
 
 __all__ = ["Workspace"]

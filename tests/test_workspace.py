@@ -333,4 +333,38 @@ def test_invalid_workspace_manifest_is_a_domain_error(
     path = tmp_path / "workspace.yaml"
     path.write_text(text)
     with pytest.raises(InvalidPackage):
-        Workspace(catalog, path)._pin(())
+        _ = Workspace(catalog, path).members
+
+
+def test_members_is_a_detached_manifest_snapshot(
+    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path
+) -> None:
+    workspace = Workspace(catalog, tmp_path / "project/workspace.yaml")
+    editable = workspace.add(rtl.ref)
+    members = workspace.members
+    assert members == {rtl.ref: editable.source}
+    members.clear()
+    assert workspace.members == {rtl.ref: editable.source}
+
+
+def test_graph_captures_members_before_running_conan(
+    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = Workspace(catalog, tmp_path / "project/workspace.yaml")
+    editable = workspace.add(rtl.ref)
+    resolve = catalog._client.graph
+
+    def unregister_during_resolution(
+        directory: Path, *, lockfile: Path | None = None, update: bool = False
+    ) -> NativeGraph:
+        workspace.path.write_text("packages: {}\n")
+        return resolve(directory, lockfile=lockfile, update=update)
+
+    with monkeypatch.context() as change:
+        change.setattr(catalog._client, "graph", unregister_during_resolution)
+        graph = rtl.ref.without_revision().graph(workspace=workspace)
+    assert workspace.members == {}
+    assert graph.editables == (editable,)
+    with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected Conan I/O")):
+        assert graph.get_with_sources((rtl.ref,))[0].source == editable.source
+    assert not rtl.ref.graph(workspace=workspace).editables

@@ -7,9 +7,9 @@ import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..api.catalog import Catalog
-from ..api.errors import InvalidPackage
+from ..api.errors import Conflict, InvalidPackage
 from ..api.records import Ref
-from .recipe import _RECIPE_ENV
+from .recipe import _RECIPE_ENV, StoredRecipe
 from .references import from_conan_reference
 
 
@@ -43,6 +43,19 @@ class WorkspaceFile:
             return entries
         except (OSError, ValidationError, yaml.YAMLError) as error:
             raise InvalidPackage(f"Invalid workspace manifest {self.path}: {error}") from error
+
+    def find(self, ref: Ref, entries: dict[Ref, Path]) -> Ref:
+        registered = {item.without_revision(): item for item in entries}
+        chosen = registered.get(ref.without_revision(), ref)
+        if ref.revision is not None and chosen != ref:
+            raise Conflict(f"Workspace uses {chosen}; requested {ref}")
+        return chosen
+
+    def recipe(self, ref: Ref) -> StoredRecipe:
+        directory = self.recipe_directory(ref)
+        if ref.revision is not None and (directory / "record.json").is_file():
+            return StoredRecipe(directory, ref, reference=str(ref))
+        return self.catalog._package(ref).recipe()
 
     def recipe_directory(self, ref: Ref) -> Path:
         return (
