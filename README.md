@@ -13,10 +13,10 @@
 - `LocalRecord` — описание текущего проекта с готовыми локальными путями; его формирует flow.
 - `Record` — представление пакета из реестра с путями файлов Conan cache и, по запросу, исходников.
 
-Оба содержат `ref`, `payload`, `source`, `files`, `nfs`. Source — Path исходников
-либо None, files — словарь имён упакованных файлов и их локальных Path,
-nfs — словарь имён внешних ресурсов и абсолютных Path. Координаты Git хранит Conan
-во внутренних метаданных рецепта; публичного поля scm нет.
+Оба содержат `ref`, `payload`, `source`, `files`. Source — Path исходников либо None,
+files — словарь имён упакованных файлов и их локальных Path. Внешние ресурсы, включая
+NFS-пути, описывает пользовательский payload; их формат и проверку определяет flow.
+Координаты Git хранит Conan во внутренних метаданных рецепта; публичного поля scm нет.
 Классов GitResource, LocatedResource и обёрток материализованных путей нет.
 
 ```python
@@ -30,14 +30,13 @@ from hwcatalog.api.records import LocalRecord, Ref
 catalog = Catalog()
 local = LocalRecord(
     Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
-    payload={"filelist": "rtl.f"},
+    payload={"filelist": "rtl.f", "timing": "/nfs/cpu/timing.lib"},
     source=Path("/work/cpu"),
     files={"report": Path("/work/cpu/out/report.txt")},
-    nfs={"timing": Path("/nfs/cpu/timing.lib")},
 )
 published = catalog.publish(local)
 record = published.ref.get(with_sources=True)
-print(record.files["report"], record.source, record.nfs["timing"])
+print(record.files["report"], record.source, record.payload)
 implementations = published.ref.find_dependents(
     candidates=SearchQuery(namespace="soc", component="cpu", view="be", type="lib-lef"),
     transitive=False,
@@ -50,7 +49,8 @@ resolved = project.resolve()
 `Catalog` предоставляет только `search` и `publish`. Публикация принимает один LocalRecord
 и уже опубликованные dependencies. Рецепт генерируется Jinja-шаблоном; один export-pkg
 создаёт пакет, upload отправляет его на remote. Локальный source передаётся SCM-механизму
-Conan: SDK не клонирует Git самостоятельно. Файлы files копируются в пакет; nfs — только пути.
+Conan: SDK не клонирует Git самостоятельно. Файлы files копируются в пакет;
+содержимое payload сохраняется как JSON.
 
 `Ref.get()` возвращает готовый Record, заполняя files путями скачанных файлов.
 `with_sources=True` дополнительно получает исходники из GitLab штатным source() Conan
@@ -65,7 +65,7 @@ Graph.create_lockfile() использует dependencies и запоминае�
 могут находиться в одной директории и иметь разные манифесты и lockfile.
 Lockfile остаётся непрозрачным файлом проекта и явно передаётся при публикации.
 
-LocalRecord.to_json() готовит переносимые метаданные: ref, payload, имена files и nfs.
+LocalRecord.to_json() готовит переносимые метаданные: ref, payload и имена files.
 Рабочие source/files-пути туда не попадают. Record.from_json() читает скачанные
 метаданные, привязывая имена файлов к package_dir. Record.to_dict() предназначен
 для просмотра готовых данных, включая пути cache; отдельного Record.to_json() нет.

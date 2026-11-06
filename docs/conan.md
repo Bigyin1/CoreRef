@@ -14,14 +14,13 @@ from hwcatalog.api.records import LocalRecord, Ref
 catalog = Catalog()
 local = LocalRecord(
     Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
-    payload={"filelist": "rtl.f"},
+    payload={"filelist": "rtl.f", "lib": "/nfs/cpu/cpu.lib"},
     source=Path("/work/cpu"),
     files={"report": Path("/work/cpu/out/report.txt")},
-    nfs={"lib": Path("/nfs/cpu/cpu.lib")},
 )
 published = catalog.publish(local, dependencies=())
 record = published.ref.get(with_sources=True)
-print(record.source, record.files, record.nfs)
+print(record.source, record.files, record.payload)
 ```
 
 LocalRecord.source — текущий Git checkout. При export() Conan сам проверяет его
@@ -30,10 +29,10 @@ SDK не клонирует Git самостоятельно. Публикаци
 зависимости должны быть опубликованы заранее. Пакеты имеют имена
 namespace.component.view.type/version, например soc.cpu.be.lib-lef/4.0.
 
-LocalRecord.to_json() готовит переносимые ref/payload, список имён файлов и nfs.
+LocalRecord.to_json() готовит переносимые ref/payload и список имён файлов.
 Пути исходного checkout и файлов издателя туда не попадают. Временный Jinja-рецепт
 передаётся одному export-pkg, затем upload. Отдельного файла публикации и ручного
-conanfile.py не требуется. Files копируются под artifacts/, nfs сохраняет только пути.
+conanfile.py не требуется. Files копируются под artifacts/.
 
 ## Готовые пути
 
@@ -44,9 +43,9 @@ Git.checkout_from_conandata_coordinates() и возвращает точный c
 Record.source содержит Path checkout. URL/commit остаются во внутренних метаданных Conan.
 Без запроса source путь равен None. Повторное получение использует cache Conan.
 
-Внешние NFS-пути находятся в Record.nfs; их байты не загружаются в Conan.
-SDK требует именованные абсолютные Path, но не требует доступности NFS на машине
-чтения метаданных. Проверка существования LIB/LEF перед запуском инструмента — задача flow.
+Внешние ресурсы, например NFS-пути, flow может описать строками в payload.
+SDK сохраняет эти данные как JSON и не проверяет пути или доступность ресурсов.
+Проверка существования LIB/LEF перед запуском инструмента — задача flow.
 Обёрток ресурсов, URI-провайдеров, digest и собственного Git-кэша нет.
 
 Оба вида записей предоставляют paths напрямую. Публичного materialize нет:

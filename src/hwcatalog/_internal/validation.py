@@ -33,8 +33,7 @@ def normalize_ref(value: Ref) -> Ref:
 
 
 def normalize_record(value: Record, *, catalog: RefCatalog | None = None) -> Record:
-    _validate_paths(value.files, artifacts=True)
-    _validate_paths(value.nfs)
+    _validate_files(value.files)
     record = replace(value, ref=normalize_ref(value.ref))
     return Record.from_json(
         json.dumps(record.to_dict(), allow_nan=False),
@@ -47,12 +46,12 @@ def normalize_local(value: LocalRecord, *, catalog: RefCatalog | None = None) ->
     if not isinstance(value, LocalRecord):
         raise InvalidPackage("Expected one LocalRecord")
     snapshot = normalize_record(
-        Record(value.ref, value.payload, files=value.files, nfs=value.nfs), catalog=catalog
+        Record(value.ref, value.payload, files=value.files), catalog=catalog
     )
     source_path = value.source
     if source_path is not None:
         source_path = source_path.expanduser().absolute()
-    return LocalRecord(snapshot.ref, snapshot.payload, source_path, snapshot.files, snapshot.nfs)
+    return LocalRecord(snapshot.ref, snapshot.payload, source_path, snapshot.files)
 
 
 def normalize_publication(
@@ -70,13 +69,11 @@ def normalize_publication(
     return record, dependencies
 
 
-def _validate_paths(paths: Mapping[str, Path], *, artifacts: bool = False) -> None:
+def _validate_files(paths: Mapping[str, Path]) -> None:
     for name, path in paths.items():
-        _text(name)
-        if artifacts:
-            validate_file_name(name)
+        validate_file_name(name)
         if not isinstance(path, Path) or not path.is_absolute():
-            raise InvalidPackage("Resource paths must be absolute Path values")
+            raise InvalidPackage("Package file paths must be absolute Path values")
 
 
 def normalize_query(value: SearchQuery) -> SearchQuery:

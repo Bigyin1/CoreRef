@@ -95,13 +95,12 @@ class Ref:
 
 @dataclass(frozen=True)
 class LocalRecord:
-    """Project inputs with already available source, file and NFS paths."""
+    """Project metadata with already available source and package file paths."""
 
     ref: Ref
     payload: JSON | JSONSerializable = None
     source: Path | None = None
     files: Mapping[str, Path] = field(default_factory=dict)
-    nfs: Mapping[str, Path] = field(default_factory=dict)
 
     def to_json(self) -> str:
         """Prepare portable package metadata, excluding local source and artifact paths."""
@@ -111,8 +110,6 @@ class LocalRecord:
         value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
         if self.files:
             value["files"] = tuple(sorted(self.files))
-        if self.nfs:
-            value["nfs"] = {name: str(path) for name, path in self.nfs.items()}
         return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
@@ -124,7 +121,6 @@ class Record:
     payload: JSON | JSONSerializable = None
     source: Path | None = field(default=None, compare=False)
     files: Mapping[str, Path] = field(default_factory=dict, compare=False)
-    nfs: Mapping[str, Path] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, JSON]:
         """Expose downloaded metadata and paths, for inspection or CLI output."""
@@ -136,8 +132,6 @@ class Record:
             value["source"] = str(self.source)
         if self.files:
             value["files"] = {name: str(path) for name, path in self.files.items()}
-        if self.nfs:
-            value["nfs"] = {name: str(path) for name, path in self.nfs.items()}
         return value
 
     @classmethod
@@ -157,7 +151,6 @@ class Record:
             payload=deepfreeze(value["payload"]),
             source=Path(value["source"]) if value.get("source") else None,
             files=cls._file_paths(value.get("files", {}), package_dir),
-            nfs=deepfreeze({name: Path(path) for name, path in value.get("nfs", {}).items()}),
         )
 
     @staticmethod

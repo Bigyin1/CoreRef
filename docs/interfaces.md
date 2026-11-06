@@ -9,9 +9,9 @@
 | search(query=SearchQuery()) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
 | publish(record: LocalRecord, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает Record |
 
-Source, files и nfs принадлежат LocalRecord. Source — рабочий Git checkout, files —
-карта относительных имён внутри пакета и абсолютных локальных Path. Nfs — карта имён
-внешних ресурсов и абсолютных Path; файлы nfs не загружаются в Conan.
+Source и files принадлежат LocalRecord. Source — рабочий Git checkout, files —
+карта относительных имён внутри пакета и абсолютных локальных Path. Внешние ресурсы
+описываются в payload; их формат, проверка и использование принадлежат flow.
 Зависимости должны существовать. Передача опубликованного Record в publish отклоняется.
 
 ## Ref и Record
@@ -32,7 +32,7 @@ namespace.component.view.type/version. Контекст RefCatalog не учас
 Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все пять полей.
 
 Record — представление уже полученного пакета: ref, payload, source (Path | None),
-files (Mapping[str, Path]), nfs (Mapping[str, Path]).
+files (Mapping[str, Path]).
 URL/commit остаются внутри Conan; отдельного поля или класса Git-ресурса нет.
 
 Record.from_json(data, *, catalog, package_dir=None) читает метаданные пакета.
@@ -41,12 +41,12 @@ Record.from_json(data, *, catalog, package_dir=None) читает метадан
 Record.to_dict() возвращает данные для просмотра или CLI. Публичных to_json и materialize
 у Record нет; получение исходников выполняется через Ref.get(with_sources=True).
 Физические пути files/source не участвуют в равенстве опубликованных записей:
-один пакет может находиться в разных cache. Ref, payload и nfs сравниваются по содержимому.
+один пакет может находиться в разных cache. Ref и payload сравниваются по содержимому.
 
-LocalRecord содержит ref, payload, source, files, nfs. Его создаёт flow из текущего
+LocalRecord содержит ref, payload, source, files. Его создаёт flow из текущего
 проекта. LocalRecord.to_json() — подготовка переносимых метаданных для публикации:
-source и исходные пути files исключаются, сохраняются имена файлов. Nfs остаётся
-картой абсолютных путей. У локальной записи нет получения или материализации данных.
+source и исходные пути files исключаются, сохраняются имена файлов.
+У локальной записи нет получения или материализации данных.
 
 ## Graph
 

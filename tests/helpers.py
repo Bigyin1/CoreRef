@@ -98,5 +98,4 @@ def local_record(
         record.payload,
         source,
         record.files if files is None else files,
-        record.nfs,
     )

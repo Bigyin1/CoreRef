@@ -16,9 +16,9 @@ def test_files_are_available_on_fetch_and_source_is_optional(
     artifact.write_text("library(cpu) {}")
     local = LocalRecord(
         Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+        payload={"lef": str(tmp_path / "mounted/cpu.lef")},
         source=checkout,
         files={"timing.lib": artifact},
-        nfs={"lef": tmp_path / "mounted/cpu.lef"},
     )
     published = catalog.publish(local)
     assert isinstance(published, Record)
@@ -32,17 +32,19 @@ def test_files_are_available_on_fetch_and_source_is_optional(
     assert materialized.source is not None
     assert (materialized.source / "cpu.sv").is_file()
     assert materialized.files["timing.lib"].read_text() == artifact.read_text()
-    assert materialized.nfs == local.nfs
+    assert materialized.payload == local.payload
     assert not hasattr(local, "materialize")
     assert not hasattr(materialized, "materialize")
 
 
-def test_nfs_only_materialization_does_not_install_a_binary(
+def test_payload_only_record_does_not_install_a_binary(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    paths = {"lib": tmp_path / "not-mounted-yet/cpu.lib"}
+    paths = {"lib": str(tmp_path / "not-mounted-yet/cpu.lib")}
     record = catalog.publish(
-        LocalRecord(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), nfs=paths)
+        LocalRecord(
+            Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), payload={"paths": paths}
+        )
     )
     operations: list[str] = []
     run = catalog._client.run
@@ -54,7 +56,7 @@ def test_nfs_only_materialization_does_not_install_a_binary(
     monkeypatch.setattr(catalog._client, "run", track)
     for with_sources in (False, True):
         local = record.ref.get(with_sources=with_sources)
-        assert local.nfs == paths
+        assert local.payload == {"paths": paths}
         assert local.files == {}
         assert local.source is None
     assert "install" not in operations
@@ -72,9 +74,9 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
 ) -> None:
     local = LocalRecord(
         Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+        payload={"lef": str(tmp_path / "nfs/cpu.lef")},
         source=tmp_path / "working-tree",
         files={"timing/cpu.lib": tmp_path / "output.lib"},
-        nfs={"lef": tmp_path / "nfs/cpu.lef"},
     )
     metadata = local.to_json()
     assert "working-tree" not in metadata
@@ -83,7 +85,7 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
         Record.from_json(metadata, catalog=catalog)
     record = Record.from_json(metadata, package_dir=tmp_path / "downloaded", catalog=catalog)
     assert record.files == {"timing/cpu.lib": tmp_path / "downloaded/artifacts/timing/cpu.lib"}
-    assert record.nfs == local.nfs
+    assert record.payload == local.payload
     assert record.source is None
 
 
