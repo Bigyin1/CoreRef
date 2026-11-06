@@ -9,10 +9,11 @@ from dulwich.repo import Repo
 
 from examples.conan_config import configured_home
 from hwcatalog._internal.conan import records as conan_records
+from hwcatalog._internal.conan.format import read_recipe, write_recipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency
-from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record, resolve_published
 
 
@@ -58,9 +59,6 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
             source=checkout,
         )
     )
-    assert record.scm is not None
-    with Repo(checkout) as repository:
-        assert record.scm["commit"] == repository.head().decode()
     assert record.payload == {"tool": "synthesis"}
     assert record.ref.get() == record
     artifacts = record.ref.get()
@@ -68,6 +66,7 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
     assert artifacts.files == {}
     fetched = record.ref.get(with_sources=True)
     assert fetched.source is not None
+    assert _commit(fetched.source) == _commit(checkout)
     assert (fetched.source / "cpu.sv").read_text() == "module cpu; endmodule\n"
     assert fetched.source.is_relative_to(packages._client.home)
     shutil.rmtree(checkout)
@@ -80,15 +79,13 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
 def test_pinned_source_round_trip_uses_conan_scm(
     tmp_path: Path, checkout: Path, *, catalog: Catalog
 ) -> None:
-    source = {"url": str(checkout), "requested_ref": "main", "commit": _commit(checkout)}
     catalog = Catalog(configured_home(tmp_path / "home"))
-    description = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), scm=source)
+    description = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
     record = catalog.publish(local_record(description, source=checkout))
-    assert record.scm is not None
-    assert record.scm["commit"] == source["commit"]
     _, folder = conan_records.locate(catalog._client, record.ref)
     assert "exports_sources" not in (folder / "conanfile.py").read_text()
     assert "source" not in json.loads((folder / "record.json").read_text())
+    assert "scm" not in json.loads((folder / "record.json").read_text())
     assert "scm" in (folder / "conandata.yml").read_text()
     assert str(checkout) not in (folder / "conanfile.py").read_text()
     fetched = record.ref.get(with_sources=True)
@@ -113,6 +110,35 @@ def test_dirty_source_fails_before_publication(
             )
         )
     assert not catalog.search()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("url", ""),
+        ("url", "  "),
+        ("url", "--option"),
+        ("url", "https://gitlab.invalid/`command`.git"),
+        ("url", "https://gitlab.invalid/$command.git"),
+        ("url", "https://gitlab.invalid/project.git\n"),
+        ("commit", "main"),
+        ("commit", "a" * 39),
+        ("commit", "a" * 40 + "\n"),
+        ("extra", "unsupported"),
+    ],
+)
+def test_invalid_native_scm_is_rejected(
+    tmp_path: Path, field: str, value: str, *, catalog: Catalog
+) -> None:
+    local = LocalRecord(
+        Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=tmp_path
+    )
+    write_recipe(tmp_path, local)
+    scm = {"url": "https://gitlab.invalid/cpu.git", "commit": "a" * 40}
+    scm[field] = value
+    (tmp_path / "conandata.yml").write_text(json.dumps({"scm": scm}))
+    with pytest.raises(InvalidPackage):
+        read_recipe(tmp_path, local.ref)
 
 
 @pytest.mark.parametrize(

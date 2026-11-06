@@ -32,8 +32,8 @@ namespace.component.view.type/version. Контекст RefCatalog не учас
 Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все пять полей.
 
 Record — представление уже полученного пакета: ref, payload, source (Path | None),
-files (Mapping[str, Path]), nfs (Mapping[str, Path]), scm (Mapping[str, str] | None).
-SCM содержит URL/commit Conan; отдельного класса Git-ресурса нет.
+files (Mapping[str, Path]), nfs (Mapping[str, Path]).
+URL/commit остаются внутри Conan; отдельного поля или класса Git-ресурса нет.
 
 Record.from_json(data, *, catalog, package_dir=None) читает метаданные пакета.
 Для списка имён файлов нужен package_dir; локальные пути будут заполнены под artifacts/.
@@ -41,7 +41,7 @@ Record.from_json(data, *, catalog, package_dir=None) читает метадан
 Record.to_dict() возвращает данные для просмотра или CLI. Публичных to_json и materialize
 у Record нет; получение исходников выполняется через Ref.get(with_sources=True).
 Физические пути files/source не участвуют в равенстве опубликованных записей:
-один пакет может находиться в разных cache. SCM, payload и nfs сравниваются по содержимому.
+один пакет может находиться в разных cache. Ref, payload и nfs сравниваются по содержимому.
 
 LocalRecord содержит ref, payload, source, files, nfs. Его создаёт flow из текущего
 проекта. LocalRecord.to_json() — подготовка переносимых метаданных для публикации:

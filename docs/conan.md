@@ -21,7 +21,7 @@ local = LocalRecord(
 )
 published = catalog.publish(local, dependencies=())
 record = published.ref.get(with_sources=True)
-print(record.source, record.files, record.nfs, record.scm)
+print(record.source, record.files, record.nfs)
 ```
 
 LocalRecord.source — текущий Git checkout. При export() Conan сам проверяет его
@@ -41,7 +41,7 @@ Ref.get() заполняет Record.files путями доступных фай
 Ref.get(with_sources=True) дополнительно передаёт scoped-конфигурацию
 `tools.build:download_source=True` в Conan install. Встроенный source() вызывает
 Git.checkout_from_conandata_coordinates() и возвращает точный commit из GitLab.
-Record.source содержит Path checkout, Record.scm — обычный словарь URL/commit.
+Record.source содержит Path checkout. URL/commit остаются во внутренних метаданных Conan.
 Без запроса source путь равен None. Повторное получение использует cache Conan.
 
 Внешние NFS-пути находятся в Record.nfs; их байты не загружаются в Conan.

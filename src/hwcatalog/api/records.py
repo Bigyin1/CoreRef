@@ -125,7 +125,6 @@ class Record:
     source: Path | None = field(default=None, compare=False)
     files: Mapping[str, Path] = field(default_factory=dict, compare=False)
     nfs: Mapping[str, Path] = field(default_factory=dict)
-    scm: Mapping[str, str] | None = field(default=None, kw_only=True)
 
     def to_dict(self) -> dict[str, JSON]:
         """Expose downloaded metadata and paths, for inspection or CLI output."""
@@ -135,8 +134,6 @@ class Record:
         value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
         if self.source is not None:
             value["source"] = str(self.source)
-        if self.scm is not None:
-            value["scm"] = dict(self.scm)
         if self.files:
             value["files"] = {name: str(path) for name, path in self.files.items()}
         if self.nfs:
@@ -151,15 +148,14 @@ class Record:
         value = json.loads(payload)
         if not isinstance(value, dict):
             raise ValueError("Record must be a JSON object")
-        if package_dir is not None and any(
-            name in value for name in ("source", "source_path", "scm")
+        if "scm" in value or (
+            package_dir is not None and any(name in value for name in ("source", "source_path"))
         ):
             raise ValueError("Git source must be stored in Conan SCM metadata")
         return cls(
             ref=Ref(**value["ref"], catalog=catalog),
             payload=deepfreeze(value["payload"]),
             source=Path(value["source"]) if value.get("source") else None,
-            scm=deepfreeze(value.get("scm")),
             files=cls._file_paths(value.get("files", {}), package_dir),
             nfs=deepfreeze({name: Path(path) for name, path in value.get("nfs", {}).items()}),
         )

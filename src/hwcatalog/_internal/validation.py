@@ -1,7 +1,6 @@
 """Catalog input normalization, independent of Conan graph resolution."""
 
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -34,8 +33,6 @@ def normalize_ref(value: Ref) -> Ref:
 
 
 def normalize_record(value: Record, *, catalog: RefCatalog | None = None) -> Record:
-    if value.scm is not None:
-        _validate_scm(value.scm)
     _validate_paths(value.files, artifacts=True)
     _validate_paths(value.nfs)
     record = replace(value, ref=normalize_ref(value.ref))
@@ -71,16 +68,6 @@ def normalize_publication(
     if record.ref in dependencies:
         raise InvalidPackage("A package cannot depend on itself")
     return record, dependencies
-
-
-def _validate_scm(source: Mapping[str, str]) -> None:
-    url = _text(source.get("url", ""))
-    if url.startswith("-") or any(char in url for char in ('"', "`", "$", "\n", "\r", "\0")):
-        raise InvalidPackage("Git URL contains characters unsafe for Conan SCM helpers")
-    if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", _text(source.get("commit", ""))):
-        raise InvalidPackage("Git source requires an exact commit")
-    if set(source) - {"url", "commit", "requested_ref"}:
-        raise InvalidPackage("Unsupported SCM fields")
 
 
 def _validate_paths(paths: Mapping[str, Path], *, artifacts: bool = False) -> None:

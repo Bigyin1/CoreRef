@@ -1,7 +1,6 @@
-"""SCM dictionaries and named filesystem paths stay outside consumer payloads."""
+"""Named filesystem paths stay outside consumer payloads."""
 
 import json
-from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -12,26 +11,22 @@ from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
-def test_paths_and_scm_roundtrip_as_immutable_snapshots(
-    tmp_path: Path, *, catalog: Catalog
-) -> None:
+def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Catalog) -> None:
     nfs = {"lib": tmp_path / "cpu.lib"}
-    source = {"url": "https://gitlab.example.invalid/cpu.git", "commit": "a" * 40}
     record = normalize_record(
         Record(
             Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
-            scm=source,
+            source=tmp_path / "source",
             files={"report": tmp_path / "report.txt"},
             nfs=nfs,
         )
     )
     nfs.clear()
-    source.clear()
     restored = Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
     assert restored == record
     assert restored.nfs["lib"] == tmp_path / "cpu.lib"
     assert restored.files["report"] == tmp_path / "report.txt"
-    assert isinstance(restored.scm, Mapping)
+    assert restored.source == tmp_path / "source"
     with pytest.raises(TypeError):
         restored.nfs["other"] = tmp_path  # type: ignore[index]
 

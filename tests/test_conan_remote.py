@@ -195,8 +195,6 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     assert installed.source is None
     assert installed.files.keys() == {"cpu.lib"}
     assert installed.files["cpu.lib"].read_text() == "library(cpu) {}"
-    assert published.scm is not None
-    assert published.scm["url"] == str(git_origin)
     offline = git_origin.with_name("offline-origin.git")
     git_origin.rename(offline)
     try:

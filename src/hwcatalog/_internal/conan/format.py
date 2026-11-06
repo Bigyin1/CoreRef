@@ -1,13 +1,12 @@
 """Canonical catalog recipe metadata; lockfile contents belong to Conan."""
 
 import re
-from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
 import yaml  # type: ignore[import-untyped]  # Validated by models at this boundary.
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ...api.errors import InvalidPackage
 from ...api.protocols import RefCatalog
@@ -89,8 +88,17 @@ def _recipe_text(ref: Ref, requirements: tuple[str, ...]) -> str:
 class _SCM(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     url: str
-    commit: str
+    commit: str = Field(pattern=r"^(?:[a-f0-9]{40}|[a-f0-9]{64})\z")
     requested_ref: str = "HEAD"
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        if not value.strip() or value.startswith("-"):
+            raise ValueError("Git URL must be nonempty and must not start with a dash")
+        if any(char in value for char in ('"', "`", "$", "\n", "\r", "\0")):
+            raise ValueError("Git URL contains characters unsafe for Conan SCM helpers")
+        return value
 
 
 class _ConanData(BaseModel):
@@ -123,15 +131,7 @@ def read_recipe(directory: Path, expected: Ref) -> tuple[Record, RecipeMetadata]
         )
         metadata = RecipeMetadata.model_validate_json((directory / "hwcatalog.json").read_text())
         if metadata.has_source:
-            data = _ConanData.model_validate(
-                yaml.safe_load((directory / "conandata.yml").read_text())
-            )
-            record = normalize_record(
-                replace(
-                    record,
-                    scm=data.scm.model_dump(),
-                )
-            )
+            _ConanData.model_validate(yaml.safe_load((directory / "conandata.yml").read_text()))
         if record.ref != expected:
             raise ValueError("Record coordinates disagree with the recipe")
         _validate_recipe(directory, record, metadata)

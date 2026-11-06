@@ -30,7 +30,7 @@ def locate(client: ConanClient, ref: Ref) -> tuple[str, Path]:
 def get(client: ConanClient, ref: Ref, *, with_sources: bool = False) -> Record:
     ref = normalize_ref(ref)
     record = read_records(client, (to_conan_reference(ref),), catalog=ref._catalog)[ref]
-    if record.files or (with_sources and record.scm):
+    if record.files or with_sources:
         from .materialization import materialize
 
         return materialize(client, record, with_sources=with_sources)

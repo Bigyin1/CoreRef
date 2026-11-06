@@ -9,7 +9,7 @@ from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
-def test_files_are_available_on_fetch_and_scm_is_optional(
+def test_files_are_available_on_fetch_and_source_is_optional(
     catalog: Catalog, checkout: Path, tmp_path: Path
 ) -> None:
     artifact = tmp_path / "cpu.lib"
@@ -22,7 +22,8 @@ def test_files_are_available_on_fetch_and_scm_is_optional(
     )
     published = catalog.publish(local)
     assert isinstance(published, Record)
-    assert published.scm is not None
+    assert not hasattr(published, "scm")
+    assert "scm" not in published.to_dict()
     assert published.files["timing.lib"].read_text() == artifact.read_text()
     fetched = published.ref.get()
     assert fetched.files["timing.lib"].read_text() == artifact.read_text()
@@ -51,10 +52,11 @@ def test_nfs_only_materialization_does_not_install_a_binary(
         return run(*arguments)
 
     monkeypatch.setattr(catalog._client, "run", track)
-    local = record.ref.get()
-    assert local.nfs == paths
-    assert local.files == {}
-    assert local.source is None
+    for with_sources in (False, True):
+        local = record.ref.get(with_sources=with_sources)
+        assert local.nfs == paths
+        assert local.files == {}
+        assert local.source is None
     assert "install" not in operations
 
 
