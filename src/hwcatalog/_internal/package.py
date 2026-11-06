@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Self
 
 from frozendict import deepfreeze, frozendict
 
-from ...api.errors import CatalogError, Conflict, InvalidPackage, NotFound
-from ...api.query import SearchQuery
-from ...api.records import LocalRecord, Record, Ref
+from ..api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from ..api.query import SearchQuery
+from ..api.records import LocalRecord, Record, Ref
 from .client import RecipeRevisions
 from .graph import GraphData, ResolvedConanGraph
 from .recipe import LocalRecipe, StoredRecipe
@@ -20,7 +20,7 @@ from .references import from_conan_reference, to_conan_reference
 from .types import NativePackage
 
 if TYPE_CHECKING:
-    from ...api.catalog import Catalog
+    from ..api.catalog import Catalog
 
 
 class StoredPackage:

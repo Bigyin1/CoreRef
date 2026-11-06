@@ -9,12 +9,12 @@ import yaml  # type: ignore[import-untyped]  # Validated at this boundary.
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from ...api.errors import InvalidPackage
-from ...api.records import LocalRecord, Record, Ref
+from ..api.errors import InvalidPackage
+from ..api.records import LocalRecord, Record, Ref
 from .references import from_conan_reference, to_conan_reference
 
 _RECIPE_ENV = Environment(
-    loader=PackageLoader("hwcatalog._internal.conan"),
+    loader=PackageLoader("hwcatalog._internal"),
     autoescape=False,  # noqa: S701 - Python literals use repr escaping.
     undefined=StrictUndefined,
     trim_blocks=True,

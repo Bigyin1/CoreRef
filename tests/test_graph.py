@@ -64,7 +64,7 @@ def test_failed_lock_creation_preserves_previous_scope(catalog: Catalog, tmp_pat
 
 
 def test_legacy_coordinate_names_are_rejected(*, catalog: Catalog) -> None:
-    from hwcatalog._internal.conan.references import from_conan_reference
+    from hwcatalog._internal.references import from_conan_reference
 
     with pytest.raises(InvalidPackage):
         from_conan_reference("soc.cpu.rtl/1.0", catalog=catalog)

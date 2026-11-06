@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from .._internal.conan.client import ConanClient
-from .._internal.conan.package import LocalPackage, StoredPackage
-from .._internal.conan.references import from_conan_reference
+from .._internal.client import ConanClient
+from .._internal.package import LocalPackage, StoredPackage
+from .._internal.references import from_conan_reference
 from .query import SearchQuery
 from .records import LocalRecord, Record, Ref
 

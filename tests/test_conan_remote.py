@@ -16,7 +16,7 @@ from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 
 from examples.conan_config import configured_home
-from hwcatalog._internal.conan.recipe import LocalRecipe, StoredRecipe
+from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
     CatalogError,

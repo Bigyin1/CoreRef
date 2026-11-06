@@ -18,7 +18,7 @@ from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
 )
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
-from ...api.errors import CatalogError, Conflict, InvalidPackage
+from ..api.errors import CatalogError, Conflict, InvalidPackage
 from .types import NativeGraph, NativeReference
 
 

@@ -8,7 +8,7 @@ import pytest
 from dulwich.repo import Repo
 
 from examples.conan_config import configured_home
-from hwcatalog._internal.conan.recipe import LocalRecipe, StoredRecipe
+from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency

@@ -3,11 +3,11 @@
 import re
 from typing import TYPE_CHECKING
 
-from ...api.errors import InvalidPackage
-from ...api.records import Ref
+from ..api.errors import InvalidPackage
+from ..api.records import Ref
 
 if TYPE_CHECKING:
-    from ...api.catalog import Catalog
+    from ..api.catalog import Catalog
 
 NAME_PART = re.compile(r"[a-z0-9_-]+\Z")
 VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")

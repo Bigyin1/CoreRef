@@ -3,9 +3,9 @@
 from collections.abc import Mapping
 from functools import cached_property
 
-from ...api.errors import InvalidPackage
-from ...api.graph import Dependency
-from ...api.records import LocalRecord, Record, Ref
+from ..api.errors import InvalidPackage
+from ..api.graph import Dependency
+from ..api.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
 
 type GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[Dependency, ...]]

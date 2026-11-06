@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cached_property
 
-from .._internal.conan.references import NAME_PART, VERSION
+from .._internal.references import NAME_PART, VERSION
 from .records import LocalRecord, Record
 
 

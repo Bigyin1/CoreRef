@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog._internal.conan.recipe import LocalRecipe, StoredRecipe
+from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.records import LocalRecord, Record, Ref
