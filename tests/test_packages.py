@@ -141,7 +141,7 @@ def test_invalid_native_scm_is_rejected(
     scm[field] = value
     (tmp_path / "conandata.yml").write_text(json.dumps({"scm": scm}))
     with pytest.raises(InvalidPackage):
-        StoredRecipe.read(tmp_path, local.ref, reference=str(local.ref))
+        StoredRecipe(tmp_path, local.ref, reference=str(local.ref))
 
 
 @pytest.mark.parametrize("name", ["../escape", "/absolute"])
@@ -231,4 +231,4 @@ def test_full_git_commit_metadata_is_accepted(
     (tmp_path / "conandata.yml").write_text(
         json.dumps({"scm": {"url": "https://gitlab.invalid/cpu.git", "commit": "a" * length}})
     )
-    assert StoredRecipe.read(tmp_path, record.ref, reference=str(record.ref)).metadata.has_source
+    assert StoredRecipe(tmp_path, record.ref, reference=str(record.ref)).metadata.has_source

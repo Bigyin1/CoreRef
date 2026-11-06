@@ -48,7 +48,7 @@ class Catalog:
         for reference, revisions in self._client.index(pattern).items():
             ref = from_conan_reference(reference, catalog=self)
             if query.matches_ref(ref):
-                packages.append(StoredPackage.from_index(ref, revisions))
+                packages.append(StoredPackage(ref).load(revisions))
         return tuple(packages)
 
 

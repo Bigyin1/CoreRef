@@ -1,7 +1,6 @@
 """Operations on one local package or one published package reference."""
 
 import json
-import shutil
 from dataclasses import replace
 from functools import cached_property
 from pathlib import Path
@@ -32,11 +31,10 @@ class StoredPackage:
         self._client = self._catalog._client
         self._recipes: dict[Ref, StoredRecipe] = {}
 
-    @classmethod
-    def from_index(cls, ref: Ref, revisions: RecipeRevisions) -> Self:
-        package = cls(ref)
-        package._download(ref, cls._pin(ref, revisions))
-        return package
+    def load(self, revisions: RecipeRevisions) -> Self:
+        """Fetch this package using revisions already obtained from the index."""
+        self._download(self.ref, revisions.pin(str(self.ref)))
+        return self
 
     def recipe(self) -> StoredRecipe:
         return self._load(str(self.ref))
@@ -97,24 +95,18 @@ class StoredPackage:
         recipe = self._recipes.get(ref)
         if recipe is None:
             revisions = self._client.index(f"{ref}*#*").get(str(ref))
-            recipe = self._download(ref, self._pin(ref, revisions))
+            if revisions is None:
+                raise NotFound(ref)
+            recipe = self._download(ref, revisions.pin(str(ref)))
         if "#" in reference and reference != recipe.reference:
             raise Conflict(f"Locked revision differs from published identity: {reference}")
         return recipe
 
     def _download(self, ref: Ref, reference: str) -> StoredRecipe:
         directory = self._client.download_recipe(reference)
-        recipe = StoredRecipe.read(directory, ref, reference=reference)
+        recipe = StoredRecipe(directory, ref, reference=reference)
         self._recipes[ref] = recipe
         return recipe
-
-    @staticmethod
-    def _pin(ref: Ref, revisions: RecipeRevisions | None) -> str:
-        if revisions is None or not revisions.revisions:
-            raise NotFound(ref)
-        if len(revisions.revisions) != 1:
-            raise Conflict(f"Multiple recipe revisions for {ref}")
-        return f"{ref}#{next(iter(revisions.revisions))}"
 
 
 class LocalPackage:
@@ -232,7 +224,7 @@ class LocalPackage:
         with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:
             directory = Path(temporary)
             recipe.write(directory)
-            self._copy_files(directory, record)
+            recipe.copy_files(directory)
             return self._export(directory)
 
     def _snapshot(self, record: LocalRecord) -> LocalRecord:
@@ -289,9 +281,7 @@ class LocalPackage:
         if reference is None:
             raise InvalidPackage("Conan did not return the exported recipe reference")
         pinned = reference.repr_notime()
-        recipe = StoredRecipe.read(
-            self._client.cache_path(pinned), self.record.ref, reference=pinned
-        )
+        recipe = StoredRecipe(self._client.cache_path(pinned), self.record.ref, reference=pinned)
         self._client.upload(pinned)
         return recipe.record
 
@@ -301,12 +291,3 @@ class LocalPackage:
             return path.expanduser().resolve(strict=True)
         except (OSError, ValueError) as exc:
             raise InvalidPackage(f"Publication input does not exist: {path}") from exc
-
-    @staticmethod
-    def _copy_files(directory: Path, record: LocalRecord) -> None:
-        for name, path in record.files.items():
-            destination = directory / "artifacts" / name
-            if not destination.resolve().is_relative_to((directory / "artifacts").resolve()):
-                raise InvalidPackage("Artifact would escape the package directory")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, destination)

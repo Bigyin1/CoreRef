@@ -155,7 +155,7 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
         with pytest.raises(CatalogError, match="Simulated upload failure"):
             catalog.publish(local_record(record))
     directory = remote_catalog._client.cache_path(str(record.ref))
-    assert StoredRecipe.read(directory, record.ref, reference=str(record.ref)).record == record
+    assert StoredRecipe(directory, record.ref, reference=str(record.ref)).record == record
     assert catalog.search() == ()
 
     # A prepared local package must not block another attempt to publish to the server.

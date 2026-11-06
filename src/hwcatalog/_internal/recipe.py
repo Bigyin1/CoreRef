@@ -1,9 +1,10 @@
 """Prepared local recipes and validated recipes obtained from Conan."""
 
 import json
-from dataclasses import dataclass, replace
+import shutil
+from dataclasses import replace
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal
 
 import yaml  # type: ignore[import-untyped]  # Validated at this boundary.
 from edify import RegexBuilder
@@ -98,28 +99,28 @@ class LocalRecipe:
         if self.record.source is not None:
             (directory / "source-path.txt").write_text(str(self.record.source))
 
+    def copy_files(self, directory: Path) -> None:
+        """Stage this publication's files alongside the prepared recipe."""
+        for name, path in self.record.files.items():
+            destination = directory / "artifacts" / name
+            if not destination.resolve().is_relative_to((directory / "artifacts").resolve()):
+                raise InvalidPackage("Artifact would escape the package directory")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, destination)
 
-@dataclass(frozen=True)
+
 class StoredRecipe:
-    """One validated recipe revision and its already downloaded metadata."""
+    """Read and validate one recipe revision before Conan evaluates its code."""
 
-    reference: str
-    directory: Path
-    record: Record
-    metadata: RecipeMetadata
-
-    @classmethod
-    def read(cls, directory: Path, expected: Ref, *, reference: str) -> Self:
-        """Validate metadata and canonical code before Conan evaluates the recipe."""
+    def __init__(self, directory: Path, expected: Ref, *, reference: str) -> None:
+        self.reference = reference
+        self.directory = directory
         try:
-            recipe = cls(
-                reference,
-                directory,
-                cls._read_record(directory, expected),
-                RecipeMetadata.model_validate_json((directory / "hwcatalog.json").read_text()),
+            self.record = self._read_record(expected)
+            self.metadata = RecipeMetadata.model_validate_json(
+                (self.directory / "hwcatalog.json").read_text()
             )
-            recipe._validate()
-            return recipe
+            self._validate()
         except (
             OSError,
             ValueError,
@@ -131,9 +132,8 @@ class StoredRecipe:
         ) as exc:
             raise InvalidPackage(f"Invalid catalog recipe for {expected}: {exc}") from exc
 
-    @staticmethod
-    def _read_record(directory: Path, expected: Ref) -> Record:
-        value = json.loads((directory / "record.json").read_text())
+    def _read_record(self, expected: Ref) -> Record:
+        value = json.loads((self.directory / "record.json").read_text())
         if not isinstance(value, dict):
             raise ValueError("Record must be a JSON object")
         if any(name in value for name in ("source", "source_path", "scm")):
@@ -144,10 +144,10 @@ class StoredRecipe:
         record = Record(
             Ref(**value["ref"], catalog=expected._catalog),
             value["payload"],
-            files={name: directory / "artifacts" / name for name in names},
+            files={name: self.directory / "artifacts" / name for name in names},
         )
         if any(
-            not path.resolve().is_relative_to((directory / "artifacts").resolve())
+            not path.resolve().is_relative_to((self.directory / "artifacts").resolve())
             for path in record.files.values()
         ):
             raise ValueError("Artifact would escape the package directory")

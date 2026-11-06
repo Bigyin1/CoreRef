@@ -86,7 +86,7 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
         Record.from_json(metadata, catalog=catalog)
     local.source = None
     LocalRecipe(local).write(tmp_path / "downloaded")
-    record = StoredRecipe.read(tmp_path / "downloaded", local.ref, reference=str(local.ref)).record
+    record = StoredRecipe(tmp_path / "downloaded", local.ref, reference=str(local.ref)).record
     assert record.files == {"timing/cpu.lib": tmp_path / "downloaded/artifacts/timing/cpu.lib"}
     assert record.payload == local.payload
     assert record.source is None
@@ -104,4 +104,4 @@ def test_package_source_metadata_belongs_to_conan(
     LocalRecipe(local).write(tmp_path)
     (tmp_path / "record.json").write_text(json.dumps(value))
     with pytest.raises(InvalidPackage, match="Conan SCM"):
-        StoredRecipe.read(tmp_path, local.ref, reference=str(local.ref))
+        StoredRecipe(tmp_path, local.ref, reference=str(local.ref))

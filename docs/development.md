@@ -54,11 +54,14 @@ Preview-правила включены только по явным кодам:
 - `package.py`: `LocalPackage` отделяет входы проекта, сохраняет нативный граф
   и result, создаёт lockfile и выполняет publish. `StoredPackage` получает запись, файлы, исходники и зависимости
   опубликованного Ref, а также ищет потребителей.
-- `recipe.py`: `LocalRecipe` пишет временный Jinja-рецепт; `StoredRecipe` хранит
-  проверенные метаданные, revision и директорию загруженного рецепта.
+- `recipe.py`: `LocalRecipe` пишет временный Jinja-рецепт и копирует файлы при публикации.
+  `StoredRecipe(directory, expected, reference=...)` читает и проверяет рецепт
+  при создании; хранит его метаданные, revision и директорию.
 - `graph.py`: `ResolvedConanGraph` проверяет нативный граф Conan и извлекает
   ссылки и связи. Загрузку пакетов выполняет вызывающий объект пакета.
 - `client.py`: `ConanClient` отвечает за настройки и выполнение команд Conan.
+  `RecipeRevisions.pin(reference)` выбирает единственную допустимую revision;
+  `StoredPackage.load(revisions)` использует уже полученный индекс без повторного поиска.
 - `references.py` содержит кодирование и чтение Ref Conan; SearchQuery строит
   conan_pattern и объединяет фильтрацию/сортировку записей в select().
   Валидация пользовательских входов принадлежит flow; SDK сохраняет JSON-снимки

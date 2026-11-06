@@ -19,7 +19,7 @@ from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
 )
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
-from ..api.errors import CatalogError, Conflict, InvalidPackage
+from ..api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from .types import NativeGraph, NativeReference
 
 
@@ -46,6 +46,14 @@ class _API(Protocol):
 class RecipeRevisions(BaseModel):
     revisions: dict[str, object] = Field(default_factory=dict)
 
+    def pin(self, reference: str) -> str:
+        """Select the only revision allowed for one published package identity."""
+        if not self.revisions:
+            raise NotFound(reference)
+        if len(self.revisions) != 1:
+            raise Conflict(f"Multiple recipe revisions for {reference}")
+        return f"{reference}#{next(iter(self.revisions))}"
+
 
 class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
     pass
@@ -53,7 +61,13 @@ class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
 
 class ConanClient:
     def __init__(self, home: Path | None, remote: str | None, timeout: float) -> None:
-        self.home = self._resolve_home(home)
+        if home is not None:
+            self.home = home.expanduser().resolve()
+        else:
+            try:
+                self.home = Path(cast(_API, ConanAPI()).home_folder).resolve()
+            except (ConanException, OSError) as error:
+                raise CatalogError(f"Conan could not resolve its default home: {error}") from error
         self.remote = self._configured_remote(remote)
         self.timeout = timeout
 
@@ -64,29 +78,38 @@ class ConanClient:
     def run(self, *arguments: str) -> object:
         """Run a command without spawning Conan or changing environment/cwd."""
         try:
-            conan = ConanAPI(cache_folder=str(self.home))
-            Cli(conan).add_commands()
-            result = cast(_API, conan).command.run(
-                [
-                    *arguments,
-                    "-vquiet",
-                    "-cc",
-                    "core:non_interactive=True",
-                    "-cc",
-                    f"core.net.http:timeout={self.timeout}",
-                ],
-                raise_on_errors=False,
-            )
-            self._validate_result(result)
-            return result
+            return self._execute(arguments)
         except GraphConflictError as exc:
             raise Conflict(str(exc)) from exc
         except GraphLoopError as exc:
             raise InvalidPackage(str(exc)) from exc
         except ConanException as exc:
-            raise self._command_error(arguments, exc) from exc
+            if "not in lockfile" in str(exc):
+                raise InvalidPackage("Recipe dependency is absent from its lockfile") from exc
+            raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
         except OSError as exc:
             raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
+
+    def _execute(self, arguments: tuple[str, ...]) -> object:
+        conan = ConanAPI(cache_folder=str(self.home))
+        Cli(conan).add_commands()
+        result = cast(_API, conan).command.run(
+            [
+                *arguments,
+                "-vquiet",
+                "-cc",
+                "core:non_interactive=True",
+                "-cc",
+                f"core.net.http:timeout={self.timeout}",
+            ],
+            raise_on_errors=False,
+        )
+        if isinstance(result, Mapping):
+            if "graph" in result:
+                cast(NativeGraph, result["graph"]).report_graph_error()
+            if result.get("conan_error") is not None:
+                raise ConanException(str(result["conan_error"]))
+        return result
 
     def index(self, pattern: str) -> dict[str, RecipeRevisions]:
         source = ("--remote", self.remote) if self.remote else ()
@@ -141,8 +164,7 @@ class ConanClient:
             *self.source_args,
         )
 
-    @staticmethod
-    def save_lockfile(graph: NativeGraph, output: Path) -> None:
+    def save_lockfile(self, graph: NativeGraph, output: Path) -> None:
         """Let Conan create an opaque lockfile from an already resolved graph."""
         level = ConanOutput.get_output_level()
         try:
@@ -223,30 +245,6 @@ class ConanClient:
     def upload(self, reference: str) -> None:
         if self.remote:
             self.run("upload", reference, "--remote", self.remote, "--confirm")
-
-    @staticmethod
-    def _validate_result(result: object) -> None:
-        if not isinstance(result, Mapping):
-            return
-        if "graph" in result:
-            cast(NativeGraph, result["graph"]).report_graph_error()
-        if result.get("conan_error") is not None:
-            raise ConanException(str(result["conan_error"]))
-
-    @staticmethod
-    def _command_error(arguments: tuple[str, ...], error: Exception) -> CatalogError:
-        if "not in lockfile" in str(error):
-            return InvalidPackage("Recipe dependency is absent from its lockfile")
-        return CatalogError(f"Conan command {arguments[:2]} failed: {error}")
-
-    @staticmethod
-    def _resolve_home(home: Path | None) -> Path:
-        if home is not None:
-            return home.expanduser().resolve()
-        try:
-            return Path(cast(_API, ConanAPI()).home_folder).resolve()
-        except (ConanException, OSError) as error:
-            raise CatalogError(f"Conan could not resolve its default home: {error}") from error
 
     def _configured_remote(self, requested: str | None) -> str | None:
         if requested is not None:

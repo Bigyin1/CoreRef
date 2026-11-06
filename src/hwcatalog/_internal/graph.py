@@ -32,7 +32,7 @@ class ResolvedConanGraph:
 
     def result(self, root: LocalRecord | Record, dependencies: tuple[Record, ...]) -> GraphData:
         package = self.native.root.conanfile
-        if self._logical(package) != str(root.ref):
+        if str(package.ref) != str(root.ref):
             raise InvalidPackage("Conan graph root differs from the requested reference")
         self._validate_package(package)
         records = {str(record.ref): record for record in (root, *dependencies)}
@@ -44,17 +44,13 @@ class ResolvedConanGraph:
     def _edges(self, records: Mapping[str, LocalRecord | Record]) -> tuple[Dependency, ...]:
         edges: set[Dependency] = set()
         for package in (self.native.root.conanfile, *self._packages):
-            source = self._logical(package)
+            source = str(package.ref)
             for target in package.dependencies.direct_host.values():
-                destination = self._logical(target)
+                destination = str(target.ref)
                 if source not in records or destination not in records:
                     raise InvalidPackage("Conan graph contains an unknown endpoint")
                 edges.add(Dependency(records[source].ref, records[destination].ref))
         return tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
-
-    @staticmethod
-    def _logical(package: NativePackage) -> str:
-        return package.ref.repr_notime().split("#", 1)[0]
 
     @staticmethod
     def _validate_package(package: NativePackage) -> None:
