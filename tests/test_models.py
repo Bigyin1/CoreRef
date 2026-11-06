@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import dataclass
 from enum import StrEnum
 
 import pytest
@@ -28,7 +28,7 @@ def test_minimal_record(*, catalog: Catalog) -> None:
     assert (
         Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog) == record
     )
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(AttributeError):
         record.payload = 1  # type: ignore[misc]
 
 

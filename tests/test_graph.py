@@ -1,6 +1,5 @@
 """Each project description has its own resolver and lockfile scope."""
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,7 +25,9 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
     right = Graph(
         catalog,
         local_record(
-            replace(root, ref=Ref(**(root.ref.to_dict() | {"component": "other"}), catalog=catalog))
+            Record(
+                Ref(**(root.ref.to_dict() | {"component": "other"}), catalog=catalog), root.payload
+            )
         ),
         dependencies=(second.ref,),
     )

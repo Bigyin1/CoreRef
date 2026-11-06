@@ -193,7 +193,7 @@ def test_requirements_and_scm_share_one_exported_conandata(
     recipe = catalog._package(parent.ref).recipe()
     record = json.loads((recipe.directory / "record.json").read_text())
     data = yaml.safe_load((recipe.directory / "conandata.yml").read_text())
-    assert record["format"] == 6
+    assert record["format"] == 7
     assert set(record) == {"format", "ref", "payload"}
     assert not (recipe.directory / "hwcatalog.json").exists()
     assert set(data) == {"requires", "scm"}

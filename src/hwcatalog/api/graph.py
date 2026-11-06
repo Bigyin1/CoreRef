@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import networkx as nx
 
 from .errors import CatalogError, InvalidPackage
-from .records import LocalRecord, Record, Ref
+from .records import InstalledRecord, LocalRecord, Record, Ref
 
 # NetworkX generics are provided by stubs, not its runtime classes.
 if TYPE_CHECKING:
@@ -88,11 +88,11 @@ class Graph:
         self._lockfile = self._package.create_lockfile(output)
         return self._lockfile
 
-    def get(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
+    def get(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
         """Fetch selected package files together without requesting SCM sources."""
         return self._package.get(refs)
 
-    def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
+    def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
         """Fetch selected published dependencies in one install and reuse this snapshot."""
         return self._package.get_with_sources(refs)
 

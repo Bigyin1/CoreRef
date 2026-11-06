@@ -1,6 +1,5 @@
 """Resolve unpublished consumers using the native Conan graph API."""
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -58,7 +57,7 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     old = catalog.publish(local_record(old))
     current = catalog.publish(local_record(current))
     root = catalog.publish(local_record(root), dependencies=(old.ref,))
-    local = replace(root, payload={"local": True})
+    local = Record(root.ref, {"local": True})
     graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
     assert graph.dependencies == (Dependency(root.ref.without_revision(), current.ref),)

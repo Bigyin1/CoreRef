@@ -33,24 +33,28 @@ SDK не клонирует Git самостоятельно. Публикаци
 namespace.component[_subcomponent].view.type/version[#revision], например soc.cpu_alu.be.lib-lef/4.0.
 Первый `_` отделяет часть; component не содержит `_`, пустой subcomponent недопустим.
 
-LocalRecord.to_json() готовит record.json с format=6, ref/payload и списком имён файлов.
+LocalRecord.to_json() готовит record.json с format=7, ref/payload и списком имён файлов.
 Пути исходного checkout и файлов издателя туда не попадают. Временный Jinja-рецепт
 при наличии зависимостей сначала используется в одном graph info с проектным lockfile.
 Точные прямые requirements из нативного графа записываются в публикуемый рецепт,
 после чего выполняются один export-pkg и upload. Без зависимостей graph info не нужен. Отдельного файла публикации и ручного
-conanfile.py не требуется. Files копируются под artifacts/.
+conanfile.py не требуется. Files копируются в staging artifacts/; SHA-256 записываются
+в record.json.file_digests. Рецепт экспортирует только метаданные, а package() копирует
+байты из временной source_folder в бинарный пакет. Поэтому чтение рецептов не получает
+артефакты; изменение файла всё ещё меняет RREV через его хеш.
 Начальный conandata.yml также генерируется Jinja-шаблоном и содержит requires.
 Во время export() Git-helper Conan добавляет scm, сохраняя зависимости.
 Рецепт получает их через self.conan_data в requirements(); отдельной копии списка нет.
 
 ## Готовые пути
 
-Ref.get() заполняет Record.files путями доступных файлов пакета.
+Ref.info() возвращает Record с file_names и has_source без установки файлов.
+Ref.get() возвращает InstalledRecord с путями доступных файлов пакета.
 Ref.get_with_sources() дополнительно передаёт scoped-конфигурацию
 `tools.build:download_source=True` в Conan install. Встроенный source() вызывает
 Git(self, "source").checkout_from_conandata_coordinates() и возвращает точный commit
 из GitLab. Git-helper сам создаёт поддиректорию source; явного mkdir в рецепте нет.
-Record.source содержит Path checkout. URL/commit остаются во внутренних метаданных Conan.
+InstalledRecord.source содержит Path checkout. URL/commit остаются во внутренних метаданных Conan.
 Без запроса source путь равен None. Повторное получение использует cache Conan.
 
 Внешние ресурсы, например NFS-пути, flow может описать строками в payload.
@@ -59,7 +63,7 @@ SDK сохраняет эти данные как JSON и не проверяе�
 Обёрток ресурсов, URI-провайдеров, digest и собственного Git-кэша нет.
 
 Оба вида записей предоставляют paths напрямую. Публичного materialize нет:
-внутренний код получения данных заполняет поля до возврата Record. Копировать cache
+внутренний код получения данных создаёт InstalledRecord с готовыми путями. Копировать cache
 для этого не нужно. Для изменений данные копируются в рабочую директорию потребителя.
 
 ## Проектные графы

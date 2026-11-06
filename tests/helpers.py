@@ -7,7 +7,7 @@ from pathlib import Path
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import JSON, LocalRecord, Record, Ref
+from hwcatalog.api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
 
 
 class ProjectTypeId(StrEnum):
@@ -89,5 +89,5 @@ def local_record(
         record.ref.without_revision(),
         record.payload,
         source,
-        record.files if files is None else files,
+        (record.files if isinstance(record, InstalledRecord) else {}) if files is None else files,
     )

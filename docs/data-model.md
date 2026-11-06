@@ -17,21 +17,24 @@ Source — Path текущего checkout, files — именованные пу
 Flow формирует этот объект до публикации
 и передаёт в Graph. Локальный корень не должен извлекаться из Conan.
 
-Record представляет полученный пакет с теми же полями. Files уже содержит локальные
-пути. Координаты Git остаются во внутренних метаданных Conan. Source заполняется
-по запросу исходников в Ref.get_with_sources(), до этого равен None.
-Физические files/source могут различаться между cache и исключены из сравнения Record.
-Ref и payload сохраняют сравнение по содержимому.
+Record — метаданные реестра: ref, payload, file_names и has_source.
+Путей files/source в нём нет; чтение метаданных не получает бинарные файлы.
+InstalledRecord наследует Record и добавляет files и необязательный source.
+Все объявленные файлы уже доступны в Conan cache. Исходники получают отдельно:
+has_source=True/source=None означает, что они ещё не запрошены; sources_ready
+истинен после получения либо при отсутствии SCM.
 
-У Record нет публичной materialize. Внутренний код получения данных заполняет files
-и source до возврата объекта пользователю. У LocalRecord загрузки также нет:
-он уже описывает доступные рабочие данные. Классы ресурсов и обёртки путей удалены.
+Record и InstalledRecord — обычные классы со свойствами только для чтения,
+без PostInit и object.__setattr__. InstalledRecord принимает готовый Record и
+использует его неизменяемый payload повторно. Равенство и хеш основаны на метаданных;
+физические пути и различие типа не меняют идентичность пакета.
 
-LocalRecord.to_json() подготавливает format/ref/payload и имена files.
-Пути рабочего checkout и исходных файлов в пакет не попадают. SCM фиксирует Conan.
-Record.from_json(data, *, catalog) восстанавливает inspection-снимок с локальными путями.
-Внутренний StoredRecipe читает метаданные пакета из обязательной директории рецепта.
-Record.to_dict() даёт inspection-представление с локальными путями.
+LocalRecord.to_json() готовит format=7/ref/payload/имена files. После копирования
+файлов LocalRecipe записывает SHA-256 в file_digests. Артефакты не экспортируются
+в рецепт, а копируются package() из временной source_folder в бинарный пакет.
+Хеши сохраняют зависимость RREV от содержимого; пути издателя не экспортируются.
+Record.to_dict() выдаёт метаданные, InstalledRecord.to_dict() добавляет пути.
+Record.from_json() восстанавливает соответствующий вид inspection-снимка.
 
 Payload — произвольное JSON-значение или пользовательский JSONSerializable с to_json().
 Тип JSON и протокол JSONSerializable импортируются из hwcatalog.api.records
@@ -52,7 +55,7 @@ ordered_refs(root, stop_at=()) и ordered_records(root, stop_at=()) возвра
 выбранные узлы в листья. Общие зависимости других ветвей сохраняются. Порядок
 для одинаковых параметров кэшируется в пределах Graph.
 
-Record и Dependency — frozen dataclass значений. Ref — обычный класс
+Dependency — frozen dataclass значений. Ref — обычный класс
 с публичными координатами только для чтения. Аргумент catalog сохраняется только
 в _catalog; InitVar и второго поля catalog нет. Контекст не входит в равенство,
 хеш, repr и сериализацию. Новый Ref с изменёнными координатами создают через
@@ -76,7 +79,7 @@ subcomponent означает отсутствие ограничения; ст�
 становится cpu_alu. matches(record) и select(records) сохраняют точную AND-семантику.
 
 
-Формат пакета 6 хранит маркер format в record.json. Это версия нашего формата записи,
+Формат пакета 7 хранит маркер format в record.json. Это версия нашего формата записи,
 не версия Conan. hwcatalog.json больше не создаётся. В conandata.yml.requires находится
 единственный список прямых зависимостей с revisions; метод requirements() передаёт
 его Conan через self.requires(). SCM-координаты Conan дописывает в conandata.yml.scm,

@@ -28,16 +28,19 @@ BE-представление, и его части. `subcomponent="alu"` суж
 Без lockfile незакреплённые зависимости проверяются на настроенном remote;
 lockfile сохраняет прежний выбор. Существующий Graph не меняет revisions после публикаций.
 
-В API разделены два состояния:
+В API разделены три роли:
 
-- `LocalRecord` — описание текущего проекта с готовыми локальными путями; его формирует flow.
-- `Record` — представление пакета из реестра с путями файлов Conan cache и, по запросу, исходников.
+- `LocalRecord` — изменяемый вход проекта: ref без собственной revision, payload,
+  рабочий Git-каталог source и локальные файлы files для публикации.
+- `Record` — метаданные реестра: ref, payload, file_names и has_source. Путей files/source нет.
+- `InstalledRecord` — полученный пакет: те же метаданные, все упакованные files
+  с путями в Conan cache и, по запросу, Git source.
 
-Оба содержат `ref`, `payload`, `source`, `files`. Source — Path исходников либо None,
-files — словарь имён упакованных файлов и их локальных Path. Внешние ресурсы, включая
-NFS-пути, описывает пользовательский payload; их формат и проверку определяет flow.
-Координаты Git хранит Conan во внутренних метаданных рецепта; публичного поля scm нет.
-Классов GitResource, LocatedResource и обёрток материализованных путей нет.
+Record и InstalledRecord — обычные классы со свойствами только для чтения.
+Конструктор Record отделяет и замораживает payload, InstalledRecord принимает
+готовые метаданные и пути. PostInit и object.__setattr__ не используются.
+Внешние ресурсы, включая NFS-пути, описывает пользовательский payload;
+их формат и проверку определяет flow. SCM URL/commit остаются в Conan.
 
 ```python
 from pathlib import Path
@@ -55,6 +58,8 @@ local = LocalRecord(
     files={"report": Path("/work/cpu/out/report.txt")},
 )
 published = catalog.publish(local)
+metadata = published.ref.info()
+print(metadata.file_names, metadata.has_source)
 record = published.ref.get_with_sources()
 print(record.files["report"], record.source, record.payload)
 implementations = published.ref.find_dependents(
@@ -73,13 +78,20 @@ print(project.records, project.dependencies)
 Conan: SDK не клонирует Git самостоятельно. Файлы files копируются в пакет;
 содержимое payload сохраняется как JSON.
 
-`Ref.get()` возвращает готовый Record, заполняя files путями скачанных файлов.
-`get_with_sources()` дополнительно получает исходники из GitLab штатным source() Conan
-и заполняет Record.source. При обычном get() source=None.
-Публичного materialize у Ref, Record и LocalRecord нет. Для зависимостей готового графа
-Graph.get(refs) получает файлы выбранных пакетов одной установкой без запроса SCM,
-а Graph.get_with_sources(refs) дополнительно получает их исходники;
-рабочее дерево локального корня уже доступно.
+`Ref.info()`, поиск, прямые зависимости и записи разрешённого графа возвращают
+Record без скачивания бинарных файлов или Git-исходников. Имена доступных файлов
+известны через file_names; has_source показывает, объявлены ли SCM-исходники.
+
+`Ref.get()` возвращает InstalledRecord со всеми файлами пакета; `get_with_sources()`
+дополнительно получает Git-исходники штатным source() Conan. Если has_source=True
+и source=None, исходники ещё не получены. sources_ready=True означает, что они
+получены либо пакет их не объявляет. Publish также возвращает InstalledRecord:
+созданные файлы уже находятся в бинарном пакете в cache издателя.
+
+Для готового графа Graph.get(refs) и Graph.get_with_sources(refs) возвращают
+InstalledRecord выбранных зависимостей одной установкой. Graph.records сохраняет
+Record с метаданными; результат установки возвращается отдельно. Публичного
+materialize нет; рабочее дерево LocalRecord корня уже доступно.
 
 `Graph` — обычный класс для одного описания проекта, например deps.toml. Формат файла
 и добавление найденных зависимостей определяет flow. Graph разрешается при создании и не требует
@@ -102,7 +114,12 @@ ordered_records(root, stop_at=...) позволяет flow получить за
 рецепты используются повторно, повторный запрос в пределах Graph не обращается к Conan.
 
 LocalRecord.to_json() готовит record.json: format, ref без собственной revision, payload и имена files.
-Маркер format=6 относится к нашему формату записи, а не к Conan или lockfile.
+Маркер format=7 относится к нашему формату записи, а не к Conan или lockfile.
+При подготовке файлов LocalRecipe добавляет file_digests — SHA-256 содержимого
+каждого файла. В экспорт рецепта входят только метаданные: артефакты остаются
+во временной staging-директории и через package() копируются в бинарный пакет.
+Их имена и хеши влияют на RREV, поэтому изменение содержимого создаёт новую revision,
+а локальный путь издателя на неё не влияет. Поиск не скачивает артефакты.
 Зависимости хранятся только в conandata.yml.requires; requirements() читает их
 через self.conan_data. SCM-координаты Conan добавляет в тот же conandata.yml.
 Отдельных hwcatalog.json и has_source нет: наличие исходников определяется по scm.
@@ -110,7 +127,8 @@ conanfile.py и начальный conandata.yml генерируются Jinja-
 Рабочие source/files-пути туда не попадают. Record.from_json(data, *, catalog) восстанавливает
 inspection-снимок с явными путями. Метаданные пакета читает внутренний StoredRecipe
 с обязательной директорией рецепта. Record.to_dict() предназначен
-для просмотра готовых данных, включая пути cache; отдельного Record.to_json() нет.
+для просмотра метаданных; InstalledRecord.to_dict() добавляет пути cache.
+Record.from_json() восстанавливает оба вида снимков; отдельного to_json() у них нет.
 
 Публичные модули находятся прямо в hwcatalog.api: catalog, graph, records, query,
 errors. Тип JSON и протокол JSONSerializable находятся в records.

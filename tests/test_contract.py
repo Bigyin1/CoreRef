@@ -1,6 +1,5 @@
 """The public contract contains immutable records and exact dependencies."""
 
-from dataclasses import replace
 from itertools import pairwise
 from typing import cast
 
@@ -28,7 +27,7 @@ def test_get_returns_published_records_and_reports_missing(catalog: Catalog) -> 
 def test_new_revision_preserves_previously_published_records(catalog: Catalog) -> None:
     original = release("existing", catalog=catalog)
     original = catalog.publish(local_record(original))
-    changed = catalog.publish(local_record(replace(original, payload={"changed": True})))
+    changed = catalog.publish(local_record(Record(original.ref, {"changed": True})))
     assert changed.ref != original.ref
     assert catalog.search() == (changed,)
     assert Ref(**original.ref.to_dict(), catalog=catalog).get() == original

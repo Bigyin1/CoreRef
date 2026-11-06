@@ -87,9 +87,10 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
     local.source = None
     LocalRecipe(local).write(tmp_path / "downloaded")
     record = StoredRecipe(tmp_path / "downloaded", local.ref, reference=str(local.ref)).record
-    assert record.files == {"timing/cpu.lib": tmp_path / "downloaded/artifacts/timing/cpu.lib"}
+    assert record.file_names == ("timing/cpu.lib",)
+    assert not hasattr(record, "files")
     assert record.payload == local.payload
-    assert record.source is None
+    assert not record.has_source
 
 
 @pytest.mark.parametrize("field", ["source", "source_path", "scm"])

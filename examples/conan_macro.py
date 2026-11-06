@@ -41,14 +41,15 @@ def main() -> None:
         ):
             print(result.ref)
             print(result.to_dict())
+            installed = result.ref.get()
             dependencies = tuple(record.ref for record in result.ref.dependencies())
             graph = Graph(
                 catalog,
-                LocalRecord(result.ref.without_revision(), result.payload, files=result.files),
+                LocalRecord(result.ref.without_revision(), result.payload, files=installed.files),
                 dependencies=dependencies,
             )
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
-            print(result.ref.get().files["cpu.lib"].read_text().strip())
+            print(installed.files["cpu.lib"].read_text().strip())
 
 
 if __name__ == "__main__":

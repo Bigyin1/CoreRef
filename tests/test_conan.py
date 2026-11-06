@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -291,7 +290,7 @@ def test_latest_and_explicit_revisions_are_independently_accessible(
     original = record(catalog=conan_catalog)
     original = conan_catalog.publish(local_record(original))
     folder = tmp_path / "replacement"
-    LocalRecipe(local_record(replace(original, payload={"different": True}))).write(folder)
+    LocalRecipe(local_record(Record(original.ref, {"different": True}))).write(folder)
     conan_catalog._client.create_lockfile(folder)
     conan_catalog._client.upload(conan_catalog._client.export(folder))
     assert original.ref.get().ref == original.ref

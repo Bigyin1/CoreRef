@@ -7,7 +7,7 @@
 | Метод | Контракт |
 |---|---|
 | search(query=SearchQuery(), *, all_revisions=False) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
-| publish(record: LocalRecord, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает Record |
+| publish(record: LocalRecord, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает InstalledRecord |
 
 Source и files принадлежат LocalRecord. Source — рабочий Git checkout, files —
 карта относительных имён внутри пакета и абсолютных локальных Path. Внешние ресурсы
@@ -25,8 +25,9 @@ namespace.component[_subcomponent].view.type/version[#revision]. Приватн�
 
 | Метод Ref | Контракт |
 |---|---|
-| get() | Record с метаданными и доступными файлами пакета; source=None |
-| get_with_sources() | Дополнительно получает Git-исходники средствами Conan, если они объявлены |
+| info() | Record с метаданными без получения бинарных файлов и Git |
+| get() | InstalledRecord с доступными файлами пакета; source=None |
+| get_with_sources() | InstalledRecord с файлами и Git-исходниками, если они объявлены |
 | dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
 | find_dependents(*, candidates, transitive=True) | Кандидаты, зависящие от точного Ref |
 | to_dict() | Координаты, включая revision, если она задана |
@@ -36,24 +37,38 @@ namespace.component[_subcomponent].view.type/version[#revision]. Приватн�
 использует нативный граф. Сам Ref исключается. Отсутствующий пакет вызывает NotFound.
 Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все семь координат, включая revision.
 
-Record — представление уже полученного пакета: ref, payload, source (Path | None),
-files (Mapping[str, Path]).
-URL/commit остаются внутри Conan; отдельного поля или класса Git-ресурса нет.
+Record содержит только метаданные: ref, payload, file_names (tuple[str, ...])
+и has_source (bool). Его возвращают info(), search(), dependencies(), find_dependents()
+и опубликованная часть Graph.records. Files и source отсутствуют: поиск не требует
+скачивания содержимого. Has_source вычисляется из SCM-данных Conan, а не дублируется
+в переносимом record.json.
 
-Record.from_json(data, *, catalog) восстанавливает inspection-снимок с явными путями
-source/files. Метаданные скачанного пакета читает внутренний StoredRecipe: он требует
-директорию рецепта и проверяет метаданные вместе с кодом рецепта.
-Record.to_dict() возвращает данные для просмотра или CLI. Публичных to_json и materialize
-у Record нет; получение исходников выполняется через Ref.get_with_sources().
-Физические пути files/source не участвуют в равенстве опубликованных записей:
-один пакет может находиться в разных cache. Ref и payload сравниваются по содержимому.
+InstalledRecord наследует Record и добавляет files (Mapping[str, Path]) и
+source (Path | None). Его возвращают publish(), get() и get_with_sources().
+Конструктор InstalledRecord(record, *, files=None, source=None) принимает готовые
+метаданные: все объявленные file_names должны присутствовать в files; source
+допускается только для пакета с has_source=True. Без файлов files — пустой словарь.
 
-LocalRecord содержит ref, payload, source, files. Его создаёт flow из текущего
-проекта. LocalRecord.to_json() — подготовка переносимых метаданных для публикации:
-source и исходные пути files исключаются, сохраняются имена файлов и маркер format=6.
-Зависимости и SCM-координаты хранятся только в conandata.yml; Conan получает зависимости
-через requirements(), а SDK читает прямые связи без разрешения полного графа.
-У локальной записи нет получения или материализации данных.
+При has_source=True и source=None исходники ещё не получены. Sources_ready=True
+означает, что source получен либо исходники не объявлены. Get_with_sources() получает
+их штатными средствами Conan. URL/commit остаются внутри Conan.
+
+Record и InstalledRecord — обычные классы с приватными полями и свойствами только
+для чтения. Payload отделяется от входа в конструкторе Record; готовые неизменяемые
+метаданные используются повторно при создании InstalledRecord. PostInit и ручного
+object.__setattr__ нет. Равенство и хеш зависят от метаданных, а не от типа представления
+и физических путей: metadata и установленная запись одного пакета равны.
+
+To_dict() выдаёт метаданные; InstalledRecord.to_dict() дополнительно всегда содержит
+словарь files и при наличии — source. Record.from_json(data, *, catalog) восстанавливает
+Record или InstalledRecord по этим полям. Материализации на экземпляре и to_json нет.
+
+LocalRecord содержит ref, payload, source, files и остаётся изменяемым входом flow.
+Его source — рабочий Git checkout, files — исходные файлы пользователя. Собственная
+revision не задана. LocalRecord.to_json() готовит переносимый record.json с format=7,
+логическим ref, payload и именами файлов. LocalRecipe.copy_files() добавляет SHA-256
+в file_digests: хеши попадают в рецепт и влияют на RREV, содержимое — только в бинарный
+пакет. Полученные зависимости и SCM сохраняются в conandata.yml.
 
 ## SearchQuery
 
@@ -88,8 +103,8 @@ Graph без lockfile, затем вызывают create_lockfile(path).
 | requirements | Прямые зависимости с revisions, выбранными Conan |
 | records | LocalRecord корня и Record всех опубликованных зависимостей |
 | dependencies | Все рёбра Dependency(source, target) |
-| get(refs) | Получает выбранные Record с файлами одной установкой без запроса SCM |
-| get_with_sources(refs) | Получает выбранные Record с файлами и SCM-исходниками одной установкой |
+| get(refs) | Получает выбранные InstalledRecord с файлами одной установкой без запроса SCM |
+| get_with_sources(refs) | Получает выбранные InstalledRecord с файлами и SCM-исходниками одной установкой |
 | create_lockfile(path=None) | Сохраняет уже разрешённый граф через Conan, запоминает путь и возвращает Path |
 
 catalog, record, records, dependencies, requirements, networkx и lockfile доступны
@@ -109,7 +124,7 @@ Conan проверяет циклы и конфликты requirements. Разр
 get(refs) и get_with_sources(refs) принимают только опубликованные зависимости этого Graph.
 Локальный корень уже доступен. Дубликаты Ref убираются с сохранением порядка;
 пустой список и повторные запросы полученных записей не запускают Conan.
-Graph.records сохраняет исходные метаданные, полученные Record возвращаются отдельно.
+Graph.records сохраняет Record с метаданными, полученные InstalledRecord возвращаются отдельно.
 Если сначала получены только файлы, get_with_sources() добавляет исходники одной
 следующей установкой. После этого get() возвращает уже готовую запись с source;
 полученные данные не отбрасываются.

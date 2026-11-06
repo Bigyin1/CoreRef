@@ -11,7 +11,7 @@ from hwcatalog._internal.types import NativeGraph
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import LocalRecord, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
 def test_sources_and_files_are_fetched_once_without_project_lockfile(
@@ -58,7 +58,9 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
     )
     assert graph.get_with_sources((leaf.ref,))[0] is fetched[1]
     assert graph.get_with_sources(()) == ()
-    assert all(record.source is None for record in graph.records)
+    assert all(
+        not hasattr(record, "source") for record in graph.records if isinstance(record, Record)
+    )
     assert "hwcatalog-conan-batch-" not in capsys.readouterr().err
     assert len(calls) == 1 and calls[0][0] == "install"
     assert not Path(calls[0][calls[0].index("--lockfile") + 1]).exists()

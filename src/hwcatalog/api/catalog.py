@@ -6,7 +6,7 @@ from .._internal.client import ConanClient
 from .._internal.package import LocalPackage, StoredPackage
 from .._internal.references import from_conan_reference
 from .query import SearchQuery
-from .records import LocalRecord, Record, Ref
+from .records import InstalledRecord, LocalRecord, Record, Ref
 
 
 class Catalog:
@@ -33,7 +33,7 @@ class Catalog:
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
-    ) -> Record:
+    ) -> InstalledRecord:
         """Publish one package from a detached snapshot of the local description."""
         self._client.require_remote()
         return self._local_package(record, dependencies, lockfile).publish()

@@ -20,11 +20,13 @@ def test_construction_snapshots_mutable_project(catalog: Catalog, tmp_path: Path
     )
     project = Graph(catalog, local)
     first = project.records[0]
+    assert isinstance(first, LocalRecord)
     assert payload.calls == 1
     items.append("changed")
     files.clear()
     local.source = tmp_path
     second = Graph(catalog, local).records[0]
+    assert isinstance(second, LocalRecord)
     assert payload.calls == 2
     assert first is not local and second is not local
     assert first.payload == {"items": ("original",)}

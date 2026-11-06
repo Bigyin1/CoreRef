@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Protocol, Self, cast, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
 
 from frozendict import deepfreeze, frozendict
 
@@ -155,11 +155,15 @@ class Ref:
         coordinates.pop("revision", None)
         return Ref(**coordinates, catalog=self._catalog)
 
-    def get(self) -> Record:
+    def info(self) -> Record:
+        """Read metadata without installing package files or Git sources."""
+        return self._catalog._package(self).info()
+
+    def get(self) -> InstalledRecord:
         """Get exact metadata and files; an unpinned Ref selects the latest revision."""
         return self._catalog._package(self).get()
 
-    def get_with_sources(self) -> Record:
+    def get_with_sources(self) -> InstalledRecord:
         """Get package files and its Git checkout when the recipe declares one."""
         return self._catalog._package(self).get_with_sources()
 
@@ -181,7 +185,7 @@ class Ref:
 class LocalRecord:
     """Project metadata with already available source and package file paths."""
 
-    _format: ClassVar[int] = 6
+    _format: ClassVar[int] = 7
     ref: Ref
     payload: JSON | JSONSerializable = None
     source: Path | None = None
@@ -202,52 +206,135 @@ class LocalRecord:
         return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-@dataclass(frozen=True)
 class Record:
-    """A downloaded package view with local artifact paths and optional fetched source."""
+    """Immutable package metadata, without paths to installed contents."""
 
-    ref: Ref
-    payload: JSON | JSONSerializable = None
-    source: Path | None = field(default=None, compare=False)
-    files: Mapping[str, Path] = field(default_factory=dict, compare=False)
-
-    def __post_init__(self) -> None:
-        payload = self.payload
+    def __init__(
+        self,
+        ref: Ref,
+        payload: JSON | JSONSerializable = None,
+        *,
+        file_names: tuple[str, ...] = (),
+        has_source: bool = False,
+    ) -> None:
         if isinstance(payload, JSONSerializable):
             payload = json.loads(payload.to_json())
-        object.__setattr__(
-            self, "payload", deepfreeze(json.loads(json.dumps(payload, allow_nan=False)))
+        self._ref = ref
+        self._payload: JSON = deepfreeze(json.loads(json.dumps(payload, allow_nan=False)))
+        self._file_names = tuple(sorted(file_names))
+        self._has_source = has_source
+
+    @property
+    def ref(self) -> Ref:
+        return self._ref
+
+    @property
+    def payload(self) -> JSON:
+        return self._payload
+
+    @property
+    def file_names(self) -> tuple[str, ...]:
+        return self._file_names
+
+    @property
+    def has_source(self) -> bool:
+        return self._has_source
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(ref={self.ref!r})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Record):
+            return NotImplemented
+        return (self.ref, self.payload, self.file_names, self.has_source) == (
+            other.ref,
+            other.payload,
+            other.file_names,
+            other.has_source,
         )
-        object.__setattr__(self, "files", frozendict(self.files))
+
+    def __hash__(self) -> int:
+        return hash((self.ref, self.payload, self.file_names, self.has_source))
 
     def to_dict(self) -> dict[str, JSON]:
-        """Expose downloaded metadata and paths, for inspection or CLI output."""
-        # __post_init__ has already converted consumer objects into frozen JSON.
-        payload = cast(JSON, self.payload)
-        value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
-        if self.source is not None:
-            value["source"] = str(self.source)
-        if self.files:
-            value["files"] = {name: str(path) for name, path in self.files.items()}
-        return value
+        """Expose metadata for inspection or CLI output."""
+        return {
+            "ref": self.ref.to_dict(),
+            "payload": self.payload,
+            "file_names": self.file_names,
+            "has_source": self.has_source,
+        }
 
-    @classmethod
-    def from_json(cls, payload: str, *, catalog: Catalog) -> Self:
-        """Restore an inspection snapshot with explicit local paths."""
+    @staticmethod
+    def from_json(payload: str, *, catalog: Catalog) -> Record:
+        """Restore a metadata or installed snapshot, according to its fields."""
         value = json.loads(payload)
         if not isinstance(value, dict):
             raise ValueError("Record must be a JSON object")
         if "scm" in value:
             raise ValueError("Git source must be stored in Conan SCM metadata")
-        files = value.get("files", {})
+        record = Record(
+            Ref(**value["ref"], catalog=catalog),
+            value["payload"],
+            file_names=tuple(value.get("file_names", ())),
+            has_source=value.get("has_source", False),
+        )
+        if "files" not in value:
+            if "source" in value:
+                raise ValueError("An installed snapshot must include its files mapping")
+            return record
+        files = value["files"]
         if not isinstance(files, dict):
             raise ValueError("Snapshot files must be a path dictionary")
-        return cls(
-            ref=Ref(**value["ref"], catalog=catalog),
-            payload=value["payload"],
+        return InstalledRecord(
+            record,
             source=Path(value["source"]) if value.get("source") else None,
             files={name: Path(path) for name, path in files.items()},
         )
 
 
-__all__ = ["JSON", "JSONSerializable", "LocalRecord", "Record", "Ref"]
+class InstalledRecord(Record):
+    """Package metadata with all packaged files available and optional fetched sources."""
+
+    def __init__(
+        self,
+        record: Record,
+        *,
+        files: Mapping[str, Path] | None = None,
+        source: Path | None = None,
+    ) -> None:
+        # Metadata is already detached and immutable; reuse it without serializing again.
+        self._ref = record.ref
+        self._payload = record.payload
+        self._file_names = record.file_names
+        self._has_source = record.has_source
+        self._files = frozendict(files or {})
+        self._source = source
+        if set(self.file_names) != set(self.files):
+            raise ValueError("Installed files must match the declared file names")
+        if source is not None and not self.has_source:
+            raise ValueError("The package declares no SCM source")
+
+    @property
+    def source(self) -> Path | None:
+        return self._source
+
+    @property
+    def files(self) -> Mapping[str, Path]:
+        return self._files
+
+    @property
+    def sources_ready(self) -> bool:
+        """Whether sources are available or the package declares none."""
+        return not self.has_source or self.source is not None
+
+    def to_dict(self) -> dict[str, JSON]:
+        """Include paths only in installed inspection snapshots."""
+        value = super().to_dict()
+        value["files"] = {name: str(path) for name, path in self.files.items()}
+        if self.source is not None:
+            value["source"] = str(self.source)
+        return value
+
+
+__all__ = ["JSON", "InstalledRecord", "JSONSerializable", "LocalRecord", "Record", "Ref"]

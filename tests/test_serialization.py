@@ -1,7 +1,6 @@
 """The stored envelope is typed; resources and metadata are opaque JSON."""
 
 import json
-from dataclasses import replace
 
 import pytest
 
@@ -16,15 +15,15 @@ def test_roundtrip_preserves_content_and_nested_immutability(*, catalog: Catalog
         "user-owned reference",
         None,
     )
-    a = replace(
-        release("source", catalog=catalog),
+    a = Record(
+        release("source", catalog=catalog).ref,
         payload={
             "resources": resources,
             "numbers": [1, 1.0, -0.0, False, True, 2**100],
             "unicode": "Содержимое 💡",
         },
     )
-    execution = replace(run("run", catalog=catalog), payload=resources)
+    execution = Record(run("run", catalog=catalog).ref, resources)
     original = tuple(record for record in (a, execution))
     records = tuple(
         type(record).from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)

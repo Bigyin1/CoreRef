@@ -6,19 +6,24 @@ from pathlib import Path
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.records import LocalRecord, Record, Ref
+from hwcatalog.api.records import InstalledRecord, LocalRecord, Record, Ref
 
 
 def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Catalog) -> None:
     paths = {"lib": str(tmp_path / "cpu.lib")}
-    record = Record(
-        Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
-        payload={"external": paths},
+    record = InstalledRecord(
+        Record(
+            Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+            payload={"external": paths},
+            file_names=("report",),
+            has_source=True,
+        ),
         source=tmp_path / "source",
         files={"report": tmp_path / "report.txt"},
     )
     paths.clear()
     restored = Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
+    assert isinstance(restored, InstalledRecord)
     assert restored == record
     assert restored.payload == {"external": {"lib": str(tmp_path / "cpu.lib")}}
     assert restored.files["report"] == tmp_path / "report.txt"
@@ -35,7 +40,10 @@ def test_package_file_input_validation_belongs_to_caller(
         Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), files={name: path}
     )
     assert record.files == {name: path}
-    assert Record(record.ref, files=record.files).files == record.files
+    assert (
+        InstalledRecord(Record(record.ref, file_names=(name,)), files=record.files).files
+        == record.files
+    )
 
 
 @pytest.mark.parametrize("paths", [{"lib": "relative/path"}, {"": "/unmounted/data"}])
