@@ -121,6 +121,8 @@ class ConanClient:
         try:
             graph.report_graph_error()
         except GraphMissingError as exc:
+            if isinstance(exc.__context__, (NotFoundException, ConanReferenceDoesNotExistInDB)):
+                raise NotFound(str(exc)) from exc
             if "not found" in exc.missing_error.lower():
                 raise NotFound(str(exc)) from exc
             raise

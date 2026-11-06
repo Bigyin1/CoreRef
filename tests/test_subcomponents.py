@@ -64,6 +64,8 @@ def test_underscore_is_reserved_as_the_component_separator(catalog: Catalog) -> 
         (SearchQuery(component="cpu", subcomponent="alu"), "*.cpu_alu.*.*/*#*"),
         (SearchQuery(subcomponent="alu"), "*.*_alu.*.*/*#*"),
         (SearchQuery(component="cpu"), "*.cpu*.*.*/*#*"),
+        (SearchQuery(component="cpu", subcomponent=None), "*.cpu.*.*/*#*"),
+        (SearchQuery(subcomponent=None), "*.*.*.*/*#*"),
         (SearchQuery(component="cpu_alu"), None),
         (SearchQuery(subcomponent=""), None),
         (SearchQuery(subcomponent="alu*"), None),
@@ -92,6 +94,12 @@ def test_component_search_includes_parts_but_excludes_prefix_neighbours(catalog:
     assert catalog.search(SearchQuery(component="cpu", subcomponent="alu")) == (records[1],)
     assert catalog.search(SearchQuery(subcomponent="cache")) == (records[2],)
     assert SearchQuery(subcomponent="alu").select(records) == (records[1],)
+    with patch.object(
+        catalog._client, "download_recipe", wraps=catalog._client.download_recipe
+    ) as download:
+        assert catalog.search(SearchQuery(component="cpu", subcomponent=None)) == (records[0],)
+        assert download.call_count == 1
+    assert SearchQuery(subcomponent=None).select(records) == (records[0], records[3])
 
 
 def test_graph_lockfile_and_batch_files_keep_parts_distinct(

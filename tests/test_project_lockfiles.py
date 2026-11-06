@@ -9,7 +9,7 @@ from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, InvalidPackage
 from hwcatalog.api.graph import Dependency, Graph
 from hwcatalog.api.records import LocalRecord, Record, Ref
-from tests.helpers import local_record, resolve_published
+from tests.helpers import local_record
 
 
 def test_project_lock_pins_publication_and_installation(
@@ -28,8 +28,10 @@ def test_project_lock_pins_publication_and_installation(
     )
     lockfile = project.create_lockfile(tmp_path / "project/conan.lock")
     original_lock = lockfile.read_bytes()
+    local = project.record
+    assert isinstance(local, LocalRecord)
     record = catalog.publish(
-        replace(project.record, files={"cpu.lib": artifact}),
+        replace(local, files={"cpu.lib": artifact}),
         dependencies=project.requirements,
         lockfile=lockfile,
     )
@@ -42,7 +44,8 @@ def test_project_lock_pins_publication_and_installation(
     assert "conan.lock" not in installed.files
     assert lockfile.read_bytes() == original_lock
     assert project.create_lockfile() == lockfile
-    assert resolve_published(catalog, project.record.ref, lockfile=lockfile).records
+    record.ref.graph().create_lockfile(tmp_path / "stored.lock")
+    assert record.ref.graph(lockfile=tmp_path / "stored.lock").records
 
 
 @pytest.mark.parametrize(
@@ -76,8 +79,10 @@ def test_conan_validates_the_supplied_project_lockfile(
         )
     else:
         lockfile.write_text("not a Conan lockfile\n")
+    local = project.record
+    assert isinstance(local, LocalRecord)
     with pytest.raises(exception):
-        Graph(catalog, project.record, dependencies=project.requirements, lockfile=lockfile)
+        Graph(catalog, local, dependencies=project.requirements, lockfile=lockfile)
     assert macro.ref.get() == macro
 
 

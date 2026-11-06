@@ -10,6 +10,7 @@ from frozendict import deepfreeze, frozendict
 
 if TYPE_CHECKING:
     from .catalog import Catalog
+    from .graph import Graph
     from .query import SearchQuery
 
 
@@ -166,6 +167,12 @@ class Ref:
     def get_with_sources(self) -> InstalledRecord:
         """Get package files and its Git checkout when the recipe declares one."""
         return self._catalog._package(self).get_with_sources()
+
+    def graph(self, *, lockfile: Path | None = None) -> Graph:
+        """Resolve this published root and its full tree without installing files."""
+        from .graph import Graph
+
+        return Graph(self._catalog, self, lockfile=lockfile)
 
     def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
         """Read immediate dependencies, optionally filtered by their coordinates."""

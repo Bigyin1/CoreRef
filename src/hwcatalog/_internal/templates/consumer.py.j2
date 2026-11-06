@@ -1,0 +1,5 @@
+from conan import ConanFile
+
+
+class CatalogConsumer(ConanFile):
+    requires = {{ requirements | pyrepr }}

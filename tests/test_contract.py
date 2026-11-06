@@ -70,7 +70,7 @@ def test_dependencies_must_already_exist(catalog: Catalog) -> None:
     with pytest.raises(InvalidPackage, match="cycle/loop"):
         catalog.publish(local_record(second), dependencies=(first.ref,))
     assert resolve_published(catalog, first.ref).dependencies == (
-        Dependency(first.ref.without_revision(), second.ref),
+        Dependency(first.ref, second.ref),
     )
 
 
@@ -83,14 +83,14 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
     right = catalog.publish(local_record(right), dependencies=(shared.ref,))
     root = catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
     edges = (
-        Dependency(root.ref.without_revision(), left.ref),
-        Dependency(root.ref.without_revision(), right.ref),
+        Dependency(root.ref, left.ref),
+        Dependency(root.ref, right.ref),
         Dependency(left.ref, shared.ref),
         Dependency(right.ref, shared.ref),
     )
     graph = resolve_published(catalog, root.ref)
     assert {record.ref for record in graph.records} == {
-        root.ref.without_revision(),
+        root.ref,
         left.ref,
         right.ref,
         shared.ref,
@@ -112,7 +112,7 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
     assert not Ref(**root.ref.to_dict(), catalog=catalog).dependencies(
         SearchQuery(component="absent")
     )
-    assert resolve_published(catalog, shared.ref).records == (local_record(shared),)
+    assert resolve_published(catalog, shared.ref).records == (shared,)
 
 
 def test_resolution_is_stable_when_new_consumers_are_published(catalog: Catalog) -> None:
@@ -140,9 +140,8 @@ def test_resolution_returns_the_entire_graph(catalog: Catalog, length: int) -> N
         catalog.publish(local_record(source), dependencies=(target.ref,))
     records = tuple(record.ref.get() for record in records)
     edges = tuple(Dependency(source.ref, target.ref) for source, target in pairwise(records))
-    edges = (Dependency(records[0].ref.without_revision(), records[1].ref), *edges[1:])
     result = resolve_published(catalog, records[0].ref)
-    assert result.records == (local_record(records[0]), *records[1:])
+    assert result.records == records
     assert set(result.dependencies) == set(edges)
 
 

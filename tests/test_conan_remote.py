@@ -176,7 +176,7 @@ def test_local_revision_does_not_override_remote_dependency(
     another_be = Record(Ref("soc", "cpu", "be", "lib-lef", "5.0", catalog=remote_catalog))
     another_be = remote_catalog.publish(local_record(another_be), dependencies=(rtl.ref,))
     assert {r.ref for r in resolve_published(remote_catalog, another_be.ref).records} == {
-        another_be.ref.without_revision(),
+        another_be.ref,
         rtl.ref,
     }
 

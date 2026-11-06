@@ -74,11 +74,8 @@ def graph_json(result: Graph) -> str:
 
 
 def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = None) -> Graph:
-    """Inspect saved package data through the same resolver used for local inputs."""
-    ref = Ref(**ref.to_dict(), catalog=catalog)
-    record = ref.get()
-    dependencies = tuple(item.ref for item in ref.dependencies())
-    return Graph(catalog, local_record(record), dependencies=dependencies, lockfile=lockfile)
+    """Resolve the published root itself through the public API."""
+    return Ref(**ref.to_dict(), catalog=catalog).graph(lockfile=lockfile)
 
 
 def local_record(

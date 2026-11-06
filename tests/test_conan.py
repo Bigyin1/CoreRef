@@ -102,13 +102,13 @@ def test_publish_does_not_scan_unrelated_packages(conan_catalog: Catalog, tmp_pa
     assert Ref(**published.ref.to_dict(), catalog=conan_catalog).get() == published
 
 
-def test_publish_rejects_an_invalid_catalog_dependency_before_conan_executes_it(
+def test_publish_rejects_invalid_catalog_metadata_before_resolving_it(
     conan_catalog: Catalog,
 ) -> None:
     dependency = conan_catalog.publish(local_record(record(catalog=conan_catalog)))
     directory = conan_catalog._package(dependency.ref).recipe().directory
-    (directory / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
-    with pytest.raises(InvalidPackage, match="canonical"):
+    (directory / "record.json").write_text('{"format": -1}')
+    with pytest.raises(InvalidPackage, match="Unsupported record format"):
         conan_catalog.publish(
             local_record(record("be", package_type="lib-lef", catalog=conan_catalog)),
             dependencies=(dependency.ref,),
@@ -138,7 +138,7 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert not catalog.search(SearchQuery(component="missing"))
     assert not catalog.search(SearchQuery(component=""))
     expected = resolve_published(catalog, be.ref)
-    assert expected.dependencies == (Dependency(be.ref.without_revision(), rtl.ref),)
+    assert expected.dependencies == (Dependency(be.ref, rtl.ref),)
     assert len(expected.networkx) == 2
     assert Ref(**be.ref.to_dict(), catalog=catalog).dependencies()[0] == stored
     assert (
@@ -258,10 +258,11 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
     )
     cli.upload(cli.export(build))
     assert Ref(**be.ref.to_dict(), catalog=conan_catalog).get().ref.without_revision() == be.ref
-    assert resolve_published(conan_catalog, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
+    graph = be.ref.graph()
+    assert graph.dependencies == (Dependency(graph.record.ref, rtl.ref),)
 
 
-@pytest.mark.parametrize("damage", ["missing", "missing-data", "bad-marker", "noncanonical-recipe"])
+@pytest.mark.parametrize("damage", ["missing", "missing-data", "bad-marker", "bad-coordinates"])
 def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None:
     rtl, be = (
         record(catalog=conan_catalog),
@@ -279,9 +280,13 @@ def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None
         data["format"] = 999
         (folder / "record.json").write_text(json.dumps(data))
     else:
-        (folder / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
+        data = json.loads((folder / "record.json").read_text())
+        data["ref"]["component"] = "different"
+        (folder / "record.json").write_text(json.dumps(data))
     with pytest.raises(InvalidPackage):
-        resolve_published(conan_catalog, be.ref)
+        be.ref.info()
+    with pytest.raises(CatalogError):
+        be.ref.graph()
 
 
 def test_latest_and_explicit_revisions_are_independently_accessible(
@@ -361,8 +366,8 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         dependencies.host[to_conan_reference(shared.ref)].ref.name == "soc.zzz-shared.rtl.default"
     )
     edges = (
-        Dependency(root.ref.without_revision(), left.ref),
-        Dependency(root.ref.without_revision(), right.ref),
+        Dependency(root.ref, left.ref),
+        Dependency(root.ref, right.ref),
         Dependency(left.ref, shared.ref),
         Dependency(right.ref, shared.ref),
     )
@@ -387,7 +392,7 @@ def test_native_graph_uses_explicit_home_without_changing_process_state(
     assert os.environ["CONAN_HOME"] == str(ambient_home)
     assert Path.cwd() == cwd
     assert not ambient_home.exists()
-    assert resolve_published(conan_catalog, root.ref).records == (local_record(root),)
+    assert resolve_published(conan_catalog, root.ref).records == (root,)
 
 
 def test_native_graph_reports_missing_pinned_dependency(conan_catalog: Catalog) -> None:

@@ -33,6 +33,18 @@ def _recipe_text(ref: Ref) -> str:
     return _RECIPE_TEMPLATE.render(name=name, version=version)
 
 
+class ConsumerRecipe:
+    """An anonymous consumer for resolving or fetching published references."""
+
+    def __init__(self, requirements: tuple[str, ...]) -> None:
+        self.requirements = tuple(sorted(set(requirements)))
+
+    def write(self, directory: Path) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        template = _RECIPE_ENV.get_template("consumer.py.j2")
+        (directory / "conanfile.py").write_text(template.render(requirements=self.requirements))
+
+
 class LocalRecipe:
     """A local package description ready to be written into a staging directory."""
 
@@ -69,14 +81,14 @@ class LocalRecipe:
 
 
 class StoredRecipe:
-    """Read and validate one recipe revision before Conan evaluates its code."""
+    """Read catalog metadata from a trusted Conan recipe revision."""
 
     def __init__(self, directory: Path, expected: Ref, *, reference: str) -> None:
         self.reference = reference
         expected = from_conan_reference(reference, catalog=expected._catalog)
         self.directory = directory
         try:
-            data = self._read_data(expected)
+            data = self._read_data()
             self.requirements = tuple(cast(Iterable[str], data.get("requires", ())))
             self.record = self._read_record(expected, has_source=bool(data.get("scm")))
         except (
@@ -141,11 +153,7 @@ class StoredRecipe:
             files=files,
         )
 
-    def _read_data(self, expected: Ref) -> Mapping[str, object]:
-        if (self.directory / "conanfile.py").read_text() != _recipe_text(
-            expected.without_revision()
-        ):
-            raise ValueError("Only canonical catalog recipes are supported")
+    def _read_data(self) -> Mapping[str, object]:
         data = yaml.safe_load((self.directory / "conandata.yml").read_text())
         if not isinstance(data, Mapping):
             raise ValueError("Conan data must be a YAML mapping")

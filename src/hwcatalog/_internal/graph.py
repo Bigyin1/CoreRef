@@ -44,7 +44,9 @@ class ResolvedConanGraph:
 
     def result(self, root: LocalRecord | Record, dependencies: tuple[Record, ...]) -> GraphData:
         package = self.native.root.conanfile
-        if str(package.ref) != str(root.ref.without_revision()):
+        if self.native.root.ref is None or self.native.root.ref.name is None:
+            package = self.package(root.ref)
+        elif str(package.ref) != str(root.ref.without_revision()):
             raise InvalidPackage("Conan graph root differs from the requested reference")
         self._validate_package(package)
         records = {str(record.ref.without_revision()): record for record in (root, *dependencies)}
@@ -55,7 +57,10 @@ class ResolvedConanGraph:
 
     def _edges(self, records: Mapping[str, LocalRecord | Record]) -> tuple[Dependency, ...]:
         edges: set[Dependency] = set()
-        for package in (self.native.root.conanfile, *self._packages):
+        packages = self._packages
+        if self.native.root.ref is not None and self.native.root.ref.name is not None:
+            packages = (self.native.root.conanfile, *packages)
+        for package in packages:
             source = str(package.ref)
             for target in package.dependencies.direct_host.values():
                 destination = str(target.ref)

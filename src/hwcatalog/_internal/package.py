@@ -13,7 +13,7 @@ from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.query import SearchQuery
 from ..api.records import InstalledRecord, LocalRecord, Record, Ref
 from .graph import GraphData, ResolvedConanGraph
-from .recipe import LocalRecipe, StoredRecipe
+from .recipe import ConsumerRecipe, LocalRecipe, StoredRecipe
 from .references import from_conan_reference, to_conan_reference
 
 if TYPE_CHECKING:
@@ -51,6 +51,22 @@ class StoredPackage:
 
     def get_with_sources(self) -> InstalledRecord:
         return self._get(with_sources=True)
+
+    def resolved_graph(self, lockfile: Path | None) -> PackageGraph:
+        """Resolve the stored root itself, retaining its exact revision and metadata."""
+        with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
+            directory = Path(temporary)
+            ConsumerRecipe((str(self.ref),)).write(directory)
+            native = self._client.graph(
+                directory,
+                lockfile=lockfile,
+                update=lockfile is None and self._client.remote is not None,
+            )
+        graph = ResolvedConanGraph(native)
+        record = self.record_at(graph.direct_references[0])
+        # Later fetches must reuse Conan's choice, including an older locked root.
+        self._resolved[self.ref.without_revision()] = record.ref
+        return PackageGraph(record, graph, packages={record.ref: self})
 
     def dependencies(self, query: SearchQuery) -> tuple[Record, ...]:
         records = self._read_records(self.recipe().requirements)
@@ -114,49 +130,22 @@ class StoredPackage:
         return recipe
 
 
-class LocalPackage:
-    """A detached local description and dependencies for one catalog operation."""
+class PackageGraph:
+    """A resolved local or published root with shared recipe and installation caches."""
 
     def __init__(
         self,
-        catalog: Catalog,
-        record: LocalRecord,
+        record: LocalRecord | Record,
+        graph: ResolvedConanGraph,
         *,
-        dependencies: tuple[Ref, ...],
-        lockfile: Path | None,
+        packages: dict[Ref, StoredPackage],
     ) -> None:
-        self._catalog = catalog
-        self._client = catalog._client
-        self.record = self._snapshot(record)
-        self.dependencies = self._references(dependencies)
-        self.lockfile = lockfile
-        self._packages: dict[Ref, StoredPackage] = {}
+        self.record = record
+        self.graph = graph
+        self._catalog = record.ref._catalog
+        self._client = self._catalog._client
+        self._packages = dict(packages)
         self._fetched: dict[Ref, InstalledRecord] = {}
-
-    @cached_property
-    def graph(self) -> ResolvedConanGraph:
-        self._validate_requirements()
-        recipe = LocalRecipe(self.record, tuple(str(ref) for ref in self.dependencies))
-        with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
-            directory = Path(temporary)
-            recipe.write(directory)
-            update = (
-                self.lockfile is None
-                and self._client.remote is not None
-                and any(ref.revision is None for ref in self.dependencies)
-            )
-            if update:
-                native = self._client.graph(directory, lockfile=self.lockfile, update=True)
-            else:
-                native = self._client.graph(directory, lockfile=self.lockfile)
-            return ResolvedConanGraph(native)
-
-    def _validate_requirements(self) -> None:
-        for ref in self.dependencies:
-            if ref.revision is not None or self.lockfile is None:
-                package = StoredPackage(ref)
-                recipe = package.recipe()
-                self._packages[recipe.record.ref] = package
 
     @cached_property
     def result(self) -> GraphData:
@@ -227,7 +216,7 @@ class LocalPackage:
         sources = {str(ref): ref in selected for ref in self._packages}
         with TemporaryDirectory(prefix="hwcatalog-conan-batch-") as temporary:
             directory = Path(temporary)
-            LocalRecipe(self.record, tuple(recipe.reference for recipe in recipes)).write(directory)
+            ConsumerRecipe(tuple(recipe.reference for recipe in recipes)).write(directory)
             self._client.save_lockfile(self.graph.native, directory / "conan.lock")
             installed = ResolvedConanGraph(self._client.install_project(directory, sources))
             self._check_install(installed, recipes)
@@ -247,6 +236,63 @@ class LocalPackage:
             recipe.reference in references for recipe in recipes
         ):
             raise Conflict("Installed dependencies differ from the resolved graph")
+
+    def _read_records(self, references: tuple[str, ...]) -> tuple[Record, ...]:
+        records = []
+        for reference in dict.fromkeys(references):
+            ref = from_conan_reference(reference, catalog=self._catalog)
+            if ref not in self._packages:
+                self._packages[ref] = StoredPackage(ref)
+            records.append(self._packages[ref].record_at(reference))
+        return tuple(records)
+
+
+class LocalPackage:
+    """A detached local description and dependencies for one catalog operation."""
+
+    def __init__(
+        self,
+        catalog: Catalog,
+        record: LocalRecord,
+        *,
+        dependencies: tuple[Ref, ...],
+        lockfile: Path | None,
+    ) -> None:
+        self._catalog = catalog
+        self._client = catalog._client
+        self.record = self._snapshot(record)
+        self.dependencies = self._references(dependencies)
+        self.lockfile = lockfile
+        self._packages: dict[Ref, StoredPackage] = {}
+
+    @cached_property
+    def graph(self) -> ResolvedConanGraph:
+        self._validate_requirements()
+        recipe = LocalRecipe(self.record, tuple(str(ref) for ref in self.dependencies))
+        with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
+            directory = Path(temporary)
+            recipe.write(directory)
+            update = (
+                self.lockfile is None
+                and self._client.remote is not None
+                and any(ref.revision is None for ref in self.dependencies)
+            )
+            if update:
+                native = self._client.graph(directory, lockfile=self.lockfile, update=True)
+            else:
+                native = self._client.graph(directory, lockfile=self.lockfile)
+            return ResolvedConanGraph(native)
+
+    def _validate_requirements(self) -> None:
+        for ref in self.dependencies:
+            if ref.revision is not None or self.lockfile is None:
+                package = StoredPackage(ref)
+                recipe = package.recipe()
+                self._packages[recipe.record.ref] = package
+
+    @cached_property
+    def resolved(self) -> PackageGraph:
+        return PackageGraph(self.record, self.graph, packages=self._packages)
 
     def publish(self) -> InstalledRecord:
         record = self._publication_record()
@@ -286,15 +332,6 @@ class LocalPackage:
         if not self.dependencies:
             return ()
         return self.graph.direct_references
-
-    def _read_records(self, references: tuple[str, ...]) -> tuple[Record, ...]:
-        records = []
-        for reference in dict.fromkeys(references):
-            ref = from_conan_reference(reference, catalog=self._catalog)
-            if ref not in self._packages:
-                self._packages[ref] = StoredPackage(ref)
-            records.append(self._packages[ref].record_at(reference))
-        return tuple(records)
 
     def _publication_record(self) -> LocalRecord:
         files: dict[str, Path] = {}

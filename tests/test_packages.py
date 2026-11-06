@@ -39,7 +39,7 @@ def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path
     assert record.ref.get() == record
     assert record.ref.dependencies() == (rtl,)
     assert resolve_published(packages, record.ref).dependencies == (
-        Dependency(record.ref.without_revision(), rtl.ref),
+        Dependency(record.ref, rtl.ref),
     )
     artifact.unlink()
     content = record.ref.get().files["timing/cpu.lib"]

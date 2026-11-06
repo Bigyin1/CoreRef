@@ -1,4 +1,4 @@
-"""Resolved project snapshots, dependency ordering and project-owned lockfiles."""
+"""Resolved local and published packages, dependency ordering and lockfiles."""
 
 from dataclasses import dataclass, replace
 from functools import cached_property
@@ -29,7 +29,7 @@ class Dependency:
 
 @dataclass(init=False)
 class Graph:
-    """One resolved project with records, edges, traversals and lockfile operations."""
+    """One resolved local or published package with records, ordering and lockfiles."""
 
     _records: tuple[LocalRecord | Record, ...]
     _dependencies: tuple[Dependency, ...]
@@ -37,13 +37,18 @@ class Graph:
     def __init__(
         self,
         catalog: Catalog,
-        record: LocalRecord,
+        record: LocalRecord | Ref,
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
         self._catalog = catalog
-        self._package = catalog._local_package(record, dependencies, lockfile)
+        if isinstance(record, Ref):
+            if dependencies:
+                raise InvalidPackage("Published graph requirements come from its recipe")
+            self._package = catalog._package(record).resolved_graph(lockfile)
+        else:
+            self._package = catalog._local_package(record, dependencies, lockfile).resolved
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result
         self._requirements = tuple(
@@ -56,9 +61,10 @@ class Graph:
         return self._catalog
 
     @property
-    def record(self) -> LocalRecord:
-        """Return an editable local description detached from the resolved snapshot."""
-        return replace(self._package.record)
+    def record(self) -> LocalRecord | Record:
+        """Return immutable stored metadata or a detached editable local description."""
+        record = self._package.record
+        return replace(record) if isinstance(record, LocalRecord) else record
 
     @property
     def records(self) -> tuple[LocalRecord | Record, ...]:
@@ -93,7 +99,7 @@ class Graph:
         return self._package.get(refs)
 
     def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
-        """Fetch selected published dependencies in one install and reuse this snapshot."""
+        """Fetch selected published packages in one install and reuse this snapshot."""
         return self._package.get_with_sources(refs)
 
     @property

@@ -5,7 +5,6 @@ from tempfile import TemporaryDirectory
 
 from examples.local_server import local_server
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
 from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import LocalRecord, Ref
 
@@ -41,13 +40,8 @@ def main() -> None:
         ):
             print(result.ref)
             print(result.to_dict())
-            installed = result.ref.get()
-            dependencies = tuple(record.ref for record in result.ref.dependencies())
-            graph = Graph(
-                catalog,
-                LocalRecord(result.ref.without_revision(), result.payload, files=installed.files),
-                dependencies=dependencies,
-            )
+            graph = result.ref.graph()
+            installed = graph.get((graph.record.ref,))[0]
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
             print(installed.files["cpu.lib"].read_text().strip())
 
