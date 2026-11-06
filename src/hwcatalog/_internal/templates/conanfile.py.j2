@@ -5,8 +5,11 @@ class CatalogRecord(ConanFile):
     name = {{ name|pyrepr }}
     version = {{ version|pyrepr }}
     package_type = "header-library"
-    exports = "record.json", "hwcatalog.json", "artifacts/*"
-    requires = {{ requirements|pyrepr }}
+    exports = "record.json", "artifacts/*"
+
+    def requirements(self):
+        for reference in self.conan_data.get("requires", []):
+            self.requires(reference)
 
     def export(self):
         from pathlib import Path
@@ -16,12 +19,9 @@ class CatalogRecord(ConanFile):
             Git(self, marker.read_text()).coordinates_to_conandata(repository=True)
 
     def source(self):
-        import os
         from conan.tools.scm import Git
-        if self.conan_data and "scm" in self.conan_data:
-            checkout = os.path.join(self.source_folder, "source")
-            os.makedirs(checkout, exist_ok=True)
-            Git(self, checkout).checkout_from_conandata_coordinates()
+        if self.conan_data.get("scm"):
+            Git(self, "source").checkout_from_conandata_coordinates()
 
     def package(self):
         import os

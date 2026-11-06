@@ -50,7 +50,7 @@ class StoredPackage:
         return self._get(with_sources=True)
 
     def dependencies(self, query: SearchQuery) -> tuple[Record, ...]:
-        records = self._read_records(self.recipe().metadata.requires)
+        records = self._read_records(self.recipe().requirements)
         return query.select(records)
 
     def find_dependents(self, query: SearchQuery, *, transitive: bool) -> tuple[Record, ...]:
@@ -68,16 +68,14 @@ class StoredPackage:
 
     def _depends_on(self, recipe: StoredRecipe, *, transitive: bool) -> bool:
         if not transitive:
-            return any(
-                record.ref == self.ref for record in self._read_records(recipe.metadata.requires)
-            )
+            return any(record.ref == self.ref for record in self._read_records(recipe.requirements))
         graph = ResolvedConanGraph(self._client.graph(recipe.directory))
         graph.result(recipe.record, self._read_records(graph.references))
         return graph.contains(self.ref)
 
     def _get(self, *, with_sources: bool) -> Record:
         recipe = self.recipe()
-        fetch_source = with_sources and recipe.metadata.has_source
+        fetch_source = with_sources and recipe.has_source
         if not recipe.record.files and not fetch_source:
             return recipe.record
         with TemporaryDirectory(prefix="hwcatalog-conan-install-") as temporary:
@@ -164,7 +162,7 @@ class LocalPackage:
             required = tuple(
                 recipe
                 for recipe in recipes
-                if recipe.record.files or (with_sources and recipe.metadata.has_source)
+                if recipe.record.files or (with_sources and recipe.has_source)
             )
             records = {recipe.record.ref: recipe.record for recipe in recipes}
             if required:
@@ -179,18 +177,12 @@ class LocalPackage:
         record = self._fetched.get(ref)
         if record is None:
             return True
-        return (
-            with_sources
-            and record.source is None
-            and self._packages[ref].recipe().metadata.has_source
-        )
+        return with_sources and record.source is None and self._packages[ref].recipe().has_source
 
     def _install(
         self, recipes: tuple[StoredRecipe, ...], *, with_sources: bool
     ) -> tuple[Record, ...]:
-        selected = {
-            recipe.record.ref for recipe in recipes if with_sources and recipe.metadata.has_source
-        }
+        selected = {recipe.record.ref for recipe in recipes if with_sources and recipe.has_source}
         sources = {str(ref): ref in selected for ref in self._packages}
         with TemporaryDirectory(prefix="hwcatalog-conan-batch-") as temporary:
             directory = Path(temporary)
@@ -201,7 +193,7 @@ class LocalPackage:
             return tuple(
                 recipe.installed(
                     installed.package(recipe.record.ref),
-                    with_sources=with_sources and recipe.metadata.has_source,
+                    with_sources=with_sources and recipe.has_source,
                 )
                 for recipe in recipes
             )

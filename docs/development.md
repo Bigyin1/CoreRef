@@ -49,14 +49,15 @@ Preview-правила включены только по явным кодам:
 ## Внутренние объекты
 
 Модули расположены непосредственно в hwcatalog._internal; подкаталог templates
-содержит Jinja-шаблон рецепта.
+содержит Jinja-шаблоны conanfile.py и conandata.yml.
 
 - `package.py`: `LocalPackage` отделяет входы проекта, сохраняет нативный граф
   и result, создаёт lockfile и выполняет publish. `StoredPackage` получает запись, файлы, исходники и зависимости
   опубликованного Ref, а также ищет потребителей.
 - `recipe.py`: `LocalRecipe` пишет временный Jinja-рецепт и копирует файлы при публикации.
   `StoredRecipe(directory, expected, reference=...)` читает и проверяет рецепт
-  при создании; хранит его метаданные, revision и директорию.
+  при создании; хранит данные record.json и conandata.yml, revision и директорию.
+  Зависимости и SCM читаются из conandata.yml; отдельного hwcatalog.json нет.
 - `graph.py`: `ResolvedConanGraph` проверяет нативный граф Conan и извлекает
   ссылки и связи. Загрузку пакетов выполняет вызывающий объект пакета.
 - `client.py`: `ConanClient` отвечает за настройки и выполнение команд Conan.

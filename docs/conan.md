@@ -30,17 +30,21 @@ SDK не клонирует Git самостоятельно. Публикаци
 namespace.component[_subcomponent].view.type/version, например soc.cpu_alu.be.lib-lef/4.0.
 Первый `_` отделяет часть; component не содержит `_`, пустой subcomponent недопустим.
 
-LocalRecord.to_json() готовит переносимые ref/payload и список имён файлов.
+LocalRecord.to_json() готовит record.json с format=6, ref/payload и списком имён файлов.
 Пути исходного checkout и файлов издателя туда не попадают. Временный Jinja-рецепт
 передаётся одному export-pkg, затем upload. Отдельного файла публикации и ручного
 conanfile.py не требуется. Files копируются под artifacts/.
+Начальный conandata.yml также генерируется Jinja-шаблоном и содержит requires.
+Во время export() Git-helper Conan добавляет scm, сохраняя зависимости.
+Рецепт получает их через self.conan_data в requirements(); отдельной копии списка нет.
 
 ## Готовые пути
 
 Ref.get() заполняет Record.files путями доступных файлов пакета.
 Ref.get_with_sources() дополнительно передаёт scoped-конфигурацию
 `tools.build:download_source=True` в Conan install. Встроенный source() вызывает
-Git.checkout_from_conandata_coordinates() и возвращает точный commit из GitLab.
+Git(self, "source").checkout_from_conandata_coordinates() и возвращает точный commit
+из GitLab. Git-helper сам создаёт поддиректорию source; явного mkdir в рецепте нет.
 Record.source содержит Path checkout. URL/commit остаются во внутренних метаданных Conan.
 Без запроса source путь равен None. Повторное получение использует cache Conan.
 

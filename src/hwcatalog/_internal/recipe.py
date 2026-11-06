@@ -4,12 +4,11 @@ import json
 import shutil
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal
 
 import yaml  # type: ignore[import-untyped]  # Validated at this boundary.
 from edify import RegexBuilder
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ..api.errors import CatalogError, InvalidPackage
 from ..api.records import LocalRecord, Record, Ref
@@ -26,6 +25,7 @@ _RECIPE_ENV = Environment(
 )
 _RECIPE_ENV.filters["pyrepr"] = repr
 _RECIPE_TEMPLATE = _RECIPE_ENV.get_template("conanfile.py.j2")
+_CONANDATA_TEMPLATE = _RECIPE_ENV.get_template("conandata.yml.j2")
 _HEX_DIGIT = RegexBuilder().any_of().range("a", "f").range("0", "9").end()
 _COMMIT = (
     RegexBuilder()
@@ -40,16 +40,9 @@ _COMMIT = (
 )
 
 
-class RecipeMetadata(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    format: Literal[5]
-    has_source: bool = False
-    requires: tuple[str, ...] = ()
-
-
-def _recipe_text(ref: Ref, requirements: tuple[str, ...]) -> str:
+def _recipe_text(ref: Ref) -> str:
     name, version = to_conan_reference(ref).split("/")
-    return _RECIPE_TEMPLATE.render(name=name, version=version, requirements=requirements)
+    return _RECIPE_TEMPLATE.render(name=name, version=version)
 
 
 class _SCM(BaseModel):
@@ -77,7 +70,8 @@ class _SCM(BaseModel):
 
 class _ConanData(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    scm: _SCM
+    requires: tuple[str, ...] = Field(default=(), strict=False)
+    scm: _SCM | None = None
 
 
 class LocalRecipe:
@@ -85,17 +79,15 @@ class LocalRecipe:
 
     def __init__(self, record: LocalRecord, requirements: tuple[str, ...] = ()) -> None:
         self.record = record
-        self.metadata = RecipeMetadata(
-            format=5, requires=tuple(sorted(set(requirements))), has_source=bool(record.source)
-        )
+        self.requirements = tuple(sorted(set(requirements)))
 
     def write(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "conanfile.py").write_text(
-            _recipe_text(self.record.ref, self.metadata.requires)
-        )
+        (directory / "conanfile.py").write_text(_recipe_text(self.record.ref))
         (directory / "record.json").write_text(self.record.to_json())
-        (directory / "hwcatalog.json").write_text(self.metadata.model_dump_json())
+        (directory / "conandata.yml").write_text(
+            _CONANDATA_TEMPLATE.render(requirements=self.requirements)
+        )
         if self.record.source is not None:
             (directory / "source-path.txt").write_text(str(self.record.source))
 
@@ -117,10 +109,7 @@ class StoredRecipe:
         self.directory = directory
         try:
             self.record = self._read_record(expected)
-            self.metadata = RecipeMetadata.model_validate_json(
-                (self.directory / "hwcatalog.json").read_text()
-            )
-            self._validate()
+            self._data = self._read_data()
         except (
             OSError,
             ValueError,
@@ -132,28 +121,39 @@ class StoredRecipe:
         ) as exc:
             raise InvalidPackage(f"Invalid catalog recipe for {expected}: {exc}") from exc
 
+    @property
+    def requirements(self) -> tuple[str, ...]:
+        return self._data.requires
+
+    @property
+    def has_source(self) -> bool:
+        return self._data.scm is not None
+
     def _read_record(self, expected: Ref) -> Record:
         value = json.loads((self.directory / "record.json").read_text())
         if not isinstance(value, dict):
             raise ValueError("Record must be a JSON object")
+        if value.get("format") != LocalRecord._format:
+            raise ValueError("Unsupported record format")
         if any(name in value for name in ("source", "source_path", "scm")):
             raise ValueError("Git source must be stored in Conan SCM metadata")
-        names = value.get("files", [])
-        if not isinstance(names, list):
-            raise ValueError("Package files must be a list of stored names")
         record = Record(
             Ref(**value["ref"], catalog=expected._catalog),
             value["payload"],
-            files={name: self.directory / "artifacts" / name for name in names},
+            files=self._read_files(value.get("files", [])),
         )
-        if any(
-            not path.resolve().is_relative_to((self.directory / "artifacts").resolve())
-            for path in record.files.values()
-        ):
-            raise ValueError("Artifact would escape the package directory")
         if record.ref != expected:
             raise ValueError("Record coordinates disagree with the recipe")
         return record
+
+    def _read_files(self, names: object) -> dict[str, Path]:
+        if not isinstance(names, list):
+            raise ValueError("Package files must be a list of stored names")
+        folder = self.directory / "artifacts"
+        files = {name: folder / name for name in names}
+        if any(not path.resolve().is_relative_to(folder.resolve()) for path in files.values()):
+            raise ValueError("Artifact would escape the package directory")
+        return files
 
     def installed(self, package: NativePackage, *, with_sources: bool) -> Record:
         """Attach Conan cache paths to this recipe's already validated record."""
@@ -170,15 +170,12 @@ class StoredRecipe:
             source = Path(package.folders.source_folder) / "source"
         return replace(self.record, source=source, files=files)
 
-    def _validate(self) -> None:
-        if self.metadata.has_source:
-            _ConanData.model_validate(
-                yaml.safe_load((self.directory / "conandata.yml").read_text())
-            )
-        for dependency in self.metadata.requires:
-            ref = from_conan_reference(dependency, catalog=self.record.ref._catalog)
-            if to_conan_reference(ref) != dependency.split("#", 1)[0]:
-                raise ValueError("Requirements must use canonical exact references")
-        expected = _recipe_text(self.record.ref, self.metadata.requires)
-        if (self.directory / "conanfile.py").read_text() != expected:
+    def _read_data(self) -> _ConanData:
+        if (self.directory / "conanfile.py").read_text() != _recipe_text(self.record.ref):
             raise ValueError("Only canonical catalog recipes are supported")
+        data = _ConanData.model_validate(
+            yaml.safe_load((self.directory / "conandata.yml").read_text())
+        )
+        for dependency in data.requires:
+            from_conan_reference(dependency, catalog=self.record.ref._catalog)
+        return data

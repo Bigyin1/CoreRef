@@ -81,7 +81,12 @@ ordered_records(root, stop_at=...) позволяет flow получить за
 Для пакетов, оставшихся после отбора, вызывают Graph.get_with_sources(refs): проверенные
 рецепты используются повторно, повторный запрос в пределах Graph не обращается к Conan.
 
-LocalRecord.to_json() готовит переносимые метаданные: ref, payload и имена files.
+LocalRecord.to_json() готовит record.json: format, ref, payload и имена files.
+Маркер format=6 относится к нашему формату записи, а не к Conan или lockfile.
+Зависимости хранятся только в conandata.yml.requires; requirements() читает их
+через self.conan_data. SCM-координаты Conan добавляет в тот же conandata.yml.
+Отдельных hwcatalog.json и has_source нет: наличие исходников определяется по scm.
+conanfile.py и начальный conandata.yml генерируются Jinja-шаблонами.
 Рабочие source/files-пути туда не попадают. Record.from_json(data, *, catalog) восстанавливает
 inspection-снимок с явными путями. Метаданные пакета читает внутренний StoredRecipe
 с обязательной директорией рецепта. Record.to_dict() предназначен

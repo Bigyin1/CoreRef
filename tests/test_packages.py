@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 from dulwich.repo import Repo
 
 from examples.conan_config import configured_home
@@ -231,4 +232,49 @@ def test_full_git_commit_metadata_is_accepted(
     (tmp_path / "conandata.yml").write_text(
         json.dumps({"scm": {"url": "https://gitlab.invalid/cpu.git", "commit": "a" * length}})
     )
-    assert StoredRecipe(tmp_path, record.ref, reference=str(record.ref)).metadata.has_source
+    assert StoredRecipe(tmp_path, record.ref, reference=str(record.ref)).has_source
+
+
+def test_requirements_and_scm_share_one_exported_conandata(
+    catalog: Catalog, checkout: Path
+) -> None:
+    dependency = catalog.publish(
+        LocalRecord(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
+    )
+    parent = catalog.publish(
+        LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=checkout),
+        dependencies=(dependency.ref,),
+    )
+    recipe = catalog._package(parent.ref).recipe()
+    record = json.loads((recipe.directory / "record.json").read_text())
+    data = yaml.safe_load((recipe.directory / "conandata.yml").read_text())
+    assert record["format"] == 6
+    assert set(record) == {"format", "ref", "payload"}
+    assert not (recipe.directory / "hwcatalog.json").exists()
+    assert set(data) == {"requires", "scm"}
+    assert tuple(data["requires"]) == recipe.requirements
+    assert data["requires"][0].startswith(f"{dependency.ref}#")
+    assert data["scm"]["commit"] == _commit(checkout)
+    assert recipe.has_source
+    assert parent.ref.dependencies() == (dependency,)
+    assert "requires =" not in (recipe.directory / "conanfile.py").read_text()
+    assert parent.ref.get_with_sources().source is not None
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"requires": "soc.leaf.rtl.default/1.0"},
+        {"requires": [123]},
+        {"requires": ["ordinary-library/1.0"]},
+        {"requires": [], "has_source": True},
+    ],
+)
+def test_invalid_conandata_requirements_are_rejected(
+    catalog: Catalog, tmp_path: Path, data: dict[str, object]
+) -> None:
+    record = LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+    LocalRecipe(record).write(tmp_path)
+    (tmp_path / "conandata.yml").write_text(yaml.safe_dump(data))
+    with pytest.raises(InvalidPackage):
+        StoredRecipe(tmp_path, record.ref, reference=str(record.ref))

@@ -1,5 +1,6 @@
 """Behavioral tests against real Conan recipes and its dependency graph evaluator."""
 
+import json
 import os
 import subprocess
 from dataclasses import replace
@@ -258,7 +259,7 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
     assert resolve_published(conan_catalog, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
 
 
-@pytest.mark.parametrize("damage", ["missing", "bad-marker", "noncanonical-recipe"])
+@pytest.mark.parametrize("damage", ["missing", "missing-data", "bad-marker", "noncanonical-recipe"])
 def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None:
     rtl, be = (
         record(catalog=conan_catalog),
@@ -269,8 +270,12 @@ def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None
     folder = conan_catalog._package(be.ref).recipe().directory
     if damage == "missing":
         (folder / "record.json").unlink()
+    elif damage == "missing-data":
+        (folder / "conandata.yml").unlink()
     elif damage == "bad-marker":
-        (folder / "hwcatalog.json").write_text('{"format":999}')
+        data = json.loads((folder / "record.json").read_text())
+        data["format"] = 999
+        (folder / "record.json").write_text(json.dumps(data))
     else:
         (folder / "conanfile.py").write_text("raise RuntimeError('must not execute')\n")
     with pytest.raises(InvalidPackage):

@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, Self, cast, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, Self, cast, runtime_checkable
 
 from frozendict import deepfreeze, frozendict
 
@@ -156,6 +156,7 @@ class Ref:
 class LocalRecord:
     """Project metadata with already available source and package file paths."""
 
+    _format: ClassVar[int] = 6
     ref: Ref
     payload: JSON | JSONSerializable = None
     source: Path | None = None
@@ -166,7 +167,11 @@ class LocalRecord:
         payload = self.payload
         if isinstance(payload, JSONSerializable):
             payload = json.loads(payload.to_json())
-        value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
+        value: dict[str, JSON] = {
+            "format": self._format,
+            "ref": self.ref.to_dict(),
+            "payload": payload,
+        }
         if self.files:
             value["files"] = tuple(sorted(self.files))
         return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
