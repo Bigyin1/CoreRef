@@ -256,3 +256,31 @@ def test_conan_reports_invalid_requires_during_resolution(catalog: Catalog, tmp_
     )
     with pytest.raises(CatalogError, match="require"):
         catalog._client.graph(tmp_path)
+
+
+def test_exported_recipe_omits_publisher_paths_and_has_stable_revision(
+    catalog: Catalog, checkout: Path, tmp_path: Path, *, git_origin: Path
+) -> None:
+    relocated = tmp_path / "publisher's rtl checkout"
+    shutil.copytree(checkout, relocated)
+    ref = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
+    first = tmp_path / "first-recipe"
+    second = tmp_path / "second-recipe"
+    LocalRecipe(LocalRecord(ref, source=checkout)).write(first)
+    LocalRecipe(LocalRecord(ref, source=relocated)).write(second)
+    assert str(relocated) not in (second / "conanfile.py").read_text()
+    assert (second / "source-path.txt").read_text() == str(relocated)
+    assert (
+        catalog._client.export_package(first).root.ref
+        == catalog._client.export_package(second).root.ref
+    )
+    stored = catalog._package(ref).recipe()
+    assert "package_type" not in (stored.directory / "conanfile.py").read_text()
+    assert str(checkout) not in (stored.directory / "conanfile.py").read_text()
+    assert str(relocated) not in (stored.directory / "conanfile.py").read_text()
+    assert not (stored.directory / "source-path.txt").exists()
+    assert stored.has_source and git_origin.is_dir()
+    shutil.rmtree(checkout)
+    shutil.rmtree(relocated)
+    fetched = ref.get_with_sources()
+    assert fetched.source is not None and (fetched.source / "cpu.sv").is_file()

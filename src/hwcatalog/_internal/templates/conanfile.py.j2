@@ -4,7 +4,6 @@ from conan import ConanFile
 class CatalogRecord(ConanFile):
     name = {{ name|pyrepr }}
     version = {{ version|pyrepr }}
-    package_type = "header-library"
     exports = "record.json", "artifacts/*"
 
     def requirements(self):

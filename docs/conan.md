@@ -25,6 +25,9 @@ print(record.source, record.files, record.payload)
 
 LocalRecord.source — текущий Git checkout. При export() Conan сам проверяет его
 чистоту и фиксирует координаты через Git.coordinates_to_conandata(repository=True).
+Локальный путь передаётся export() через временный source-path.txt рядом с рецептом.
+Этот файл не экспортируется, поэтому путь checkout не попадает в рецепт и не влияет
+на recipe revision. Пакеты используют обычное поведение Conan без явного package_type.
 SDK не клонирует Git самостоятельно. Публикация принимает один LocalRecord; его
 зависимости должны быть опубликованы заранее. Пакеты имеют имена
 namespace.component[_subcomponent].view.type/version, например soc.cpu_alu.be.lib-lef/4.0.
