@@ -8,7 +8,6 @@ from enum import StrEnum
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import Conflict
 from hwcatalog.api.records import JSON, JSONSerializable, LocalRecord, Record, Ref
 from tests.helpers import local_record
 
@@ -38,7 +37,7 @@ def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
     record = Record(
         Ref("demo", "opaque", "release", "default", "1.0", catalog=catalog), UserPayload(value)
     )
-    catalog.publish(local_record(record))
+    record = catalog.publish(local_record(record))
     stored = Ref(**record.ref.to_dict(), catalog=catalog).get()
     assert stored == Record.from_json(
         json.dumps(record.to_dict(), allow_nan=False), catalog=catalog
@@ -95,9 +94,9 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
     assert ref.package_name != other.package_name
     catalog.publish(local_record(Record(ref)))
     catalog.publish(local_record(Record(other)))
-    assert Ref(**same.to_dict(), catalog=catalog).get().ref == ref
-    with pytest.raises(Conflict):
-        catalog.publish(local_record(Record(same)))
+    stored = Ref(**same.to_dict(), catalog=catalog).get()
+    assert stored.ref.without_revision() == ref
+    assert catalog.publish(local_record(Record(same))) == stored
 
 
 @pytest.mark.parametrize(

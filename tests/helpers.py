@@ -86,7 +86,7 @@ def local_record(
 ) -> LocalRecord:
     """Use fixture metadata as explicit local publication inputs."""
     return LocalRecord(
-        record.ref,
+        record.ref.without_revision(),
         record.payload,
         source,
         record.files if files is None else files,

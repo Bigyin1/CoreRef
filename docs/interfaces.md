@@ -6,7 +6,7 @@
 
 | Метод | Контракт |
 |---|---|
-| search(query=SearchQuery()) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
+| search(query=SearchQuery(), *, all_revisions=False) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
 | publish(record: LocalRecord, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает Record |
 
 Source и files принадлежат LocalRecord. Source — рабочий Git checkout, files —
@@ -16,8 +16,8 @@ Source и files принадлежат LocalRecord. Source — рабочий Gi
 
 ## Ref и Record
 
-`Ref(namespace, component, view, type, version, *, subcomponent=None, catalog)` задаёт координаты
-namespace.component[_subcomponent].view.type/version. Приватный конкретный Catalog не участвует в identity,
+`Ref(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)` задаёт координаты
+namespace.component[_subcomponent].view.type/version[#revision]. Приватный конкретный Catalog не участвует в identity,
 хеше или JSON. Ссылки результатов создаются сразу с нужным контекстом.
 
 | Метод Ref | Контракт |
@@ -26,11 +26,12 @@ namespace.component[_subcomponent].view.type/version. Приватный кон�
 | get_with_sources() | Дополнительно получает Git-исходники средствами Conan, если они объявлены |
 | dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
 | find_dependents(*, candidates, transitive=True) | Кандидаты, зависящие от точного Ref |
-| to_dict() | Только координаты |
+| to_dict() | Координаты, включая revision, если она задана |
+| without_revision() | Логические координаты с тем же каталогом |
 
 Непосредственные зависимости и обратный поиск читают requirements; транзитивный поиск
 использует нативный граф. Сам Ref исключается. Отсутствующий пакет вызывает NotFound.
-Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все шесть координат.
+Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все семь координат, включая revision.
 
 Record — представление уже полученного пакета: ref, payload, source (Path | None),
 files (Mapping[str, Path]).
@@ -53,14 +54,15 @@ source и исходные пути files исключаются, сохраня
 
 ## SearchQuery
 
-Шесть опциональных полей задают точные AND-фильтры координат.
+Семь опциональных полей задают точные AND-фильтры координат.
 
 - `criteria()` возвращает отдельный словарь заданных условий.
 - `matches_ref(ref)` проверяет координаты до скачивания рецепта.
 - `matches(record)` проверяет LocalRecord или Record по их Ref.
 - `select(records)` принимает коллекцию или итератор записей, фильтрует и возвращает
   tuple в порядке Ref. Поддерживает `graph.records`, сохраняя исходные объекты.
-- `conan_pattern` — кэшируемый шаблон поиска, например `soc.cpu*.be.lib-lef/*#*`.
+- `conan_pattern(*, all_revisions=False)` сразу формирует шаблон поиска: `#latest`
+  по умолчанию, `#*` для истории или конкретную revision из фильтра.
   Без ограничения subcomponent поиск включает целый компонент и его части; точность
   component проверяется до загрузки рецептов. С subcomponent="alu" сегмент равен cpu_alu.
   Непредставимое точное условие даёт None;
@@ -80,7 +82,7 @@ Graph без lockfile, затем вызывают create_lockfile(path).
 | Метод | Контракт |
 |---|---|
 | record | Снимок LocalRecord корня |
-| requirements | Прямые Ref, переданные при создании |
+| requirements | Прямые зависимости с revisions, выбранными Conan |
 | records | LocalRecord корня и Record всех опубликованных зависимостей |
 | dependencies | Все рёбра Dependency(source, target) |
 | get(refs) | Получает выбранные Record с файлами одной установкой без запроса SCM |
@@ -132,8 +134,18 @@ SDK повторно использует проверенные рецепты 
 
 - CatalogError — сбой Conan, конфигурации или получения файлов.
 - NotFound — отсутствующий пакет.
-- Conflict — повторная публикация или несовместимые revisions/версии.
+- Conflict — несовместимые revisions/версии в графе.
 - InvalidPackage — неверные локальные входы, координаты, рецепт или граф.
 
-Один Ref соответствует одной revision. Случайный conan.lock из cwd явно отключён.
+Ref без revision выбирает последнюю средствами Conan; Ref с revision задаёт точную запись.
+Полученные Record содержат точный Ref. Publish разрешает повторную публикацию имени/версии;
+локальный корень не должен задавать revision. Собственная revision не входит в record.json,
+но сохраняется в inspection-снимках Record.to_dict()/from_json().
+Search возвращает последние revisions; all_revisions=True включает историю.
+Явный SearchQuery.revision действует в обоих режимах.
+
+Graph сначала передаёт исходные требования и lockfile Conan. Его опубликованные узлы
+и рёбра содержат revisions. Незакреплённые ссылки в get/get_with_sources и обходах
+сопоставляются с выбранными узлами снимка, без нового поиска последней revision.
+Явная несовпадающая revision отклоняется. Случайный conan.lock из cwd явно отключён.
 Автоматических retry, rollback и управления конкурентными издателями нет.

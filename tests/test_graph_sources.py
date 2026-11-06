@@ -83,7 +83,7 @@ def test_metadata_only_selection_does_not_run_conan(
     assert graph.get_with_sources((record.ref,)) == (record,)
     assert graph.get_with_sources(()) == ()
     for ref in (graph.record.ref, Ref("soc", "absent", "rtl", "default", "1.0", catalog=catalog)):
-        with pytest.raises(InvalidPackage, match="published dependencies"):
+        with pytest.raises(InvalidPackage, match=r"published dependencies|Unknown reference"):
             graph.get_with_sources((ref,))
 
 
@@ -147,8 +147,8 @@ def test_unpinned_external_requirement_stays_at_resolved_revision(
     LocalRecipe(LocalRecord(leaf.ref, {"new": "revision"})).write(tmp_path / "new-leaf")
     catalog._client.export(tmp_path / "new-leaf")
     assert graph.get_with_sources((parent,))[0].source is not None
-    with pytest.raises(Conflict, match="Multiple recipe revisions"):
-        leaf.ref.get()
+    assert leaf.ref.get().ref == leaf.ref
+    assert leaf.ref.without_revision().get().ref != leaf.ref
 
 
 def test_required_parent_does_not_fetch_unselected_transitive_source(

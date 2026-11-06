@@ -35,6 +35,7 @@ class Ref:
         version: str,
         *,
         subcomponent: str | None = None,
+        revision: str | None = None,
         catalog: Catalog,
     ) -> None:
         if catalog is None:
@@ -45,6 +46,7 @@ class Ref:
         self._type = type
         self._version = version
         self._subcomponent = subcomponent
+        self._revision = revision
         self._catalog = catalog
 
     @property
@@ -72,8 +74,20 @@ class Ref:
         return self._subcomponent
 
     @property
-    def _identity(self) -> tuple[str, str, str, str, str, str | None]:
-        return self.namespace, self.component, self.view, self.type, self.version, self.subcomponent
+    def revision(self) -> str | None:
+        return self._revision
+
+    @property
+    def _identity(self) -> tuple[str, str, str, str, str, str | None, str | None]:
+        return (
+            self.namespace,
+            self.component,
+            self.view,
+            self.type,
+            self.version,
+            self.subcomponent,
+            self.revision,
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Ref):
@@ -96,7 +110,8 @@ class Ref:
         return f"{self.namespace}.{component}.{self.view}.{self.type}"
 
     def __str__(self) -> str:
-        return f"{self.package_name}/{self.version}"
+        value = f"{self.package_name}/{self.version}"
+        return f"{value}#{self.revision}" if self.revision is not None else value
 
     def __lt__(self, other: Ref) -> bool:
         if not isinstance(other, Ref):
@@ -108,6 +123,7 @@ class Ref:
             self.view,
             self.type,
             self.version,
+            self.revision or "",
         ) < (
             other.namespace,
             other.component,
@@ -115,6 +131,7 @@ class Ref:
             other.view,
             other.type,
             other.version,
+            other.revision or "",
         )
 
     def to_dict(self) -> dict[str, str]:
@@ -128,10 +145,18 @@ class Ref:
         }
         if self.subcomponent is not None:
             coordinates["subcomponent"] = self.subcomponent
+        if self.revision is not None:
+            coordinates["revision"] = self.revision
         return coordinates
 
+    def without_revision(self) -> Ref:
+        """Return logical coordinates bound to the same catalog."""
+        coordinates = self.to_dict()
+        coordinates.pop("revision", None)
+        return Ref(**coordinates, catalog=self._catalog)
+
     def get(self) -> Record:
-        """Get package metadata and stored files without fetching Git sources."""
+        """Get exact metadata and files; an unpinned Ref selects the latest revision."""
         return self._catalog._package(self).get()
 
     def get_with_sources(self) -> Record:
@@ -169,7 +194,7 @@ class LocalRecord:
             payload = json.loads(payload.to_json())
         value: dict[str, JSON] = {
             "format": self._format,
-            "ref": self.ref.to_dict(),
+            "ref": self.ref.without_revision().to_dict(),
             "payload": payload,
         }
         if self.files:

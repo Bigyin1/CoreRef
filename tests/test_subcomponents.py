@@ -19,7 +19,12 @@ def test_ref_and_record_roundtrip(catalog: Catalog, subcomponent: str | None) ->
     ref = Ref("soc", "cpu", "be", "lib-lef", "1.0", subcomponent=subcomponent, catalog=catalog)
     component = "cpu" if subcomponent is None else f"cpu_{subcomponent}"
     assert str(ref) == f"soc.{component}.be.lib-lef/1.0"
-    assert from_conan_reference(to_conan_reference(ref) + "#revision", catalog=catalog) == ref
+    assert (
+        from_conan_reference(
+            to_conan_reference(ref) + "#revision", catalog=catalog
+        ).without_revision()
+        == ref
+    )
     assert Ref(**ref.to_dict(), catalog=catalog) == ref
     assert ("subcomponent" in ref.to_dict()) == (subcomponent is not None)
     record = Record(ref, {"area": 10})
@@ -65,7 +70,7 @@ def test_underscore_is_reserved_as_the_component_separator(catalog: Catalog) -> 
     ],
 )
 def test_search_patterns(query: SearchQuery, pattern: str | None) -> None:
-    assert query.conan_pattern == pattern
+    assert query.conan_pattern(all_revisions=True) == pattern
 
 
 def test_component_search_includes_parts_but_excludes_prefix_neighbours(catalog: Catalog) -> None:

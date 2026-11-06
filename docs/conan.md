@@ -30,12 +30,14 @@ LocalRecord.source — текущий Git checkout. При export() Conan сам
 на recipe revision. Пакеты используют обычное поведение Conan без явного package_type.
 SDK не клонирует Git самостоятельно. Публикация принимает один LocalRecord; его
 зависимости должны быть опубликованы заранее. Пакеты имеют имена
-namespace.component[_subcomponent].view.type/version, например soc.cpu_alu.be.lib-lef/4.0.
+namespace.component[_subcomponent].view.type/version[#revision], например soc.cpu_alu.be.lib-lef/4.0.
 Первый `_` отделяет часть; component не содержит `_`, пустой subcomponent недопустим.
 
 LocalRecord.to_json() готовит record.json с format=6, ref/payload и списком имён файлов.
 Пути исходного checkout и файлов издателя туда не попадают. Временный Jinja-рецепт
-передаётся одному export-pkg, затем upload. Отдельного файла публикации и ручного
+при наличии зависимостей сначала используется в одном graph info с проектным lockfile.
+Точные прямые requirements из нативного графа записываются в публикуемый рецепт,
+после чего выполняются один export-pkg и upload. Без зависимостей graph info не нужен. Отдельного файла публикации и ручного
 conanfile.py не требуется. Files копируются под artifacts/.
 Начальный conandata.yml также генерируется Jinja-шаблоном и содержит requires.
 Во время export() Git-helper Conan добавляет scm, сохраняя зависимости.
@@ -84,8 +86,11 @@ lockfile в одной директории. Посторонний conan.lock �
 
 ## Ограничения
 
-Один Ref соответствует одной revision. Повторная публикация запрещена, несколько
-revisions вызывают Conflict. Settings/options, build requirements, overrides и
+Ref.revision задаёт recipe revision (RREV); без неё Conan выбирает последнюю.
+Publish разрешает новые revisions одной версии; одинаковое содержимое даёт тот же RREV.
+Собственная revision не записывается в record.json: она вычисляется по экспортированным
+файлам, а при чтении берётся из загруженного рецепта. Package revisions (PREV)
+не входят в публичный Ref. Settings/options, build requirements, overrides и
 диапазоны версий не поддерживаются. Прямой обратный поиск читает requirements,
 транзитивный использует нативный граф кандидата. Автоматических retry и rollback нет.
 

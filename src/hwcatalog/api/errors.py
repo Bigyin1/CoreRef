@@ -10,7 +10,7 @@ class NotFound(CatalogError):
 
 
 class Conflict(CatalogError):
-    """A reference already exists or dependency versions/revisions conflict."""
+    """Dependency versions or recipe revisions conflict."""
 
 
 class InvalidPackage(CatalogError):

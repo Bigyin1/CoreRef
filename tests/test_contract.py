@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
+from hwcatalog.api.errors import InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency
 from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import JSON, LocalRecord, Record, Ref
@@ -16,8 +16,8 @@ from tests.helpers import graph_json, local_record, release, resolve_published
 
 def test_get_returns_published_records_and_reports_missing(catalog: Catalog) -> None:
     first, second = release("first", catalog=catalog), release("second", catalog=catalog)
-    catalog.publish(local_record(second))
-    catalog.publish(local_record(first))
+    second = catalog.publish(local_record(second))
+    first = catalog.publish(local_record(first))
     assert Ref(**first.ref.to_dict(), catalog=catalog).get() == first
     assert Ref(**second.ref.to_dict(), catalog=catalog).get() == second
     with pytest.raises(NotFound):
@@ -25,12 +25,12 @@ def test_get_returns_published_records_and_reports_missing(catalog: Catalog) -> 
     assert catalog.search() == (first, second)
 
 
-def test_publication_is_immutable_and_conflicts_preserve_records(catalog: Catalog) -> None:
+def test_new_revision_preserves_previously_published_records(catalog: Catalog) -> None:
     original = release("existing", catalog=catalog)
-    catalog.publish(local_record(original))
-    with pytest.raises(Conflict):
-        catalog.publish(local_record(replace(original, payload={"changed": True})))
-    assert catalog.search() == (original,)
+    original = catalog.publish(local_record(original))
+    changed = catalog.publish(local_record(replace(original, payload={"changed": True})))
+    assert changed.ref != original.ref
+    assert catalog.search() == (changed,)
     assert Ref(**original.ref.to_dict(), catalog=catalog).get() == original
 
 
@@ -45,7 +45,7 @@ def test_publish_rejects_record_collections(catalog: Catalog, count: int) -> Non
 @pytest.mark.parametrize("problem", ["duplicate", "missing", "self", "edge-value"])
 def test_invalid_dependencies_do_not_publish(catalog: Catalog, problem: str) -> None:
     source, target = release("source", catalog=catalog), release("target", catalog=catalog)
-    catalog.publish(local_record(target))
+    target = catalog.publish(local_record(target))
     dependencies: tuple[Ref, ...] = (target.ref,)
     exception: type[Exception] = InvalidPackage
     if problem == "duplicate":
@@ -58,20 +58,20 @@ def test_invalid_dependencies_do_not_publish(catalog: Catalog, problem: str) -> 
     else:
         dependencies = (cast(Ref, Dependency(source.ref, target.ref)),)
     with pytest.raises(exception):
-        catalog.publish(local_record(source), dependencies=dependencies)
+        source = catalog.publish(local_record(source), dependencies=dependencies)
     assert catalog.search() == (target,)
 
 
 def test_dependencies_must_already_exist(catalog: Catalog) -> None:
     first, second = release("first", catalog=catalog), release("second", catalog=catalog)
     with pytest.raises(NotFound):
-        catalog.publish(local_record(first), dependencies=(second.ref,))
-    catalog.publish(local_record(second))
-    assert catalog.publish(local_record(first), dependencies=(second.ref,)) == first
-    with pytest.raises(Conflict):
+        first = catalog.publish(local_record(first), dependencies=(second.ref,))
+    second = catalog.publish(local_record(second))
+    first = catalog.publish(local_record(first), dependencies=(second.ref,))
+    with pytest.raises(InvalidPackage, match="cycle/loop"):
         catalog.publish(local_record(second), dependencies=(first.ref,))
     assert resolve_published(catalog, first.ref).dependencies == (
-        Dependency(first.ref, second.ref),
+        Dependency(first.ref.without_revision(), second.ref),
     )
 
 
@@ -79,18 +79,23 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
     root, left, right, shared = (
         release(name, catalog=catalog) for name in ("root", "left", "right", "shared")
     )
+    shared = catalog.publish(local_record(shared))
+    left = catalog.publish(local_record(left), dependencies=(shared.ref,))
+    right = catalog.publish(local_record(right), dependencies=(shared.ref,))
+    root = catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
     edges = (
-        Dependency(root.ref, left.ref),
-        Dependency(root.ref, right.ref),
+        Dependency(root.ref.without_revision(), left.ref),
+        Dependency(root.ref.without_revision(), right.ref),
         Dependency(left.ref, shared.ref),
         Dependency(right.ref, shared.ref),
     )
-    catalog.publish(local_record(shared))
-    catalog.publish(local_record(left), dependencies=(shared.ref,))
-    catalog.publish(local_record(right), dependencies=(shared.ref,))
-    catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
     graph = resolve_published(catalog, root.ref)
-    assert {record.ref for record in graph.records} == {root.ref, left.ref, right.ref, shared.ref}
+    assert {record.ref for record in graph.records} == {
+        root.ref.without_revision(),
+        left.ref,
+        right.ref,
+        shared.ref,
+    }
     assert graph.dependencies == tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
     assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies() == (left, right)
     assert Ref(**shared.ref.to_dict(), catalog=catalog).find_dependents(
@@ -117,11 +122,11 @@ def test_resolution_is_stable_when_new_consumers_are_published(catalog: Catalog)
         release("leaf", catalog=catalog),
         release("consumer", catalog=catalog),
     )
-    catalog.publish(local_record(leaf))
-    catalog.publish(local_record(root), dependencies=(leaf.ref,))
+    leaf = catalog.publish(local_record(leaf))
+    root = catalog.publish(local_record(root), dependencies=(leaf.ref,))
     graph = resolve_published(catalog, root.ref)
     before = graph_json(graph)
-    catalog.publish(local_record(consumer), dependencies=(root.ref,))
+    consumer = catalog.publish(local_record(consumer), dependencies=(root.ref,))
     assert graph_json(resolve_published(catalog, root.ref)) == before
     assert Ref(**root.ref.to_dict(), catalog=catalog).find_dependents(
         candidates=SearchQuery(), transitive=False
@@ -131,10 +136,12 @@ def test_resolution_is_stable_when_new_consumers_are_published(catalog: Catalog)
 @pytest.mark.parametrize("length", [1, 40])
 def test_resolution_returns_the_entire_graph(catalog: Catalog, length: int) -> None:
     records = tuple(release(f"part-{index:04}", catalog=catalog) for index in range(length + 1))
-    edges = tuple(Dependency(source.ref, target.ref) for source, target in pairwise(records))
     catalog.publish(local_record(records[-1]))
     for source, target in reversed(tuple(pairwise(records))):
         catalog.publish(local_record(source), dependencies=(target.ref,))
+    records = tuple(record.ref.get() for record in records)
+    edges = tuple(Dependency(source.ref, target.ref) for source, target in pairwise(records))
+    edges = (Dependency(records[0].ref.without_revision(), records[1].ref), *edges[1:])
     result = resolve_published(catalog, records[0].ref)
     assert result.records == (local_record(records[0]), *records[1:])
     assert set(result.dependencies) == set(edges)
@@ -153,7 +160,7 @@ def test_missing_graph_roots_are_errors(catalog: Catalog) -> None:
 def test_payload_changes_do_not_change_the_publication(catalog: Catalog) -> None:
     nested: list[JSON] = [1, {"nested": [2]}]
     item = Record(release("data", catalog=catalog).ref, {"items": nested})
-    catalog.publish(local_record(item))
+    item = catalog.publish(local_record(item))
     nested.clear()
     stored = Ref(**item.ref.to_dict(), catalog=catalog).get()
     assert stored.payload == {"items": (1, {"nested": (2,)})}

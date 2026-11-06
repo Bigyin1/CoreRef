@@ -59,7 +59,12 @@ def test_conan_coordinates_reject_lossy_conversion(
 def test_reference_round_trip(*, catalog: Catalog) -> None:
     ref = record("be", "4.0", package_type="lib-lef", catalog=catalog).ref
     assert to_conan_reference(ref) == "soc.cpu.be.lib-lef/4.0"
-    assert from_conan_reference("soc.cpu.be.lib-lef/4.0#" + "a" * 32, catalog=catalog) == ref
+    assert (
+        from_conan_reference(
+            "soc.cpu.be.lib-lef/4.0#" + "a" * 32, catalog=catalog
+        ).without_revision()
+        == ref
+    )
     with pytest.raises(InvalidPackage):
         from_conan_reference("ordinary-library/1.0@user/channel", catalog=catalog)
     with pytest.raises(InvalidPackage):
@@ -80,7 +85,7 @@ def test_publish_uses_one_export_pkg_without_graph_or_export_commands(
 
     monkeypatch.setattr(conan_catalog._client, "run", track)
     published = conan_catalog.publish(local_record(record(catalog=conan_catalog)))
-    assert published.ref == record(catalog=conan_catalog).ref
+    assert published.ref.without_revision() == record(catalog=conan_catalog).ref
     assert sum(arguments[0] == "export-pkg" for arguments in operations) == 1
     assert not any(arguments[0] == "export" for arguments in operations)
     assert not any(arguments[:2] == ("graph", "info") for arguments in operations)
@@ -118,10 +123,9 @@ def test_conan_round_trip_search_and_project_lockfile(
         record(catalog=conan_catalog),
         record("be", "4.0", package_type="lib-lef", catalog=conan_catalog),
     )
-    edge = Dependency(be.ref, rtl.ref)
     catalog = conan_catalog
-    catalog.publish(local_record(rtl))
-    catalog.publish(local_record(be), dependencies=(rtl.ref,))
+    rtl = catalog.publish(local_record(rtl))
+    be = catalog.publish(local_record(be), dependencies=(rtl.ref,))
     stored = Ref(**rtl.ref.to_dict(), catalog=catalog).get()
     assert stored.payload == {"files": ("cpu.rtl",)}
     assert Ref(**be.ref.to_dict(), catalog=catalog).get().ref == be.ref
@@ -135,7 +139,7 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert not catalog.search(SearchQuery(component="missing"))
     assert not catalog.search(SearchQuery(component=""))
     expected = resolve_published(catalog, be.ref)
-    assert expected.dependencies == (edge,)
+    assert expected.dependencies == (Dependency(be.ref.without_revision(), rtl.ref),)
     assert len(expected.networkx) == 2
     assert Ref(**be.ref.to_dict(), catalog=catalog).dependencies()[0] == stored
     assert (
@@ -158,8 +162,7 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert resolve_published(catalog, be.ref, lockfile=lockfile) == expected
     catalog.publish(local_record(record(version="2.0", catalog=conan_catalog)))
     assert resolve_published(catalog, be.ref) == expected
-    with pytest.raises(Conflict):
-        catalog.publish(local_record(be))
+    assert catalog.publish(local_record(be), dependencies=(rtl.ref,)) == be
     with pytest.raises(NotFound):
         Ref(**record(name="missing", catalog=conan_catalog).ref.to_dict(), catalog=catalog).get()
 
@@ -172,12 +175,12 @@ def test_conan_reverse_search_uses_each_candidates_graph(conan_catalog: Catalog)
         for version in ("4.0", "5.0", "6.0")
     )
     catalog = conan_catalog
-    catalog.publish(local_record(rtl))
-    catalog.publish(local_record(other))
-    catalog.publish(local_record(mid), dependencies=(rtl.ref,))
-    catalog.publish(local_record(be), dependencies=(mid.ref,))
-    catalog.publish(local_record(wrong), dependencies=(other.ref,))
-    catalog.publish(local_record(unrelated))
+    rtl = catalog.publish(local_record(rtl))
+    other = catalog.publish(local_record(other))
+    mid = catalog.publish(local_record(mid), dependencies=(rtl.ref,))
+    be = catalog.publish(local_record(be), dependencies=(mid.ref,))
+    wrong = catalog.publish(local_record(wrong), dependencies=(other.ref,))
+    unrelated = catalog.publish(local_record(unrelated))
     query = SearchQuery(namespace="soc", component="cpu", type="lib-lef", view="be")
     assert tuple(
         r.ref for r in Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(candidates=query)
@@ -210,7 +213,7 @@ def test_conan_rejects_conflicting_direct_requirements(conan_catalog: Catalog) -
     first = conan_catalog.publish(local_record(first))
     second = conan_catalog.publish(local_record(second))
     with pytest.raises(CatalogError):
-        conan_catalog.publish(local_record(root), dependencies=(first.ref, second.ref))
+        root = conan_catalog.publish(local_record(root), dependencies=(first.ref, second.ref))
     assert (
         Ref(**first.ref.to_dict(), catalog=conan_catalog).get(),
         Ref(**second.ref.to_dict(), catalog=conan_catalog).get(),
@@ -229,7 +232,7 @@ def test_native_conan_diamond_conflict_is_a_domain_error(conan_catalog: Catalog)
     left = conan_catalog.publish(local_record(left), dependencies=(first.ref,))
     right = conan_catalog.publish(local_record(right), dependencies=(second.ref,))
     with pytest.raises(Conflict):
-        conan_catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
+        root = conan_catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
     assert (
         Ref(**left.ref.to_dict(), catalog=conan_catalog).get(),
         Ref(**right.ref.to_dict(), catalog=conan_catalog).get(),
@@ -241,7 +244,7 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
         record(catalog=conan_catalog),
         record("be", "4.0", package_type="lib-lef", catalog=conan_catalog),
     )
-    conan_catalog.publish(local_record(rtl))
+    rtl = conan_catalog.publish(local_record(rtl))
     build = tmp_path / "external-ci"
     LocalRecipe(local_record(be), (to_conan_reference(rtl.ref),)).write(build)
     cli = conan_catalog._client
@@ -255,7 +258,7 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
         "--no-remote",
     )
     cli.run("export", str(build), "--no-remote")
-    assert Ref(**be.ref.to_dict(), catalog=conan_catalog).get().ref == be.ref
+    assert Ref(**be.ref.to_dict(), catalog=conan_catalog).get().ref.without_revision() == be.ref
     assert resolve_published(conan_catalog, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
 
 
@@ -265,8 +268,8 @@ def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None
         record(catalog=conan_catalog),
         record("be", package_type="lib-lef", catalog=conan_catalog),
     )
-    conan_catalog.publish(local_record(rtl))
-    conan_catalog.publish(local_record(be), dependencies=(rtl.ref,))
+    rtl = conan_catalog.publish(local_record(rtl))
+    be = conan_catalog.publish(local_record(be), dependencies=(rtl.ref,))
     folder = conan_catalog._package(be.ref).recipe().directory
     if damage == "missing":
         (folder / "record.json").unlink()
@@ -282,17 +285,17 @@ def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None
         resolve_published(conan_catalog, be.ref)
 
 
-def test_multiple_revisions_are_not_silently_selected(
+def test_latest_and_explicit_revisions_are_independently_accessible(
     conan_catalog: Catalog, tmp_path: Path
 ) -> None:
     original = record(catalog=conan_catalog)
-    conan_catalog.publish(local_record(original))
+    original = conan_catalog.publish(local_record(original))
     folder = tmp_path / "replacement"
     LocalRecipe(local_record(replace(original, payload={"different": True}))).write(folder)
     conan_catalog._client.create_lockfile(folder)
     conan_catalog._client.export(folder)
-    with pytest.raises(Conflict):
-        Ref(**original.ref.to_dict(), catalog=conan_catalog).get()
+    assert original.ref.get().ref == original.ref
+    assert original.ref.without_revision().get().payload == {"different": True}
 
 
 def test_upload_failure_is_reported_for_the_single_package(
@@ -306,7 +309,7 @@ def test_upload_failure_is_reported_for_the_single_package(
 
     monkeypatch.setattr(conan_catalog._client, "upload", fail_upload)
     with pytest.raises(CatalogError, match="simulated lost response"):
-        conan_catalog.publish(local_record(root))
+        root = conan_catalog.publish(local_record(root))
 
 
 def test_command_os_error_is_not_not_found(
@@ -334,10 +337,10 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         record(name="bbb-right", catalog=conan_catalog),
     )
     shared = record(name="zzz-shared", catalog=conan_catalog)
-    conan_catalog.publish(local_record(shared))
-    conan_catalog.publish(local_record(left), dependencies=(shared.ref,))
-    conan_catalog.publish(local_record(right), dependencies=(shared.ref,))
-    conan_catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
+    shared = conan_catalog.publish(local_record(shared))
+    left = conan_catalog.publish(local_record(left), dependencies=(shared.ref,))
+    right = conan_catalog.publish(local_record(right), dependencies=(shared.ref,))
+    root = conan_catalog.publish(local_record(root), dependencies=(left.ref, right.ref))
     graph = conan_catalog._client.graph(conan_catalog._package(root.ref).recipe().directory)
     assert isinstance(graph, DepsGraph)
     assert len(graph.nodes) == 4
@@ -359,8 +362,8 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         dependencies.host[to_conan_reference(shared.ref)].ref.name == "soc.zzz-shared.rtl.default"
     )
     edges = (
-        Dependency(root.ref, left.ref),
-        Dependency(root.ref, right.ref),
+        Dependency(root.ref.without_revision(), left.ref),
+        Dependency(root.ref.without_revision(), right.ref),
         Dependency(left.ref, shared.ref),
         Dependency(right.ref, shared.ref),
     )
@@ -393,8 +396,8 @@ def test_native_graph_reports_missing_pinned_dependency(conan_catalog: Catalog) 
         record(catalog=conan_catalog),
         record("be", package_type="lib-lef", catalog=conan_catalog),
     )
-    conan_catalog.publish(local_record(rtl))
-    conan_catalog.publish(local_record(macro), dependencies=(rtl.ref,))
+    rtl = conan_catalog.publish(local_record(rtl))
+    macro = conan_catalog.publish(local_record(macro), dependencies=(rtl.ref,))
     conan_catalog._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
     with pytest.raises(CatalogError):
         conan_catalog._client.graph(conan_catalog._package(macro.ref).recipe().directory)
@@ -409,7 +412,7 @@ def test_native_api_failure_is_a_catalog_error(
     from hwcatalog._internal import client
 
     root = record(catalog=conan_catalog)
-    conan_catalog.publish(local_record(root))
+    root = conan_catalog.publish(local_record(root))
 
     def fail(*_args: object, **_kwargs: object) -> object:
         raise ConanException("simulated API failure")
@@ -429,7 +432,7 @@ def test_native_graph_computation_does_not_spawn_a_conan_process(
     monkeypatch.setattr(subprocess, "run", reject_subprocess)
     monkeypatch.setattr(subprocess, "Popen", reject_subprocess)
     root = record(catalog=conan_catalog)
-    conan_catalog.publish(local_record(root))
+    root = conan_catalog.publish(local_record(root))
     assert Ref(**root.ref.to_dict(), catalog=conan_catalog).get().ref == root.ref
     assert conan_catalog.search(SearchQuery())[0].ref == root.ref
     assert len(resolve_published(conan_catalog, root.ref).records) == 1
@@ -441,9 +444,9 @@ def test_native_graph_rejects_an_unlocked_transitive_dependency(
     root, middle, leaf = (
         record(name=name, catalog=conan_catalog) for name in ("root", "middle", "leaf")
     )
-    conan_catalog.publish(local_record(leaf))
-    conan_catalog.publish(local_record(middle), dependencies=(leaf.ref,))
-    conan_catalog.publish(local_record(root), dependencies=(middle.ref,))
+    leaf = conan_catalog.publish(local_record(leaf))
+    middle = conan_catalog.publish(local_record(middle), dependencies=(leaf.ref,))
+    root = conan_catalog.publish(local_record(root), dependencies=(middle.ref,))
     lock_path = Graph(
         conan_catalog,
         local_record(record(name="consumer", catalog=conan_catalog)),
@@ -475,7 +478,7 @@ def test_default_cache_uses_conan_home_and_stays_bound_to_it(
     catalog = connection
     catalog.publish(local_record(record(catalog=catalog)))
     assert (
-        Ref(**record(catalog=catalog).ref.to_dict(), catalog=catalog).get().ref
+        Ref(**record(catalog=catalog).ref.to_dict(), catalog=catalog).get().ref.without_revision()
         == record(catalog=catalog).ref
     )
     assert not other.exists()

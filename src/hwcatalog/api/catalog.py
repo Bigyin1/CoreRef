@@ -17,9 +17,14 @@ class Catalog:
     ) -> None:
         self._client = ConanClient(Path(home) if home is not None else None, remote, timeout)
 
-    def search(self, query: SearchQuery = SearchQuery()) -> tuple[Record, ...]:
-        """Find records matching the exact coordinate filters."""
-        records = (package.recipe().record for package in self._packages(query))
+    def search(
+        self, query: SearchQuery = SearchQuery(), *, all_revisions: bool = False
+    ) -> tuple[Record, ...]:
+        """Find latest matching revisions, or history when all_revisions is requested."""
+        records = (
+            package.recipe().record
+            for package in self._packages(query, all_revisions=all_revisions)
+        )
         return query.select(records)
 
     def publish(
@@ -40,15 +45,18 @@ class Catalog:
     ) -> LocalPackage:
         return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)
 
-    def _packages(self, query: SearchQuery) -> tuple[StoredPackage, ...]:
-        pattern = query.conan_pattern
+    def _packages(
+        self, query: SearchQuery, *, all_revisions: bool = False
+    ) -> tuple[StoredPackage, ...]:
+        pattern = query.conan_pattern(all_revisions=all_revisions)
         if pattern is None:
             return ()
         packages = []
         for reference, revisions in self._client.index(pattern).items():
-            ref = from_conan_reference(reference, catalog=self)
-            if query.matches_ref(ref):
-                packages.append(StoredPackage(ref).load(revisions))
+            for revision in revisions.revisions:
+                ref = from_conan_reference(f"{reference}#{revision}", catalog=self)
+                if query.matches_ref(ref):
+                    packages.append(StoredPackage(ref).load())
         return tuple(packages)
 
 

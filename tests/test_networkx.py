@@ -27,6 +27,7 @@ def test_export_preserves_exact_dependency_directions(*, catalog: Catalog) -> No
     for record in (left, right):
         catalog.publish(local_record(record))
     snapshot = Graph(catalog, local_record(source), dependencies=(left.ref, right.ref))
+    left, right = left.ref.get(), right.ref.get()
     graph = snapshot.networkx
     assert graph.number_of_nodes() == 3 and graph.number_of_edges() == 2
     assert not graph.has_edge(left.ref, source.ref)
@@ -38,7 +39,7 @@ def test_export_preserves_exact_dependency_directions(*, catalog: Catalog) -> No
 
 def test_export_is_detached_and_payloads_stay_frozen(*, catalog: Catalog) -> None:
     source = release("source", manifest={"nested": {"ports": [1, 2]}}, catalog=catalog)
-    catalog.publish(local_record(source))
+    source = catalog.publish(local_record(source))
     result = release("result", catalog=catalog)
     snapshot = Graph(catalog, local_record(result), dependencies=(source.ref,))
     edge = snapshot.dependencies[0]
@@ -68,8 +69,9 @@ def test_ordering_prunes_private_branches_and_keeps_shared_dependencies(
     )
     for record in (common, private):
         catalog.publish(local_record(record))
-    catalog.publish(local_record(cpu), dependencies=(common.ref, private.ref))
-    catalog.publish(local_record(gpio), dependencies=(common.ref,))
+    cpu = catalog.publish(local_record(cpu), dependencies=(common.ref, private.ref))
+    gpio = catalog.publish(local_record(gpio), dependencies=(common.ref,))
+    common, cpu, gpio, private = (record.ref.get() for record in (common, cpu, gpio, private))
     snapshot = Graph(catalog, local_record(top), dependencies=(cpu.ref, gpio.ref))
     original = tuple(snapshot.networkx.edges)
     selected = snapshot.ordered_refs(top.ref, stop_at=(cpu.ref,))
@@ -88,14 +90,14 @@ def test_ordering_prunes_private_branches_and_keeps_shared_dependencies(
 
 def test_ordering_rejects_unknown_roots_and_hidden_stops(*, catalog: Catalog) -> None:
     root, middle, leaf = (release(name, catalog=catalog) for name in ("root", "middle", "leaf"))
-    catalog.publish(local_record(leaf))
-    catalog.publish(local_record(middle), dependencies=(leaf.ref,))
+    leaf = catalog.publish(local_record(leaf))
+    middle = catalog.publish(local_record(middle), dependencies=(leaf.ref,))
     snapshot = Graph(catalog, local_record(root), dependencies=(middle.ref,))
     absent = release("absent", catalog=catalog).ref
     with pytest.raises(ValueError, match="Unknown"):
         snapshot.ordered_refs(absent)
     for stops in ((root.ref,), (absent,)):
-        with pytest.raises(ValueError, match="Stop references"):
+        with pytest.raises(ValueError, match=r"Stop references|Unknown reference"):
             snapshot.ordered_refs(root.ref, stop_at=stops)
     with pytest.raises(ValueError, match="hidden or unreachable"):
         snapshot.ordered_refs(root.ref, stop_at=(middle.ref, leaf.ref))

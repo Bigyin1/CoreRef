@@ -11,7 +11,7 @@ from dulwich.repo import Repo
 from examples.conan_config import configured_home
 from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from hwcatalog.api.errors import CatalogError, InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency
 from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record, resolve_published
@@ -40,14 +40,13 @@ def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path
     assert record.ref.get() == record
     assert record.ref.dependencies() == (rtl,)
     assert resolve_published(packages, record.ref).dependencies == (
-        Dependency(record.ref, rtl.ref),
+        Dependency(record.ref.without_revision(), rtl.ref),
     )
     artifact.unlink()
     content = record.ref.get().files["timing/cpu.lib"]
     assert content.read_bytes() == b"library(cpu) {}\n\x00"
     assert record.ref.get().files["timing/cpu.lib"] == content
-    with pytest.raises(Conflict):
-        packages.publish(local_record(record))
+    assert packages.publish(local_record(record), dependencies=(rtl.ref,)) == record
 
 
 def test_local_source_is_captured_once_outside_payload(packages: Catalog, checkout: Path) -> None:
@@ -91,8 +90,9 @@ def test_pinned_source_round_trip_uses_conan_scm(
     fetched = record.ref.get_with_sources()
     assert fetched.source is not None
     assert (fetched.source / "cpu.sv").is_file()
-    with pytest.raises(Conflict):
-        catalog.publish(local_record(description))
+    changed = catalog.publish(local_record(description))
+    assert changed.ref != record.ref
+    assert record.ref.get_with_sources().source == fetched.source
 
 
 def test_dirty_source_fails_before_publication(
@@ -138,7 +138,7 @@ def test_invalid_artifact_inputs_do_not_publish(
     elif problem == "overlap":
         files["a/b"] = artifact
     with pytest.raises(InvalidPackage):
-        packages.publish(local_record(record, files=files))
+        record = packages.publish(local_record(record, files=files))
     assert not packages.search()
 
 
@@ -151,7 +151,7 @@ def test_invalid_source_inputs_do_not_publish(
     if problem == "file":
         source_path.write_text("not a checkout")
     with pytest.raises(InvalidPackage):
-        packages.publish(local_record(record, source=source_path))
+        record = packages.publish(local_record(record, source=source_path))
     assert not packages.search()
 
 
@@ -159,7 +159,7 @@ def test_missing_content_and_record(packages: Catalog) -> None:
     record = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=packages))
     with pytest.raises(NotFound):
         record.ref.get()
-    packages.publish(local_record(record))
+    record = packages.publish(local_record(record))
     assert record.ref.get().files == {}
 
 
@@ -203,7 +203,7 @@ def test_requirements_and_scm_share_one_exported_conandata(
     assert not (recipe.directory / "hwcatalog.json").exists()
     assert set(data) == {"requires", "scm"}
     assert tuple(data["requires"]) == recipe.requirements
-    assert data["requires"][0].startswith(f"{dependency.ref}#")
+    assert data["requires"][0] == str(dependency.ref)
     assert data["scm"]["commit"] == _commit(checkout)
     assert recipe.has_source
     assert parent.ref.dependencies() == (dependency,)

@@ -21,6 +21,7 @@ NAME_PART = RegexBuilder().one_or_more().use(_NAME_CHARACTER).to_regex().compile
 VERSION = (
     RegexBuilder().use(_VERSION_START).between(1, 100).use(_VERSION_CHARACTER).to_regex().compiled
 )
+REVISION = RegexBuilder().one_or_more().use(_ALPHANUMERIC).to_regex().compiled
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 
@@ -38,20 +39,25 @@ def to_conan_reference(ref: Ref) -> str:
     if ref.subcomponent is not None and not NAME_PART.fullmatch(ref.subcomponent):
         raise InvalidPackage("Subcomponent must be a nonempty lowercase token")
     name = ref.package_name
-    value = str(ref)
+    value = str(ref.without_revision())
     if (
         len(name) > _MAX_NAME_LENGTH
         or len(value) > _MAX_REFERENCE_LENGTH
         or not VERSION.fullmatch(ref.version)
     ):
         raise InvalidPackage("Reference exceeds Conan name/version constraints")
-    return value
+    if ref.revision is not None and (
+        not REVISION.fullmatch(ref.revision) or ref.revision == "latest"
+    ):
+        raise InvalidPackage(f"Invalid concrete recipe revision: {ref.revision!r}")
+    return str(ref)
 
 
 def from_conan_reference(value: str, *, catalog: Catalog) -> Ref:
-    """Decode a recipe reference; revisions and timestamps are transport details."""
+    """Decode coordinates and a recipe revision, omitting transport timestamps."""
     try:
-        name, version = value.split("#", 1)[0].split("/")
+        reference = value.split("%", 1)[0]
+        name, version = reference.split("#", 1)[0].split("/")
         namespace, component, view, package_type = name.split(".")
         component, separator, subcomponent = component.partition("_")
         ref = Ref(
@@ -61,9 +67,10 @@ def from_conan_reference(value: str, *, catalog: Catalog) -> Ref:
             package_type,
             version,
             subcomponent=subcomponent if separator else None,
+            revision=reference.partition("#")[2] or None,
             catalog=catalog,
         )
-        if to_conan_reference(ref) != value.split("#", 1)[0]:
+        if to_conan_reference(ref) != reference:
             raise ValueError("Noncanonical coordinates")
         return ref
     except (ValueError, InvalidPackage) as exc:

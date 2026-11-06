@@ -24,18 +24,30 @@ class ResolvedConanGraph:
     def references(self) -> tuple[str, ...]:
         return tuple(package.ref.repr_notime() for package in self._packages)
 
+    @property
+    def direct_references(self) -> tuple[str, ...]:
+        return tuple(
+            package.ref.repr_notime()
+            for package in self.native.root.conanfile.dependencies.direct_host.values()
+        )
+
     def package(self, ref: Ref) -> NativePackage:
-        return self.native.root.conanfile.dependencies.host[str(ref)]
+        package = self.native.root.conanfile.dependencies.host[str(ref.without_revision())]
+        if ref.revision is not None and package.ref.revision != ref.revision:
+            raise InvalidPackage(f"Conan selected a different revision for {ref}")
+        return package
 
     def contains(self, ref: Ref) -> bool:
+        if ref.revision is not None:
+            return str(ref) in self.references
         return any(reference.split("#", 1)[0] == str(ref) for reference in self.references)
 
     def result(self, root: LocalRecord | Record, dependencies: tuple[Record, ...]) -> GraphData:
         package = self.native.root.conanfile
-        if str(package.ref) != str(root.ref):
+        if str(package.ref) != str(root.ref.without_revision()):
             raise InvalidPackage("Conan graph root differs from the requested reference")
         self._validate_package(package)
-        records = {str(record.ref): record for record in (root, *dependencies)}
+        records = {str(record.ref.without_revision()): record for record in (root, *dependencies)}
         return (
             tuple(sorted(records.values(), key=lambda record: record.ref)),
             self._edges(records),

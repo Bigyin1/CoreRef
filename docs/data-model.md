@@ -1,8 +1,8 @@
 # Структуры данных
 
 Ref — пять обязательных строк namespace/component/view/type/version и необязательный
-subcomponent (по умолчанию None). Conan-имя имеет формат
-namespace.component[_subcomponent].view.type/version. Например,
+subcomponent и revision (по умолчанию None). Conan-имя имеет формат
+namespace.component[_subcomponent].view.type/version[#revision]. Например,
 soc.mmu.rtl.default/1.0 и soc.mmu_tlb.be.lib-lef/4.0. Все координаты входят в identity,
 равенство, хеш и сортировку. При сериализации отсутствующий subcomponent опускается.
 Первый `_` в сегменте компонента — разделитель; в самом component `_` запрещён,
@@ -81,3 +81,14 @@ subcomponent означает отсутствие ограничения; ст�
 сохраняя requires. Наличие scm определяет, есть ли Git-исходники. Флага has_source
 в файлах нет. StoredRecipe читает эти данные один раз за операцию, без исполнения
 рецепта и без дополнительного graph info. Старый формат пакетов не поддерживается.
+
+## Recipe revisions
+
+Ref.revision — конкретный RREV, а None означает незакреплённый выбор. Получение пакета
+превращает его в точный Ref. without_revision() снимает закрепление, сохраняя каталог.
+Revision входит в identity и inspection JSON; её сортировка стабильна, но не хронологична.
+Собственная revision отсутствует в переносимом record.json, потому что содержимое этого
+файла участвует в вычислении RREV. StoredRecipe добавляет её из загруженной ссылки.
+Локальный корень Graph или publish должен иметь revision=None; зависимости могут быть
+закреплёнными или разрешаться Conan с учётом проектного lockfile. Graph.requirements,
+опубликованные записи и концы рёбер содержат выбранные revisions.

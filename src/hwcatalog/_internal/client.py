@@ -13,9 +13,14 @@ from conan.api.output import ConanOutput  # type: ignore[import-untyped]
 from conan.api.subapi.lockfile import LockfileAPI  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 from conan.errors import ConanException  # type: ignore[import-untyped]
+from conan.internal.errors import (  # type: ignore[import-untyped]
+    ConanReferenceDoesNotExistInDB,
+    NotFoundException,
+)
 from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
     GraphConflictError,
     GraphLoopError,
+    GraphMissingError,
 )
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
@@ -45,14 +50,6 @@ class _API(Protocol):
 
 class RecipeRevisions(BaseModel):
     revisions: dict[str, object] = Field(default_factory=dict)
-
-    def pin(self, reference: str) -> str:
-        """Select the only revision allowed for one published package identity."""
-        if not self.revisions:
-            raise NotFound(reference)
-        if len(self.revisions) != 1:
-            raise Conflict(f"Multiple recipe revisions for {reference}")
-        return f"{reference}#{next(iter(self.revisions))}"
 
 
 class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
@@ -93,27 +90,41 @@ class ConanClient:
     def _execute(self, arguments: tuple[str, ...]) -> object:
         conan = ConanAPI(cache_folder=str(self.home))
         Cli(conan).add_commands()
-        result = cast(_API, conan).command.run(
-            [
-                *arguments,
-                "-vquiet",
-                "-cc",
-                "core:non_interactive=True",
-                "-cc",
-                f"core.net.http:timeout={self.timeout}",
-            ],
-            raise_on_errors=False,
-        )
+        try:
+            result = cast(_API, conan).command.run(
+                [
+                    *arguments,
+                    "-vquiet",
+                    "-cc",
+                    "core:non_interactive=True",
+                    "-cc",
+                    f"core.net.http:timeout={self.timeout}",
+                ],
+                raise_on_errors=False,
+            )
+        except (NotFoundException, ConanReferenceDoesNotExistInDB) as exc:
+            raise NotFound(str(exc)) from exc
         if isinstance(result, Mapping):
             if "graph" in result:
-                cast(NativeGraph, result["graph"]).report_graph_error()
+                self._check_graph(cast(NativeGraph, result["graph"]))
             if result.get("conan_error") is not None:
                 raise ConanException(str(result["conan_error"]))
         return result
 
+    def _check_graph(self, graph: NativeGraph) -> None:
+        try:
+            graph.report_graph_error()
+        except GraphMissingError as exc:
+            if "not found" in exc.missing_error.lower():
+                raise NotFound(str(exc)) from exc
+            raise
+
     def index(self, pattern: str) -> dict[str, RecipeRevisions]:
         source = ("--remote", self.remote) if self.remote else ()
         result = cast(Mapping[str, object], self.run("list", pattern, *source))
+        return self._entries(result)
+
+    def _entries(self, result: Mapping[str, object]) -> dict[str, RecipeRevisions]:
         try:
             groups = RecipeIndex.model_validate(result["results"]).root
         except (ValidationError, KeyError) as exc:
@@ -129,7 +140,14 @@ class ConanClient:
 
     def download_recipe(self, reference: str) -> Path:
         if self.remote:
-            self.run("download", reference, "--only-recipe", "--remote", self.remote)
+            result = cast(
+                Mapping[str, object],
+                self.run("download", reference, "--only-recipe", "--remote", self.remote),
+            )
+            entries = self._entries(result)
+            logical, _, revision = reference.partition("#")
+            if logical not in entries or revision not in entries[logical].revisions:
+                raise NotFound(reference)
         return self.cache_path(reference)
 
     def cache_path(self, reference: str) -> Path:
@@ -138,7 +156,9 @@ class ConanClient:
             raise CatalogError("Conan returned an invalid cache path")
         return Path(result)
 
-    def graph(self, directory: Path, *, lockfile: Path | None = None) -> NativeGraph:
+    def graph(
+        self, directory: Path, *, lockfile: Path | None = None, update: bool = False
+    ) -> NativeGraph:
         result = cast(
             Mapping[str, object],
             self.run(
@@ -147,6 +167,7 @@ class ConanClient:
                 str(directory / "conanfile.py"),
                 "--lockfile",
                 str(lockfile) if lockfile is not None else "",
+                *(("--update",) if update else ()),
                 *self.source_args,
             ),
         )

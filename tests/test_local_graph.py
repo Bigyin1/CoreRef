@@ -25,9 +25,10 @@ def record(name: str, version: str = "1.0", *, catalog: Catalog) -> Record:
 def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalog) -> None:
     catalog = local_catalog
     leaf, left, right = (record(name, catalog=local_catalog) for name in ("leaf", "left", "right"))
-    catalog.publish(local_record(leaf))
-    for branch in (left, right):
-        catalog.publish(local_record(branch), dependencies=(leaf.ref,))
+    leaf = catalog.publish(local_record(leaf))
+    left, right = (
+        catalog.publish(local_record(branch), dependencies=(leaf.ref,)) for branch in (left, right)
+    )
     root = Record(record("top", catalog=local_catalog).ref, {"local": ["working-tree"]})
     graph = Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
@@ -55,13 +56,13 @@ def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
 def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     catalog = local_catalog
     old, current, root = (record(name, catalog=local_catalog) for name in ("old", "current", "top"))
-    catalog.publish(local_record(old))
-    catalog.publish(local_record(current))
-    catalog.publish(local_record(root), dependencies=(old.ref,))
+    old = catalog.publish(local_record(old))
+    current = catalog.publish(local_record(current))
+    root = catalog.publish(local_record(root), dependencies=(old.ref,))
     local = replace(root, payload={"local": True})
     graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
-    assert graph.dependencies == (Dependency(root.ref, current.ref),)
+    assert graph.dependencies == (Dependency(root.ref.without_revision(), current.ref),)
     assert Ref(**root.ref.to_dict(), catalog=catalog).get() == root
     assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies() == (old,)
 
@@ -75,8 +76,8 @@ def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> 
     left, right, root = (record(name, catalog=local_catalog) for name in ("left", "right", "top"))
     for item in (first, second):
         catalog.publish(local_record(item))
-    catalog.publish(local_record(left), dependencies=(first.ref,))
-    catalog.publish(local_record(right), dependencies=(second.ref,))
+    left = catalog.publish(local_record(left), dependencies=(first.ref,))
+    right = catalog.publish(local_record(right), dependencies=(second.ref,))
     with pytest.raises(Conflict):
         Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
 
@@ -88,8 +89,8 @@ def test_local_graph_rejects_cycles_and_missing_dependencies(local_catalog: Cata
         Graph(catalog, local_record(root), dependencies=(root.ref,))
     with pytest.raises(NotFound):
         Graph(catalog, local_record(root), dependencies=(child.ref,))
-    catalog.publish(local_record(root))
-    catalog.publish(local_record(child), dependencies=(root.ref,))
+    root = catalog.publish(local_record(root))
+    child = catalog.publish(local_record(child), dependencies=(root.ref,))
     with pytest.raises(InvalidPackage):
         Graph(catalog, local_record(root), dependencies=(child.ref,))
 
@@ -129,8 +130,8 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(
     connection = Catalog(configured_home(tmp_path / "cache"))
     catalog = connection
     leaf, child, root = (record(name, catalog=catalog) for name in ("leaf", "child", "top"))
-    catalog.publish(local_record(leaf))
-    catalog.publish(local_record(child), dependencies=(leaf.ref,))
+    leaf = catalog.publish(local_record(leaf))
+    child = catalog.publish(local_record(child), dependencies=(leaf.ref,))
     lockfile = Graph(catalog, local_record(root), dependencies=(child.ref,)).create_lockfile(
         tmp_path / "project/conan.lock"
     )

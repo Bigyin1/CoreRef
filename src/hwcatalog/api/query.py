@@ -2,9 +2,8 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import cached_property
 
-from .._internal.references import COMPONENT_PART, NAME_PART, VERSION
+from .._internal.references import COMPONENT_PART, NAME_PART, REVISION, VERSION
 from .records import LocalRecord, Record, Ref
 
 
@@ -16,11 +15,11 @@ class SearchQuery:
     type: str | None = None
     version: str | None = None
     subcomponent: str | None = None
+    revision: str | None = None
 
-    @cached_property
-    def conan_pattern(self) -> str | None:
+    def conan_pattern(self, *, all_revisions: bool = False) -> str | None:
         """Narrow the Conan search; matches_ref applies exact filters to the results."""
-        patterns = {"component": COMPONENT_PART, "version": VERSION}
+        patterns = {"component": COMPONENT_PART, "version": VERSION, "revision": REVISION}
         if any(
             not patterns.get(field, NAME_PART).fullmatch(value)
             for field, value in self.criteria().items()
@@ -28,7 +27,8 @@ class SearchQuery:
             return None
         fields = (self.namespace, self._component_pattern, self.view, self.type)
         name = ".".join(value if value is not None else "*" for value in fields)
-        return f"{name}/{self.version if self.version is not None else '*'}#*"
+        revision = self.revision or ("*" if all_revisions else "latest")
+        return f"{name}/{self.version if self.version is not None else '*'}#{revision}"
 
     def criteria(self) -> dict[str, str]:
         """Return the specified exact filters."""
@@ -39,6 +39,7 @@ class SearchQuery:
             "type": self.type,
             "version": self.version,
             "subcomponent": self.subcomponent,
+            "revision": self.revision,
         }
         return {name: value for name, value in values.items() if value is not None}
 

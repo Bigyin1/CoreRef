@@ -47,9 +47,11 @@ def test_criteria_are_detached() -> None:
     ],
 )
 def test_query_matching_and_catalog_search_agree(catalog: Catalog, query: SearchQuery) -> None:
-    records = (release("rtl", catalog=catalog), run("synthesis", catalog=catalog))
-    for record in records:
-        catalog.publish(local_record(record))
+    records: tuple[Record, ...] = (
+        release("rtl", catalog=catalog),
+        run("synthesis", catalog=catalog),
+    )
+    records = tuple(catalog.publish(local_record(record)) for record in records)
     expected = tuple(record for record in records if query.matches(record))
     assert catalog.search(query) == tuple(sorted(expected, key=lambda record: record.ref))
 
@@ -59,7 +61,7 @@ def test_payload_cannot_override_identity(catalog: Catalog) -> None:
         Ref("demo", "source", "release", "default", "1.0", catalog=catalog),
         {"name": "wrong", "version": "wrong", "kind": "payload-kind", "namespace": "payload-ns"},
     )
-    catalog.publish(local_record(record))
+    record = catalog.publish(local_record(record))
     assert catalog.search(SearchQuery(component="source", version="1.0")) == (record,)
     assert not catalog.search(SearchQuery(component="wrong"))
     assert catalog.search(SearchQuery(view="release")) == (record,)
@@ -75,9 +77,8 @@ def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
         for kind in ("ip", "soc")
     )
     root = Record(Ref("demo", "top", "release", "default", "1.0", catalog=catalog))
-    for record in records:
-        catalog.publish(local_record(record))
-    catalog.publish(local_record(root), dependencies=tuple(record.ref for record in records))
+    records = tuple(catalog.publish(local_record(record)) for record in records)
+    root = catalog.publish(local_record(root), dependencies=tuple(record.ref for record in records))
     assert len(resolve_published(catalog, root.ref).records) == 5
     assert {
         record.ref for record in catalog.search(SearchQuery(component="core", version="1.0"))
@@ -95,9 +96,8 @@ def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) ->
     )
     records = tuple(Record(ref) for ref in refs)
     root = Record(Ref("demo", "top", "package", "default", "1.0", catalog=catalog))
-    for record in records:
-        catalog.publish(local_record(record))
-    catalog.publish(local_record(root), dependencies=refs)
+    records = tuple(catalog.publish(local_record(record)) for record in records)
+    root = catalog.publish(local_record(root), dependencies=refs)
     assert len(set(refs)) == len(refs)
     assert len({ref.package_name for ref in refs}) == len(refs)
     assert len(catalog.search(SearchQuery(component="same", version="1.0"))) == 3
@@ -118,8 +118,8 @@ def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catal
         local_record(Record(Ref("soc", "cpu", "be", "lib-lef", "1.0", catalog=catalog)))
     )
     assert len({rtl.ref, alternate.ref, be.ref}) == 3
-    assert str(rtl.ref) == "soc.cpu.rtl.default/1.0"
-    assert str(be.ref) == "soc.cpu.be.lib-lef/1.0"
+    assert str(rtl.ref.without_revision()) == "soc.cpu.rtl.default/1.0"
+    assert str(be.ref.without_revision()) == "soc.cpu.be.lib-lef/1.0"
     assert catalog.search(SearchQuery(view="rtl")) == (rtl, alternate)
     assert catalog.search(SearchQuery(type="gate")) == (alternate,)
     assert catalog.search(SearchQuery(view="be", type="lib-lef")) == (be,)
@@ -140,7 +140,7 @@ def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catal
     ],
 )
 def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str | None) -> None:
-    assert query.conan_pattern == pattern
+    assert query.conan_pattern(all_revisions=True) == pattern
 
 
 def test_selection_supports_local_and_stored_records_without_mutating_inputs(

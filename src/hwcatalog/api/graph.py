@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import networkx as nx
 
-from .errors import CatalogError
+from .errors import CatalogError, InvalidPackage
 from .records import LocalRecord, Record, Ref
 
 # NetworkX generics are provided by stubs, not its runtime classes.
@@ -45,9 +45,11 @@ class Graph:
         self.catalog = catalog
         self._package = catalog._local_package(record, dependencies, lockfile)
         self.record = self._package.record
-        self.requirements = self._package.dependencies
         self.lockfile = lockfile
         self.records, self.dependencies = self._package.result
+        self.requirements = tuple(
+            edge.target for edge in self.dependencies if edge.source == self.record.ref
+        )
         self._orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = {}
 
     def create_lockfile(self, path: str | Path | None = None) -> Path:
@@ -79,7 +81,12 @@ class Graph:
 
     def ordered_refs(self, root: Ref, *, stop_at: tuple[Ref, ...] = ()) -> tuple[Ref, ...]:
         """Order reachable dependencies first, treating stop_at references as leaves."""
-        key = (root, tuple(sorted(set(stop_at))))
+        try:
+            root = self._package.resolve_ref(root)
+            stops = tuple(self._package.resolve_ref(ref) for ref in stop_at)
+        except InvalidPackage as error:
+            raise ValueError(str(error)) from error
+        key = (root, tuple(sorted(set(stops))))
         if key not in self._orders:
             self._orders[key] = self._order(root, key[1])
         return self._orders[key]

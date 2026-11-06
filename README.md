@@ -3,7 +3,7 @@
 Экспериментальный каталог hardware-проектов на Conan 2.34, выделенный из hwcatalog
 (коммит `3dba7e2`). Дистрибутив — `hwcatalog-conan`, Python-пакет — `hwcatalog`.
 
-Ссылка имеет формат **namespace.component[_subcomponent].view.type/version**, например
+Ссылка имеет формат **namespace.component[_subcomponent].view.type/version[#revision]**, например
 `soc.cpu.rtl.default/1.0` и `soc.cpu_alu.be.lib-lef/4.0`. Пять основных полей обязательны;
 `subcomponent` — необязательная часть компонента, задаваемая именованным аргументом.
 Без неё имя сохраняет вид `soc.cpu.be.lib-lef/4.0`. Первый `_` отделяет subcomponent;
@@ -14,6 +14,19 @@
 Поиск `SearchQuery(namespace="soc", component="cpu", view="be")` возвращает и целое
 BE-представление, и его части. `subcomponent="alu"` сужает поиск до конкретной части.
 Связь с исходным RTL по-прежнему задаётся обычной зависимостью пакета.
+
+`Ref(..., revision=None, catalog=catalog)` обозначает последнюю recipe revision (RREV),
+а `revision="…"` закрепляет конкретную. `without_revision()` возвращает логические
+координаты с тем же каталогом. Полученные Record и опубликованные узлы Graph всегда
+содержат точную revision; локальный корень её не задаёт. Она участвует в равенстве и хеше.
+Повторный publish одной версии разрешён: Conan вычисляет revision по содержимому,
+одинаковые входы дают ту же revision. Старые revisions остаются доступны.
+
+`catalog.search(query)` возвращает последнюю revision каждого имени/версии.
+`catalog.search(query, all_revisions=True)` возвращает историю;
+`SearchQuery(revision="…")` задаёт точный фильтр в обоих режимах.
+Без lockfile незакреплённые зависимости проверяются на настроенном remote;
+lockfile сохраняет прежний выбор. Существующий Graph не меняет revisions после публикаций.
 
 В API разделены два состояния:
 
@@ -54,7 +67,8 @@ print(project.records, project.dependencies)
 ```
 
 `Catalog` предоставляет только `search` и `publish`. Публикация принимает один LocalRecord
-и уже опубликованные dependencies. Рецепт генерируется Jinja-шаблоном; один export-pkg
+и уже опубликованные dependencies. При наличии зависимостей один graph info выбирает
+их revisions с учётом lockfile; в рецепт записываются точные ссылки. Рецепт генерируется Jinja-шаблоном; один export-pkg
 создаёт пакет, upload отправляет его на remote. Локальный source передаётся SCM-механизму
 Conan: SDK не клонирует Git самостоятельно. Файлы files копируются в пакет;
 содержимое payload сохраняется как JSON.
@@ -81,7 +95,7 @@ ordered_records(root, stop_at=...) позволяет flow получить за
 Для пакетов, оставшихся после отбора, вызывают Graph.get_with_sources(refs): проверенные
 рецепты используются повторно, повторный запрос в пределах Graph не обращается к Conan.
 
-LocalRecord.to_json() готовит record.json: format, ref, payload и имена files.
+LocalRecord.to_json() готовит record.json: format, ref без собственной revision, payload и имена files.
 Маркер format=6 относится к нашему формату записи, а не к Conan или lockfile.
 Зависимости хранятся только в conandata.yml.requires; requirements() читает их
 через self.conan_data. SCM-координаты Conan добавляет в тот же conandata.yml.

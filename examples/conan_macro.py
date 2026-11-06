@@ -42,7 +42,7 @@ def main() -> None:
             dependencies = tuple(record.ref for record in result.ref.dependencies())
             graph = Graph(
                 catalog,
-                LocalRecord(result.ref, result.payload, files=result.files),
+                LocalRecord(result.ref.without_revision(), result.payload, files=result.files),
                 dependencies=dependencies,
             )
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")

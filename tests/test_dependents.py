@@ -18,12 +18,12 @@ def test_candidate_search_uses_arbitrary_paths_and_exact_versions(catalog: Catal
     macro = Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))
     wrong = Record(Ref("soc", "cpu", "be", "lib-lef", "5.0", catalog=catalog))
     unrelated = Record(Ref("soc", "cpu", "be", "lib-lef", "6.0", catalog=catalog))
-    catalog.publish(local_record(rtl))
-    catalog.publish(local_record(other))
-    catalog.publish(local_record(middle), dependencies=(rtl.ref,))
-    catalog.publish(local_record(macro), dependencies=(middle.ref,))
-    catalog.publish(local_record(wrong), dependencies=(other.ref,))
-    catalog.publish(local_record(unrelated))
+    rtl = catalog.publish(local_record(rtl))
+    other = catalog.publish(local_record(other))
+    middle = catalog.publish(local_record(middle), dependencies=(rtl.ref,))
+    macro = catalog.publish(local_record(macro), dependencies=(middle.ref,))
+    wrong = catalog.publish(local_record(wrong), dependencies=(other.ref,))
+    unrelated = catalog.publish(local_record(unrelated))
     query = SearchQuery(namespace="soc", component="cpu", type="lib-lef", view="be")
     assert Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(candidates=query) == (macro,)
     assert not Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(
@@ -48,8 +48,8 @@ def test_candidate_search_uses_arbitrary_paths_and_exact_versions(catalog: Catal
 def test_conflicting_versions_are_rejected_by_conan(catalog: Catalog) -> None:
     first = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
     second = Record(Ref("soc", "cpu", "rtl", "default", "2.0", catalog=catalog))
-    catalog.publish(local_record(first))
-    catalog.publish(local_record(second))
+    first = catalog.publish(local_record(first))
+    second = catalog.publish(local_record(second))
     with pytest.raises(CatalogError, match="Duplicated requirement"):
         catalog.publish(
             local_record(Record(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))),

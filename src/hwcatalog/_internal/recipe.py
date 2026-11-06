@@ -12,7 +12,7 @@ from jinja2 import Environment, PackageLoader, StrictUndefined
 
 from ..api.errors import CatalogError, InvalidPackage
 from ..api.records import LocalRecord, Record, Ref
-from .references import to_conan_reference
+from .references import from_conan_reference, to_conan_reference
 from .types import NativePackage
 
 _RECIPE_ENV = Environment(
@@ -42,7 +42,7 @@ class LocalRecipe:
 
     def write(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "conanfile.py").write_text(_recipe_text(self.record.ref))
+        (directory / "conanfile.py").write_text(_recipe_text(self.record.ref.without_revision()))
         (directory / "record.json").write_text(self.record.to_json())
         (directory / "conandata.yml").write_text(
             _CONANDATA_TEMPLATE.render(requirements=self.requirements)
@@ -65,6 +65,7 @@ class StoredRecipe:
 
     def __init__(self, directory: Path, expected: Ref, *, reference: str) -> None:
         self.reference = reference
+        expected = from_conan_reference(reference, catalog=expected._catalog)
         self.directory = directory
         try:
             self.record = self._read_record(expected)
@@ -94,9 +95,9 @@ class StoredRecipe:
             value["payload"],
             files=self._read_files(value.get("files", [])),
         )
-        if record.ref != expected:
+        if record.ref != expected.without_revision():
             raise ValueError("Record coordinates disagree with the recipe")
-        return record
+        return replace(record, ref=expected)
 
     def _read_files(self, names: object) -> dict[str, Path]:
         if not isinstance(names, list):
@@ -123,7 +124,9 @@ class StoredRecipe:
         return replace(self.record, source=source, files=files)
 
     def _read_data(self) -> Mapping[str, object]:
-        if (self.directory / "conanfile.py").read_text() != _recipe_text(self.record.ref):
+        if (self.directory / "conanfile.py").read_text() != _recipe_text(
+            self.record.ref.without_revision()
+        ):
             raise ValueError("Only canonical catalog recipes are supported")
         data = yaml.safe_load((self.directory / "conandata.yml").read_text())
         if not isinstance(data, Mapping):

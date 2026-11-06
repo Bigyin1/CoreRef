@@ -88,7 +88,7 @@ def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
     project = Graph(catalog, local_record(root))
     lockfile = project.create_lockfile(tmp_path / "empty/conan.lock")
     empty_lock = lockfile.read_bytes()
-    catalog.publish(local_record(root), lockfile=lockfile)
+    root = catalog.publish(local_record(root), lockfile=lockfile)
     assert project.records == (local_record(root),)
     consumer = Record(Ref("soc", "consumer", "rtl", "default", "1.0", catalog=catalog))
     Graph(catalog, local_record(consumer), dependencies=(root.ref,)).create_lockfile(lockfile)
