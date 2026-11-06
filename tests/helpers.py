@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph, GraphResult
+from hwcatalog.api.graph import Graph
 from hwcatalog.api.records import LocalRecord, Record, Ref
 from hwcatalog.api.types import JSON
 
@@ -60,7 +60,7 @@ def resources(record: Record) -> tuple[JSON, ...]:
     return items
 
 
-def graph_json(result: GraphResult) -> str:
+def graph_json(result: Graph) -> str:
     value = {
         "records": [
             (json.loads(record.to_json()) if isinstance(record, LocalRecord) else record.to_dict())
@@ -74,12 +74,12 @@ def graph_json(result: GraphResult) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = None) -> GraphResult:
+def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = None) -> Graph:
     """Inspect saved package data through the same resolver used for local inputs."""
     ref = Ref(**ref.to_dict(), catalog=catalog)
     record = ref.get()
     dependencies = tuple(item.ref for item in ref.dependencies())
-    return Graph(catalog, local_record(record), dependencies=dependencies, lockfile=lockfile).result
+    return Graph(catalog, local_record(record), dependencies=dependencies, lockfile=lockfile)
 
 
 def local_record(

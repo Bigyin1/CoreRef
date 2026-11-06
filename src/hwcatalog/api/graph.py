@@ -1,6 +1,6 @@
 """Resolved project snapshots, dependency ordering and project-owned lockfiles."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -27,15 +27,36 @@ class Dependency:
     target: Ref
 
 
-@dataclass(frozen=True)
-class GraphResult:
-    """A dependency snapshot with cached topology and dependency-first traversals."""
+@dataclass(init=False)
+class Graph:
+    """One resolved project with records, edges, traversals and lockfile operations."""
 
     records: tuple[LocalRecord | Record, ...]
     dependencies: tuple[Dependency, ...]
-    _orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = field(
-        default_factory=dict, init=False, repr=False, compare=False
-    )
+
+    def __init__(
+        self,
+        catalog: Catalog,
+        record: LocalRecord,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+        lockfile: Path | None = None,
+    ) -> None:
+        self.catalog = catalog
+        self._package = catalog._local_package(record, dependencies, lockfile)
+        self.record = self._package.record
+        self.requirements = self._package.dependencies
+        self.lockfile = lockfile
+        self.records, self.dependencies = self._package.result
+        self._orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = {}
+
+    def create_lockfile(self, path: str | Path | None = None) -> Path:
+        """Save the resolved graph through Conan; remember the path only after success."""
+        output = path if path is not None else self.lockfile
+        if output is None:
+            raise CatalogError("Provide a lockfile path in Graph or create_lockfile")
+        self.lockfile = self._package.create_lockfile(output)
+        return self.lockfile
 
     @cached_property
     def networkx(self) -> _RefGraph:
@@ -77,39 +98,9 @@ class GraphResult:
         reachable = {root, *nx.descendants(graph, root)}
         if not stops.issubset(reachable):
             raise ValueError("A stop reference is hidden or unreachable from the root")
-        try:
-            return tuple(
-                nx.lexicographical_topological_sort(graph.subgraph(reachable).reverse(copy=False))
-            )
-        except nx.NetworkXUnfeasible as error:
-            raise ValueError("Cycle in dependency graph") from error
+        return tuple(
+            nx.lexicographical_topological_sort(graph.subgraph(reachable).reverse(copy=False))
+        )
 
 
-class Graph:
-    """Resolve a local project once at construction and retain its exact graph snapshot."""
-
-    def __init__(
-        self,
-        catalog: Catalog,
-        record: LocalRecord,
-        *,
-        dependencies: tuple[Ref, ...] = (),
-        lockfile: Path | None = None,
-    ) -> None:
-        self.catalog = catalog
-        self._package = catalog._local_package(record, dependencies, lockfile)
-        self.record = self._package.record
-        self.dependencies = self._package.dependencies
-        self.lockfile = lockfile
-        self.result = self._package.result
-
-    def create_lockfile(self, path: str | Path | None = None) -> Path:
-        """Save the resolved graph through Conan; remember the path only after success."""
-        output = path if path is not None else self.lockfile
-        if output is None:
-            raise CatalogError("Provide a lockfile path in Graph or create_lockfile")
-        self.lockfile = self._package.create_lockfile(output)
-        return self.lockfile
-
-
-__all__ = ["Dependency", "Graph", "GraphResult"]
+__all__ = ["Dependency", "Graph"]

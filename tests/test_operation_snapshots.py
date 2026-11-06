@@ -20,12 +20,12 @@ def test_construction_snapshots_mutable_project(catalog: Catalog, tmp_path: Path
         Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog), payload, files=files
     )
     project = Graph(catalog, local)
-    first = project.result.records[0]
+    first = project.records[0]
     assert payload.calls == 1
     items.append("changed")
     files.clear()
     local.source = tmp_path
-    second = Graph(catalog, local).result.records[0]
+    second = Graph(catalog, local).records[0]
     assert payload.calls == 2
     assert first is not local and second is not local
     assert first.payload == {"items": ("original",)}
@@ -86,7 +86,8 @@ def test_construction_resolves_once_and_snapshots_before_conan(
     monkeypatch.setattr(catalog._client, "graph", change_inputs)
     project = Graph(catalog, local, dependencies=(dependency.ref,))
     assert calls == 1
-    result = project.result
-    assert len(result.dependencies) == 1
-    assert next(record for record in result.records if record.ref == local.ref).payload is None
-    assert project.result is result and calls == 1
+    assert len(project.dependencies) == 1
+    assert next(record for record in project.records if record.ref == local.ref).payload is None
+    assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
+    assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
+    assert calls == 1

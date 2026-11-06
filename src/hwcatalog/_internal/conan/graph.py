@@ -4,9 +4,11 @@ from collections.abc import Mapping
 from functools import cached_property
 
 from ...api.errors import InvalidPackage
-from ...api.graph import Dependency, GraphResult
+from ...api.graph import Dependency
 from ...api.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
+
+type GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[Dependency, ...]]
 
 
 class ResolvedConanGraph:
@@ -28,13 +30,13 @@ class ResolvedConanGraph:
     def contains(self, ref: Ref) -> bool:
         return any(reference.split("#", 1)[0] == str(ref) for reference in self.references)
 
-    def result(self, root: LocalRecord | Record, dependencies: tuple[Record, ...]) -> GraphResult:
+    def result(self, root: LocalRecord | Record, dependencies: tuple[Record, ...]) -> GraphData:
         package = self.native.root.conanfile
         if self._logical(package) != str(root.ref):
             raise InvalidPackage("Conan graph root differs from the requested reference")
         self._validate_package(package)
         records = {str(record.ref): record for record in (root, *dependencies)}
-        return GraphResult(
+        return (
             tuple(sorted(records.values(), key=lambda record: record.ref)),
             self._edges(records),
         )

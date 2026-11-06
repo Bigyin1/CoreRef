@@ -34,8 +34,8 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
     assert left_path != right_path
     assert left.lockfile == left_path
     assert right.lockfile == right_path
-    assert {record.ref for record in left.result.records} == {root.ref, first.ref}
-    assert {record.ref for record in right.result.records} == {right.record.ref, second.ref}
+    assert {record.ref for record in left.records} == {root.ref, first.ref}
+    assert {record.ref for record in right.records} == {right.record.ref, second.ref}
     right.create_lockfile()
     assert left_path.read_bytes() == left_lock
     assert catalog.search() == (first, second)
@@ -78,7 +78,7 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
     )
     local = local_record(Record(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog)))
     graph = Graph(catalog, local, dependencies=(dependency.ref,))
-    result = graph.result
+    records, edges = graph.records, graph.dependencies
 
     def reject(*_arguments: str) -> object:
         raise AssertionError("Saving a resolved graph must not issue more Conan commands")
@@ -87,5 +87,5 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         patch.setattr(catalog._client, "run", reject)
         lockfile = graph.create_lockfile(tmp_path / "conan.lock")
         assert graph.create_lockfile() == lockfile
-    assert graph.result is result
-    assert Graph(catalog, local, dependencies=(dependency.ref,), lockfile=lockfile).result == result
+    assert graph.records is records and graph.dependencies is edges
+    assert Graph(catalog, local, dependencies=(dependency.ref,), lockfile=lockfile) == graph

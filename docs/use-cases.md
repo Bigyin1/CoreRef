@@ -5,7 +5,7 @@
 
 ## RTL → LIB/LEF
 
-1. Передать LocalRecord и прямые зависимости в `Graph(catalog, record, dependencies=...).result`
+1. Передать LocalRecord и прямые зависимости в `Graph(catalog, record, dependencies=...)`
    и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
    из опубликованного пакета, его читают через `top_ref.get()` и `top_ref.dependencies()`.
 2. Для выбранного RTL вызвать `rtl_ref.find_dependents(
@@ -33,7 +33,7 @@ flowchart TB
 
 Прямой поиск `ref.dependencies()` возвращает Record входов узла;
 `ref.find_dependents(candidates=SearchQuery(), transitive=False)` — непосредственных
-потребителей. Для собственного анализа GraphResult.networkx
+потребителей. Для собственного анализа Graph.networkx
 предоставляет DiGraph. Экспорт и обработка выбранного графа не меняют публикации.
 
 Полный исполняемый пример находится в examples/conan_macro.py.

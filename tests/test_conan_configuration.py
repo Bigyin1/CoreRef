@@ -37,7 +37,7 @@ def test_configured_profile_defaults_are_used_without_rewriting(
     assert profiles["host"].settings["build_type"] == "Debug"
     assert profiles["build"].settings["build_type"] == "Release"
     root = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
-    assert Graph(catalog, local_record(root)).result.records == (local_record(root),)
+    assert Graph(catalog, local_record(root)).records == (local_record(root),)
     catalog.publish(local_record(root))
     assert before == {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
     assert config.read_text() == (

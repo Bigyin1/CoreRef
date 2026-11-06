@@ -29,7 +29,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     for branch in (left, right):
         catalog.publish(local_record(branch), dependencies=(leaf.ref,))
     root = Record(record("top", catalog=local_catalog).ref, {"local": ["working-tree"]})
-    graph = Graph(catalog, local_record(root), dependencies=(left.ref, right.ref)).result
+    graph = Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
     assert set(graph.dependencies) == {
         Dependency(root.ref, left.ref),
@@ -46,7 +46,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
 
 def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     root = record("top", catalog=local_catalog)
-    graph = Graph(local_catalog, local_record(root)).result
+    graph = Graph(local_catalog, local_record(root))
     assert graph.records == (local_record(root),)
     assert graph.dependencies == ()
     assert local_catalog.search() == ()
@@ -59,7 +59,7 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     catalog.publish(local_record(current))
     catalog.publish(local_record(root), dependencies=(old.ref,))
     local = replace(root, payload={"local": True})
-    graph = Graph(catalog, local_record(local), dependencies=(current.ref,)).result
+    graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
     assert graph.dependencies == (Dependency(root.ref, current.ref),)
     assert Ref(**root.ref.to_dict(), catalog=catalog).get() == root
@@ -135,10 +135,9 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(
         tmp_path / "project/conan.lock"
     )
     original = lockfile.read_bytes()
-    expected = Graph(catalog, local_record(root), dependencies=(child.ref,)).result
+    expected = Graph(catalog, local_record(root), dependencies=(child.ref,))
     assert (
-        Graph(catalog, local_record(root), dependencies=(child.ref,), lockfile=lockfile).result
-        == expected
+        Graph(catalog, local_record(root), dependencies=(child.ref,), lockfile=lockfile) == expected
     )
     assert lockfile.read_bytes() == original
     connection._client.run(

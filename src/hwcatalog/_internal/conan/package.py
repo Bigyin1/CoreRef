@@ -11,11 +11,10 @@ from typing import TYPE_CHECKING, Self
 from frozendict import deepfreeze, frozendict
 
 from ...api.errors import CatalogError, Conflict, InvalidPackage, NotFound
-from ...api.graph import GraphResult
 from ...api.query import SearchQuery
 from ...api.records import LocalRecord, Record, Ref
 from .client import RecipeRevisions
-from .graph import ResolvedConanGraph
+from .graph import GraphData, ResolvedConanGraph
 from .recipe import LocalRecipe, StoredRecipe
 from .references import from_conan_reference, to_conan_reference
 from .types import NativePackage
@@ -170,7 +169,7 @@ class LocalPackage:
             return ResolvedConanGraph(self._client.graph(directory, lockfile=self.lockfile))
 
     @cached_property
-    def result(self) -> GraphResult:
+    def result(self) -> GraphData:
         return self.graph.result(self.record, self._read_records(self.graph.references))
 
     def create_lockfile(self, path: str | Path) -> Path:

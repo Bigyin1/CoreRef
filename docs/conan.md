@@ -59,12 +59,12 @@ from hwcatalog.api.graph import Graph
 
 project = Graph(catalog, local, dependencies=())
 lockfile = project.create_lockfile(Path("/work/cpu/conan.lock"))
-result = project.result
+ordered = project.ordered_records(local.ref)
 ```
 
 Graph соответствует одному описанию проекта. Парсинг deps.toml и добавление зависимостей
 по результатам поиска выполняет flow. Локальный корень не публикуется для разрешения:
-GraphResult содержит LocalRecord корня и Record зависимостей. Source локального
+Graph содержит LocalRecord корня и Record зависимостей. Source локального
 корня уже доступен, для зависимостей flow вызывает Ref.get_with_sources().
 
 Lockfile принадлежит проекту и передаётся явно при публикации и разрешении. SDK не

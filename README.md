@@ -43,7 +43,7 @@ implementations = published.ref.find_dependents(
 )
 project = Graph(catalog, local, dependencies=())
 lockfile = project.create_lockfile(Path("/work/cpu/conan.lock"))
-resolved = project.result
+print(project.records, project.dependencies)
 ```
 
 `Catalog` предоставляет только `search` и `publish`. Публикация принимает один LocalRecord
@@ -66,7 +66,7 @@ Graph.create_lockfile() сохраняет уже разрешённый гра�
 Lockfile остаётся непрозрачным файлом проекта и явно передаётся при публикации.
 Если lockfile передан конструктору, он должен существовать; новый файл создают
 через project.create_lockfile(path) после разрешения проекта.
-GraphResult.networkx и результаты ordered_refs(root, stop_at=...) кэшируются.
+Graph.networkx и результаты ordered_refs(root, stop_at=...) кэшируются.
 ordered_records(root, stop_at=...) позволяет flow получить зависимости в порядке
 обработки и остановить обход на выбранных макроблоках, сохранив общие зависимости.
 
