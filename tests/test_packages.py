@@ -140,12 +140,8 @@ def test_invalid_native_scm_is_rejected(
         StoredRecipe.read(tmp_path, local.ref, reference=str(local.ref))
 
 
-@pytest.mark.parametrize(
-    "name", ["../escape", "/absolute", "a\\b", "a//b", "c:/escape", "name\0", "."]
-)
-def test_invalid_artifact_names_do_not_publish(
-    packages: Catalog, tmp_path: Path, name: str
-) -> None:
+@pytest.mark.parametrize("name", ["../escape", "/absolute"])
+def test_copy_cannot_escape_package_directory(packages: Catalog, tmp_path: Path, name: str) -> None:
     artifact = tmp_path / "input.txt"
     artifact.write_text("input")
     with pytest.raises(InvalidPackage):

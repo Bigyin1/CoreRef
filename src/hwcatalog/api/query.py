@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-from .._internal.validation import checked_text
 from .records import Record
 
 
@@ -13,10 +12,6 @@ class SearchQuery:
     view: str | None = None
     type: str | None = None
     version: str | None = None
-
-    def __post_init__(self) -> None:
-        for name, value in self.criteria().items():
-            object.__setattr__(self, name, checked_text(value, blank=True))
 
     def criteria(self) -> dict[str, str]:
         """Return the specified exact filters."""

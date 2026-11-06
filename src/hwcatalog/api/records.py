@@ -4,9 +4,10 @@ import json
 from collections.abc import Mapping
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, cast
 
-from .._internal.validation import checked_text, snapshot_files, snapshot_payload
+from frozendict import deepfreeze, frozendict
+
 from .protocols import JSONSerializable
 from .types import JSON
 
@@ -31,8 +32,6 @@ class Ref:
         if catalog is None:
             raise TypeError("Ref requires a catalog")
         object.__setattr__(self, "_catalog", catalog)
-        for name, value in self.to_dict().items():
-            object.__setattr__(self, name, checked_text(value))
 
     @property
     def package_name(self) -> str:
@@ -96,7 +95,9 @@ class LocalRecord:
 
     def to_json(self) -> str:
         """Prepare portable package metadata, excluding local source and artifact paths."""
-        payload = snapshot_payload(self.payload)
+        payload = self.payload
+        if isinstance(payload, JSONSerializable):
+            payload = json.loads(payload.to_json())
         value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
         if self.files:
             value["files"] = tuple(sorted(self.files))
@@ -113,12 +114,18 @@ class Record:
     files: Mapping[str, Path] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "payload", snapshot_payload(self.payload))
-        object.__setattr__(self, "files", snapshot_files(self.files))
+        payload = self.payload
+        if isinstance(payload, JSONSerializable):
+            payload = json.loads(payload.to_json())
+        object.__setattr__(
+            self, "payload", deepfreeze(json.loads(json.dumps(payload, allow_nan=False)))
+        )
+        object.__setattr__(self, "files", frozendict(self.files))
 
     def to_dict(self) -> dict[str, JSON]:
         """Expose downloaded metadata and paths, for inspection or CLI output."""
-        payload = snapshot_payload(self.payload)
+        # __post_init__ has already converted consumer objects into frozen JSON.
+        payload = cast(JSON, self.payload)
         value: dict[str, JSON] = {"ref": self.ref.to_dict(), "payload": payload}
         if self.source is not None:
             value["source"] = str(self.source)

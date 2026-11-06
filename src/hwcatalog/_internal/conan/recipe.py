@@ -125,6 +125,11 @@ class StoredRecipe:
             value["payload"],
             files={name: directory / "artifacts" / name for name in names},
         )
+        if any(
+            not path.resolve().is_relative_to((directory / "artifacts").resolve())
+            for path in record.files.values()
+        ):
+            raise ValueError("Artifact would escape the package directory")
         if record.ref != expected:
             raise ValueError("Record coordinates disagree with the recipe")
         return record

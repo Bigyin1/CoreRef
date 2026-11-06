@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
@@ -29,14 +28,14 @@ def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Cata
 
 
 @pytest.mark.parametrize("name,path", [("lib", Path("relative")), ("", Path("/data/lib"))])
-def test_package_files_require_names_and_absolute_paths(
+def test_package_file_input_validation_belongs_to_caller(
     catalog: Catalog, name: str, path: Path
 ) -> None:
     record = LocalRecord(
         Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), files={name: path}
     )
-    with pytest.raises(InvalidPackage):
-        catalog.publish(record)
+    assert record.files == {name: path}
+    assert Record(record.ref, files=record.files).files == record.files
 
 
 @pytest.mark.parametrize("paths", [{"lib": "relative/path"}, {"": "/unmounted/data"}])

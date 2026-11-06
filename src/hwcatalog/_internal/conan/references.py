@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from ...api.errors import InvalidPackage
 from ...api.query import SearchQuery
 from ...api.records import Ref
-from ..validation import checked_text
 
 if TYPE_CHECKING:
     from ...api.catalog import Catalog
@@ -19,8 +18,6 @@ _MAX_REFERENCE_LENGTH = 200
 
 def to_conan_reference(ref: Ref) -> str:
     """Encode a reference, rejecting names that cannot be represented without loss."""
-    for value in ref.to_dict().values():
-        checked_text(value)
     if ref.namespace.startswith("-") or not all(
         _TOKEN.fullmatch(value) for value in (ref.namespace, ref.component, ref.view, ref.type)
     ):

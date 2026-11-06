@@ -8,7 +8,7 @@ from enum import StrEnum
 import pytest
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import Conflict, InvalidPackage
+from hwcatalog.api.errors import Conflict
 from hwcatalog.api.protocols import JSONSerializable
 from hwcatalog.api.records import LocalRecord, Record, Ref
 from hwcatalog.api.types import JSON
@@ -110,11 +110,11 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
         (" ", "core", "release", "default", "1.0"),
     ],
 )
-def test_required_reference_fields(
+def test_reference_input_validation_belongs_to_caller(
     coordinates: tuple[str, str, str, str, str], catalog: Catalog
 ) -> None:
-    with pytest.raises(InvalidPackage):
-        Record(Ref(*coordinates, catalog=catalog))
+    ref = Ref(*coordinates, catalog=catalog)
+    assert tuple(ref.to_dict().values()) == coordinates
 
 
 class CustomKind(StrEnum):

@@ -1,16 +1,18 @@
 """Operations on one local package or one published package reference."""
 
+import json
 import shutil
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self
 
+from frozendict import deepfreeze, frozendict
+
 from ...api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from ...api.graph import GraphResult
 from ...api.query import SearchQuery
 from ...api.records import LocalRecord, Record, Ref
-from ..validation import snapshot_files, snapshot_payload
 from .client import RecipeRevisions
 from .graph import ResolvedConanGraph
 from .recipe import LocalRecipe, StoredRecipe
@@ -193,9 +195,9 @@ class LocalPackage:
         source = record.source.expanduser().absolute() if record.source is not None else None
         return LocalRecord(
             Ref(**record.ref.to_dict(), catalog=self._catalog),
-            snapshot_payload(record.payload),
+            deepfreeze(json.loads(record.to_json())["payload"]),
             source,
-            snapshot_files(record.files),
+            frozendict(record.files),
         )
 
     def _references(self, dependencies: tuple[Ref, ...]) -> tuple[Ref, ...]:
@@ -258,5 +260,7 @@ class LocalPackage:
     def _copy_files(directory: Path, record: LocalRecord) -> None:
         for name, path in record.files.items():
             destination = directory / "artifacts" / name
+            if not destination.resolve().is_relative_to((directory / "artifacts").resolve()):
+                raise InvalidPackage("Artifact would escape the package directory")
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, destination)
