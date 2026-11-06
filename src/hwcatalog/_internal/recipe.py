@@ -2,17 +2,17 @@
 
 import json
 import shutil
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
-import yaml  # type: ignore[import-untyped]  # Validated at this boundary.
-from edify import RegexBuilder
+import yaml  # type: ignore[import-untyped]
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ..api.errors import CatalogError, InvalidPackage
 from ..api.records import LocalRecord, Record, Ref
-from .references import from_conan_reference, to_conan_reference
+from .references import to_conan_reference
 from .types import NativePackage
 
 _RECIPE_ENV = Environment(
@@ -26,52 +26,11 @@ _RECIPE_ENV = Environment(
 _RECIPE_ENV.filters["pyrepr"] = repr
 _RECIPE_TEMPLATE = _RECIPE_ENV.get_template("conanfile.py.j2")
 _CONANDATA_TEMPLATE = _RECIPE_ENV.get_template("conandata.yml.j2")
-_HEX_DIGIT = RegexBuilder().any_of().range("a", "f").range("0", "9").end()
-_COMMIT = (
-    RegexBuilder()
-    .any_of()
-    .exactly(40)
-    .use(_HEX_DIGIT)
-    .exactly(64)
-    .use(_HEX_DIGIT)
-    .end()
-    .to_regex()
-    .compiled
-)
 
 
 def _recipe_text(ref: Ref) -> str:
     name, version = to_conan_reference(ref).split("/")
     return _RECIPE_TEMPLATE.render(name=name, version=version)
-
-
-class _SCM(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    url: str
-    commit: str
-    requested_ref: str = "HEAD"
-
-    @field_validator("commit")
-    @classmethod
-    def validate_commit(cls, value: str) -> str:
-        if not _COMMIT.fullmatch(value):
-            raise ValueError("Git commit must be a full lowercase SHA-1 or SHA-256")
-        return value
-
-    @field_validator("url")
-    @classmethod
-    def validate_url(cls, value: str) -> str:
-        if not value.strip() or value.startswith("-"):
-            raise ValueError("Git URL must be nonempty and must not start with a dash")
-        if any(char in value for char in ('"', "`", "$", "\n", "\r", "\0")):
-            raise ValueError("Git URL contains characters unsafe for Conan SCM helpers")
-        return value
-
-
-class _ConanData(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    requires: tuple[str, ...] = Field(default=(), strict=False)
-    scm: _SCM | None = None
 
 
 class LocalRecipe:
@@ -109,25 +68,18 @@ class StoredRecipe:
         self.directory = directory
         try:
             self.record = self._read_record(expected)
-            self._data = self._read_data()
+            data = self._read_data()
+            self.requirements = tuple(cast(Iterable[str], data.get("requires", ())))
+            self.has_source = bool(data.get("scm"))
         except (
             OSError,
             ValueError,
             TypeError,
             KeyError,
-            ValidationError,
             InvalidPackage,
             yaml.YAMLError,
         ) as exc:
             raise InvalidPackage(f"Invalid catalog recipe for {expected}: {exc}") from exc
-
-    @property
-    def requirements(self) -> tuple[str, ...]:
-        return self._data.requires
-
-    @property
-    def has_source(self) -> bool:
-        return self._data.scm is not None
 
     def _read_record(self, expected: Ref) -> Record:
         value = json.loads((self.directory / "record.json").read_text())
@@ -170,12 +122,10 @@ class StoredRecipe:
             source = Path(package.folders.source_folder) / "source"
         return replace(self.record, source=source, files=files)
 
-    def _read_data(self) -> _ConanData:
+    def _read_data(self) -> Mapping[str, object]:
         if (self.directory / "conanfile.py").read_text() != _recipe_text(self.record.ref):
             raise ValueError("Only canonical catalog recipes are supported")
-        data = _ConanData.model_validate(
-            yaml.safe_load((self.directory / "conandata.yml").read_text())
-        )
-        for dependency in data.requires:
-            from_conan_reference(dependency, catalog=self.record.ref._catalog)
-        return data
+        data = yaml.safe_load((self.directory / "conandata.yml").read_text())
+        if not isinstance(data, Mapping):
+            raise ValueError("Conan data must be a YAML mapping")
+        return cast(Mapping[str, object], data)

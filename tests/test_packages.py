@@ -93,9 +93,6 @@ def test_pinned_source_round_trip_uses_conan_scm(
     assert (fetched.source / "cpu.sv").is_file()
     with pytest.raises(Conflict):
         catalog.publish(local_record(description))
-    (folder / "conandata.yml").write_text("scm: {commit: nope}")
-    with pytest.raises(InvalidPackage):
-        record.ref.get()
 
 
 def test_dirty_source_fails_before_publication(
@@ -110,39 +107,6 @@ def test_dirty_source_fails_before_publication(
             )
         )
     assert not catalog.search()
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("url", ""),
-        ("url", "  "),
-        ("url", "--option"),
-        ("url", "https://gitlab.invalid/`command`.git"),
-        ("url", "https://gitlab.invalid/$command.git"),
-        ("url", "https://gitlab.invalid/project.git\n"),
-        ("commit", "main"),
-        ("commit", "a" * 39),
-        ("commit", "a" * 41),
-        ("commit", "a" * 63),
-        ("commit", "a" * 65),
-        ("commit", "A" * 40),
-        ("commit", "a" * 40 + "\n"),
-        ("extra", "unsupported"),
-    ],
-)
-def test_invalid_native_scm_is_rejected(
-    tmp_path: Path, field: str, value: str, *, catalog: Catalog
-) -> None:
-    local = LocalRecord(
-        Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=tmp_path
-    )
-    LocalRecipe(local).write(tmp_path)
-    scm = {"url": "https://gitlab.invalid/cpu.git", "commit": "a" * 40}
-    scm[field] = value
-    (tmp_path / "conandata.yml").write_text(json.dumps({"scm": scm}))
-    with pytest.raises(InvalidPackage):
-        StoredRecipe(tmp_path, local.ref, reference=str(local.ref))
 
 
 @pytest.mark.parametrize("name", ["../escape", "/absolute"])
@@ -221,20 +185,6 @@ def _commit(checkout: Path) -> str:
         return repo.head().decode()
 
 
-@pytest.mark.parametrize("length", [40, 64])
-def test_full_git_commit_metadata_is_accepted(
-    tmp_path: Path, length: int, *, catalog: Catalog
-) -> None:
-    record = LocalRecord(
-        Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=tmp_path
-    )
-    LocalRecipe(record).write(tmp_path)
-    (tmp_path / "conandata.yml").write_text(
-        json.dumps({"scm": {"url": "https://gitlab.invalid/cpu.git", "commit": "a" * length}})
-    )
-    assert StoredRecipe(tmp_path, record.ref, reference=str(record.ref)).has_source
-
-
 def test_requirements_and_scm_share_one_exported_conandata(
     catalog: Catalog, checkout: Path
 ) -> None:
@@ -261,20 +211,48 @@ def test_requirements_and_scm_share_one_exported_conandata(
     assert parent.ref.get_with_sources().source is not None
 
 
-@pytest.mark.parametrize(
-    "data",
-    [
-        {"requires": "soc.leaf.rtl.default/1.0"},
-        {"requires": [123]},
-        {"requires": ["ordinary-library/1.0"]},
-        {"requires": [], "has_source": True},
-    ],
-)
-def test_invalid_conandata_requirements_are_rejected(
-    catalog: Catalog, tmp_path: Path, data: dict[str, object]
+def test_conandata_fields_are_read_without_an_sdk_schema(catalog: Catalog, tmp_path: Path) -> None:
+    record = LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+    LocalRecipe(record).write(tmp_path)
+    data = {
+        "requires": ["ordinary-library/1.0"],
+        "scm": {"url": "managed-by-conan", "commit": "main", "extra": {"option": True}},
+        "patches": [],
+    }
+    (tmp_path / "conandata.yml").write_text(yaml.safe_dump(data))
+    recipe = StoredRecipe(tmp_path, record.ref, reference=str(record.ref))
+    assert recipe.requirements == ("ordinary-library/1.0",)
+    assert recipe.has_source
+
+
+@pytest.mark.parametrize("scm", [None, {}])
+def test_absent_or_empty_scm_does_not_request_sources(
+    catalog: Catalog, tmp_path: Path, scm: dict[str, object] | None
 ) -> None:
     record = LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
     LocalRecipe(record).write(tmp_path)
-    (tmp_path / "conandata.yml").write_text(yaml.safe_dump(data))
-    with pytest.raises(InvalidPackage):
-        StoredRecipe(tmp_path, record.ref, reference=str(record.ref))
+    (tmp_path / "conandata.yml").write_text(yaml.safe_dump({"scm": scm}))
+    assert not StoredRecipe(tmp_path, record.ref, reference=str(record.ref)).has_source
+
+
+def test_conan_reports_missing_scm_coordinates_when_sources_are_requested(
+    catalog: Catalog, checkout: Path
+) -> None:
+    record = catalog.publish(
+        LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=checkout)
+    )
+    folder = catalog._package(record.ref).recipe().directory
+    (folder / "conandata.yml").write_text(yaml.safe_dump({"scm": {"commit": "HEAD"}}))
+    assert record.ref.get() == record
+    with pytest.raises(CatalogError, match="source"):
+        record.ref.get_with_sources()
+
+
+def test_conan_reports_invalid_requires_during_resolution(catalog: Catalog, tmp_path: Path) -> None:
+    record = LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+    LocalRecipe(record, ("not-a-reference",)).write(tmp_path)
+    assert StoredRecipe(tmp_path, record.ref, reference=str(record.ref)).requirements == (
+        "not-a-reference",
+    )
+    with pytest.raises(CatalogError, match="require"):
+        catalog._client.graph(tmp_path)
