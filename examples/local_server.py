@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
@@ -67,6 +67,10 @@ def _server_config(root: Path, port: int, password: str) -> str:
     )
 
 
+class _PortInUse(RuntimeError):
+    """Another process bound the selected port before the child server did."""
+
+
 def _wait_for_server(server: LocalServer, process: subprocess.Popen[str], log: Path) -> None:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
@@ -79,18 +83,37 @@ def _wait_for_server(server: LocalServer, process: subprocess.Popen[str], log: P
             if process.poll() is not None:
                 break
             time.sleep(0.05)
-    raise RuntimeError(f"Conan test server did not become ready: {log.read_text()}")
+    output = log.read_text()
+    if "Address already in use" in output:
+        raise _PortInUse(output)
+    raise RuntimeError(f"Conan test server did not become ready: {output}")
 
 
 @contextmanager
 def local_server(root: Path) -> Iterator[LocalServer]:
+    """Retry port handoff collisions; propagate other startup and caller errors."""
+    for _ in range(3):
+        with ExitStack() as resources:
+            try:
+                server = resources.enter_context(_start_server(root))
+            except _PortInUse:
+                continue
+            yield server
+            return
+    raise RuntimeError(
+        f"Conan test server could not bind a port: {(root / 'server.log').read_text()}"
+    )
+
+
+@contextmanager
+def _start_server(root: Path) -> Iterator[LocalServer]:
     executable = Path(sys.executable).parent / "conan_server"
     if not executable.is_file():
         raise RuntimeError("Install development dependencies with uv sync --frozen")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-    root.mkdir(parents=True)
+    root.mkdir(parents=True, exist_ok=True)
     server = LocalServer(f"http://127.0.0.1:{port}", secrets.token_hex(16))
     (root / "server.conf").write_text(_server_config(root, port, server.password))
     log_path = root / "server.log"
