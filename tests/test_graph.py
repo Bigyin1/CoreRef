@@ -96,7 +96,16 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
 
 @pytest.mark.parametrize(
     "attribute",
-    ["catalog", "record", "records", "dependencies", "requirements", "networkx", "lockfile"],
+    [
+        "catalog",
+        "record",
+        "records",
+        "dependencies",
+        "requirements",
+        "networkx",
+        "lockfile",
+        "editables",
+    ],
 )
 def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: str) -> None:
     local = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))

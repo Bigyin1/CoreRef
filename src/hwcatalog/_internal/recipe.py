@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -158,3 +159,35 @@ class StoredRecipe:
         if not isinstance(data, Mapping):
             raise ValueError("Conan data must be a YAML mapping")
         return cast(Mapping[str, object], data)
+
+
+class EditableRecipe:
+    """A stored recipe adapted to an existing, user-editable Git working tree."""
+
+    def __init__(self, recipe: StoredRecipe, source: Path) -> None:
+        if not recipe.has_source or recipe.record.file_names:
+            raise InvalidPackage("Editable packages require SCM sources and no packaged files")
+        self.recipe = recipe
+        self.source = source
+
+    @property
+    def record(self) -> InstalledRecord:
+        if not self.source.is_dir():
+            raise InvalidPackage(f"Editable source directory is missing: {self.source}")
+        return InstalledRecord(self.recipe.record, source=self.source)
+
+    def write(self, directory: Path) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        if directory != self.recipe.directory:
+            for name in ("record.json", "conandata.yml"):
+                shutil.copyfile(self.recipe.directory / name, directory / name)
+        (directory / "source-path.txt").write_text(os.path.relpath(self.source, directory))
+        ref = self.recipe.record.ref
+        template = _RECIPE_ENV.get_template("editable.py.j2")
+        (directory / "conanfile.py").write_text(
+            template.render(
+                name=ref.package_name,
+                version=ref.version,
+                source=os.path.relpath(self.source, directory),
+            )
+        )

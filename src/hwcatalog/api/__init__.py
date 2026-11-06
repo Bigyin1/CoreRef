@@ -1,1 +1,1 @@
-"""Public catalog, project graph, records, queries and serialization protocols."""
+"""Public catalog, project graphs, editable workspaces, records and queries."""

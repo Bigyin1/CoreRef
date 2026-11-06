@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from .catalog import Catalog
     from .graph import Graph
     from .query import SearchQuery
+    from .workspace import Workspace
 
 
 type JSON = bool | int | float | str | Mapping[str, JSON] | list[JSON] | tuple[JSON, ...] | None
@@ -168,11 +169,11 @@ class Ref:
         """Get package files and its Git checkout when the recipe declares one."""
         return self._catalog._package(self).get_with_sources()
 
-    def graph(self, *, lockfile: Path | None = None) -> Graph:
+    def graph(self, *, lockfile: Path | None = None, workspace: Workspace | None = None) -> Graph:
         """Resolve this published root and its full tree without installing files."""
         from .graph import Graph
 
-        return Graph(self._catalog, self, lockfile=lockfile)
+        return Graph(self._catalog, self, lockfile=lockfile, workspace=workspace)
 
     def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
         """Read immediate dependencies, optionally filtered by their coordinates."""

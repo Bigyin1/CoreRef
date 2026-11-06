@@ -13,6 +13,7 @@ from .records import InstalledRecord, LocalRecord, Record, Ref
 # NetworkX generics are provided by stubs, not its runtime classes.
 if TYPE_CHECKING:
     from .catalog import Catalog
+    from .workspace import Workspace
 
     type _RefGraph = nx.DiGraph[Ref]
 else:
@@ -41,8 +42,13 @@ class Graph:
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
+        workspace: Workspace | None = None,
     ) -> None:
         self._catalog = catalog
+        if workspace is not None:
+            dependencies = workspace._pin(dependencies)
+            if isinstance(record, Ref):
+                record = workspace._pin((record,))[0]
         if isinstance(record, Ref):
             if dependencies:
                 raise InvalidPackage("Published graph requirements come from its recipe")
@@ -51,6 +57,8 @@ class Graph:
             self._package = catalog._local_package(record, dependencies, lockfile).resolved
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result
+        published = (item for item in self._records if isinstance(item, Record))
+        self._editables = workspace._select(published) if workspace is not None else {}
         self._requirements = tuple(
             edge.target for edge in self._dependencies if edge.source == self._package.record.ref
         )
@@ -96,11 +104,26 @@ class Graph:
 
     def get(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
         """Fetch selected package files together without requesting SCM sources."""
-        return self._package.get(refs)
+        return self._get(refs, with_sources=False)
 
     def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
         """Fetch selected published packages in one install and reuse this snapshot."""
-        return self._package.get_with_sources(refs)
+        return self._get(refs, with_sources=True)
+
+    @property
+    def editables(self) -> tuple[InstalledRecord, ...]:
+        """The workspace source overrides captured when this graph was resolved."""
+        return tuple(self._editables[ref] for ref in sorted(self._editables))
+
+    def _get(self, refs: tuple[Ref, ...], *, with_sources: bool) -> tuple[InstalledRecord, ...]:
+        selected = tuple(dict.fromkeys(self._package.resolve_ref(ref) for ref in refs))
+        remote = tuple(ref for ref in selected if ref not in self._editables)
+        records = (
+            self._package.get_with_sources(remote) if with_sources else self._package.get(remote)
+        )
+        fetched = {record.ref: record for record in records}
+        fetched.update(self._editables)
+        return tuple(fetched[ref] for ref in selected)
 
     @property
     def networkx(self) -> _RefGraph:

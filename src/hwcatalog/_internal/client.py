@@ -6,8 +6,10 @@ to this adapter and the protocols describing its actual return objects.
 
 from collections.abc import Mapping
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Protocol, cast
 
+from conan import Workspace as NativeWorkspace  # type: ignore[import-untyped]
 from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
 from conan.api.output import ConanOutput  # type: ignore[import-untyped]
 from conan.api.subapi.lockfile import LockfileAPI  # type: ignore[import-untyped]
@@ -37,12 +39,22 @@ class _Remote(Protocol):
 
 
 class _Remotes(Protocol):
-    def list(self) -> list[_Remote]: ...
+    def list(self, pattern: str | None = None) -> list[_Remote]: ...
+
+
+class _Workspace(Protocol):
+    _folder: str | None
+    _ws: object
+
+    def enable(self, value: bool) -> None: ...
+
+    def open(self, ref: str, remotes: list[_Remote], *, cwd: str, folder: str) -> str: ...
 
 
 class _API(Protocol):
     command: _Commands
     remotes: _Remotes
+    workspace: _Workspace
 
     @property
     def home_folder(self) -> str: ...
@@ -72,10 +84,10 @@ class ConanClient:
     def source_args(self) -> tuple[str, ...]:
         return ("--remote", self.remote) if self.remote else ("--no-remote",)
 
-    def run(self, *arguments: str) -> object:
+    def run(self, *arguments: str, workspace: Path | None = None) -> object:
         """Run a command without spawning Conan or changing environment/cwd."""
         try:
-            return self._execute(arguments)
+            return self._execute(arguments, workspace=workspace)
         except GraphConflictError as exc:
             raise Conflict(str(exc)) from exc
         except GraphLoopError as exc:
@@ -93,11 +105,21 @@ class ConanClient:
             return NotFound(message)
         return CatalogError(f"Conan command {arguments[:2]} failed: {message}")
 
-    def _execute(self, arguments: tuple[str, ...]) -> object:
+    def _api(self, workspace: Path | None = None) -> _API:
         conan = ConanAPI(cache_folder=str(self.home))
         Cli(conan).add_commands()
+        conan.workspace.enable(False)
+        if workspace is not None:
+            # Conan 2.34 discovers workspaces only from cwd; bind an explicit path here.
+            conan.workspace._folder = str(workspace)
+            conan.workspace._ws = NativeWorkspace(str(workspace), conan)
+            conan.workspace.enable(True)
+        return cast(_API, conan)
+
+    def _execute(self, arguments: tuple[str, ...], *, workspace: Path | None = None) -> object:
+        conan = self._api(workspace)
         try:
-            result = cast(_API, conan).command.run(
+            result = conan.command.run(
                 [
                     *arguments,
                     "-vquiet",
@@ -165,7 +187,12 @@ class ConanClient:
         return Path(result)
 
     def graph(
-        self, directory: Path, *, lockfile: Path | None = None, update: bool = False
+        self,
+        directory: Path,
+        *,
+        lockfile: Path | None = None,
+        update: bool = False,
+        workspace: Path | None = None,
     ) -> NativeGraph:
         result = cast(
             Mapping[str, object],
@@ -177,9 +204,25 @@ class ConanClient:
                 str(lockfile) if lockfile is not None else "",
                 *(("--update",) if update else ()),
                 *self.source_args,
+                **({"workspace": workspace} if workspace is not None else {}),
             ),
         )
         return cast(NativeGraph, result["graph"])
+
+    def open_sources(self, reference: str, destination: Path) -> None:
+        """Use Conan's workspace SCM checkout directly, without installing cache sources."""
+        try:
+            conan = self._api()
+            remotes = conan.remotes.list(self.remote) if self.remote is not None else []
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with TemporaryDirectory(
+                prefix="hwcatalog-editable-", dir=destination.parent
+            ) as temporary:
+                checkout = Path(temporary) / "source"
+                conan.workspace.open(reference, remotes, cwd=temporary, folder=str(checkout))
+                checkout.rename(destination)
+        except (ConanException, OSError) as error:
+            raise CatalogError(f"Conan could not open {reference}: {error}") from error
 
     def create_lockfile(self, directory: Path, *, seed: Path | None = None) -> None:
         self.run(

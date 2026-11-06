@@ -136,6 +136,63 @@ ordered_records(root, stop_at=...) позволяет flow получить за
 Для пакетов, оставшихся после отбора, вызывают Graph.get_with_sources(refs): проверенные
 рецепты используются повторно, повторный запрос в пределах Graph не обращается к Conan.
 
+Рабочие Git-копии выбранных зависимостей можно зарегистрировать в `Workspace`:
+
+```python
+from hwcatalog.api.workspace import Workspace
+
+workspace = Workspace(catalog, "/work/top/workspace.yaml")
+editable = workspace.add(cpu_ref)
+print(editable.source)  # /work/soc.cpu.rtl.default-1.0
+
+local_top = LocalRecord(
+    Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog), source=Path("/work/top")
+)
+project = Graph(catalog, local_top, dependencies=(cpu_ref,), workspace=workspace)
+records = project.get_with_sources(project.requirements)
+# Выбранные editable исходники читаются из working tree;
+# остальные зависимости получаются одной обычной Conan-установкой.
+workspace.remove(cpu_ref)  # Git-копия и локальные изменения сохраняются.
+```
+
+У Workspace только две операции: add(ref) и remove(ref). Для нескольких пакетов вызывают
+add для каждого Ref. Повторный add возвращает уже зарегистрированную рабочую копию,
+сохраняя изменения. directory="/work/other" у add задаёт другой родительский каталог
+для нового checkout; по умолчанию копия создаётся рядом с текущим проектом.
+Существующие посторонние каталоги не перезаписываются. В первом варианте поддержаны
+пакеты с SCM-исходниками без отдельных упакованных files.
+
+Манифест принадлежит SDK и хранится в текущем проекте; имена файлов можно выбирать:
+
+```yaml
+packages:
+  soc.cpu.rtl.default/1.0#0123456789abcdef0123456789abcdef: ../soc.cpu.rtl.default-1.0
+```
+
+Ключ — Ref с точной базовой revision, значение — путь к исходникам относительно
+манифеста. Другие файлы манифестов могут описывать независимые workspaces в той же
+директории. Ни SCM-координаты, ни Conan-файлы в этот YAML не включаются.
+Git checkout выполняет штатный workspace SCM API Conan; исходники не проходят
+через source cache. Данные Conan — индекс и editable-рецепты — создаются только
+в .hwcatalog/workspaces/<имя-манифеста>. Они производные; повторный add восстанавливает
+их без повторного клонирования. В .hwcatalog создаётся собственный .gitignore;
+пользовательский .gitignore проекта не изменяется.
+
+Graph(..., workspace=...) и ref.graph(workspace=...) захватывают выбор editable-пакетов
+при создании графа. Graph.editables показывает эти записи; get/get_with_sources
+возвращают их локальные source без установки в cache. Сам граф зависимостей и
+метаданные берутся из опубликованной основы; изменения файлов working tree доступны
+сразу. Изменение пользовательского TOML в такой зависимости само по себе не меняет
+граф: формат TOML и подготовку LocalRecord по-прежнему определяет flow.
+Удаление регистрации не меняет существующий Graph, для нового выбора создают новый граф.
+
+Базовая revision остаётся прежней после редактирования исходников. Незакреплённые
+прямые требования выбирают зарегистрированную основу, а конфликт с явной revision,
+транзитивным требованием или lockfile завершается ошибкой. Lockfile фиксирует
+опубликованную основу и зависимости; рабочие изменения Git он не фиксирует.
+Глобальный список editable-пакетов Conan не меняется. Это возможность SDK;
+новые команды RTL/BE CLI на этом этапе не добавлены.
+
 LocalRecord.to_json() готовит record.json: format, ref без собственной revision, payload и имена files.
 Маркер format=7 относится к нашему формату записи, а не к Conan или lockfile.
 При подготовке файлов LocalRecipe добавляет file_digests — SHA-256 содержимого

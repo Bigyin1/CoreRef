@@ -76,6 +76,9 @@ class NativePackage(Protocol):
 
 class NativeNode(Protocol):
     @property
+    def recipe(self) -> str: ...
+
+    @property
     def ref(self) -> NativeReference | None: ...
 
     @property
