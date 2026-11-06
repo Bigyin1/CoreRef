@@ -10,14 +10,13 @@ from typing import TYPE_CHECKING, Self
 
 from frozendict import deepfreeze, frozendict
 
-from ..api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.query import SearchQuery
 from ..api.records import LocalRecord, Record, Ref
 from .client import RecipeRevisions
 from .graph import GraphData, ResolvedConanGraph
 from .recipe import LocalRecipe, StoredRecipe
 from .references import from_conan_reference, to_conan_reference
-from .types import NativePackage
 
 if TYPE_CHECKING:
     from ..api.catalog import Catalog
@@ -88,29 +87,7 @@ class StoredPackage:
                 self._client.install(recipe.reference, Path(temporary), with_sources=fetch_source)
             )
             self._read_records(graph.references)
-            return self._installed_record(
-                recipe, graph.package(self.ref), with_sources=fetch_source
-            )
-
-    @staticmethod
-    def _installed_record(
-        recipe: StoredRecipe, package: NativePackage, *, with_sources: bool
-    ) -> Record:
-        if package.package_folder is None:
-            raise CatalogError("Conan did not install the data package")
-        source = None
-        if with_sources:
-            if package.folders.source_folder is None:
-                raise CatalogError("Conan did not provide the SCM source folder")
-            source = Path(package.folders.source_folder) / "source"
-        return replace(
-            recipe.record,
-            source=source,
-            files={
-                name: Path(package.package_folder) / "artifacts" / name
-                for name in recipe.record.files
-            },
-        )
+            return recipe.installed(graph.package(self.ref), with_sources=fetch_source)
 
     def _read_records(self, references: tuple[str, ...]) -> tuple[Record, ...]:
         return tuple(self._load(reference).record for reference in dict.fromkeys(references))
@@ -157,6 +134,7 @@ class LocalPackage:
         self.dependencies = self._references(dependencies)
         self.lockfile = lockfile
         self._packages = {ref: StoredPackage(ref) for ref in self.dependencies}
+        self._fetched: dict[Ref, Record] = {}
 
     @cached_property
     def graph(self) -> ResolvedConanGraph:
@@ -175,6 +153,75 @@ class LocalPackage:
         output.parent.mkdir(parents=True, exist_ok=True)
         self._client.save_lockfile(self.graph.native, output)
         return output
+
+    def get(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
+        return self._get(refs, with_sources=False)
+
+    def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
+        return self._get(refs, with_sources=True)
+
+    def _get(self, refs: tuple[Ref, ...], *, with_sources: bool) -> tuple[Record, ...]:
+        selected = tuple(dict.fromkeys(refs))
+        if any(ref not in self._packages for ref in selected):
+            raise InvalidPackage("Only published dependencies of this graph can be fetched")
+        missing = tuple(
+            ref for ref in selected if self._needs_fetch(ref, with_sources=with_sources)
+        )
+        if missing:
+            recipes = tuple(self._packages[ref].recipe() for ref in missing)
+            required = tuple(
+                recipe
+                for recipe in recipes
+                if recipe.record.files or (with_sources and recipe.metadata.has_source)
+            )
+            records = {recipe.record.ref: recipe.record for recipe in recipes}
+            if required:
+                records.update(
+                    (record.ref, record)
+                    for record in self._install(required, with_sources=with_sources)
+                )
+            self._fetched.update(records)
+        return tuple(self._fetched[ref] for ref in selected)
+
+    def _needs_fetch(self, ref: Ref, *, with_sources: bool) -> bool:
+        record = self._fetched.get(ref)
+        if record is None:
+            return True
+        return (
+            with_sources
+            and record.source is None
+            and self._packages[ref].recipe().metadata.has_source
+        )
+
+    def _install(
+        self, recipes: tuple[StoredRecipe, ...], *, with_sources: bool
+    ) -> tuple[Record, ...]:
+        selected = {
+            recipe.record.ref for recipe in recipes if with_sources and recipe.metadata.has_source
+        }
+        sources = {str(ref): ref in selected for ref in self._packages}
+        with TemporaryDirectory(prefix="hwcatalog-conan-batch-") as temporary:
+            directory = Path(temporary)
+            LocalRecipe(self.record, tuple(recipe.reference for recipe in recipes)).write(directory)
+            self._client.save_lockfile(self.graph.native, directory / "conan.lock")
+            installed = ResolvedConanGraph(self._client.install_project(directory, sources))
+            self._check_install(installed, recipes)
+            return tuple(
+                recipe.installed(
+                    installed.package(recipe.record.ref),
+                    with_sources=with_sources and recipe.metadata.has_source,
+                )
+                for recipe in recipes
+            )
+
+    def _check_install(
+        self, installed: ResolvedConanGraph, recipes: tuple[StoredRecipe, ...]
+    ) -> None:
+        references = set(installed.references)
+        if not references.issubset(self.graph.references) or not all(
+            recipe.reference in references for recipe in recipes
+        ):
+            raise Conflict("Installed dependencies differ from the resolved graph")
 
     def publish(self) -> Record:
         record = self._publication_record()

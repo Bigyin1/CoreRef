@@ -58,6 +58,14 @@ class Graph:
         self.lockfile = self._package.create_lockfile(output)
         return self.lockfile
 
+    def get(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
+        """Fetch selected package files together without requesting SCM sources."""
+        return self._package.get(refs)
+
+    def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
+        """Fetch selected published dependencies in one install and reuse this snapshot."""
+        return self._package.get_with_sources(refs)
+
     @cached_property
     def networkx(self) -> _RefGraph:
         """Build topology once; use .copy() when a mutable working graph is needed."""

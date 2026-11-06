@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
+from conan.api.output import ConanOutput  # type: ignore[import-untyped]
 from conan.api.subapi.lockfile import LockfileAPI  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 from conan.errors import ConanException  # type: ignore[import-untyped]
@@ -143,11 +144,15 @@ class ConanClient:
     @staticmethod
     def save_lockfile(graph: NativeGraph, output: Path) -> None:
         """Let Conan create an opaque lockfile from an already resolved graph."""
+        level = ConanOutput.get_output_level()
         try:
+            ConanOutput.set_output_level(ConanOutput.valid_log_levels()["quiet"])
             lockfile = LockfileAPI.update_lockfile(None, graph, clean=True)
             LockfileAPI.save_lockfile(lockfile, str(output))
         except (ConanException, OSError) as error:
             raise CatalogError(f"Conan could not save lockfile {output}: {error}") from error
+        finally:
+            ConanOutput.set_output_level(level)
 
     def export(self, directory: Path) -> str:
         result = cast(Mapping[str, object], self.run("export", str(directory), "--no-remote"))
@@ -185,6 +190,31 @@ class ConanClient:
                 *source_args,
                 "--output-folder",
                 str(output),
+                *self.source_args,
+            ),
+        )
+        return cast(NativeGraph, result["graph"])
+
+    def install_project(self, directory: Path, sources: Mapping[str, bool]) -> NativeGraph:
+        """Install one pinned consumer graph, enabling SCM only for selected packages."""
+        source_args = tuple(
+            argument
+            for reference, enabled in sources.items()
+            for argument in ("--conf:host", f"{reference}:tools.build:download_source={enabled}")
+        )
+        result = cast(
+            Mapping[str, object],
+            self.run(
+                "install",
+                str(directory),
+                "--lockfile",
+                str(directory / "conan.lock"),
+                "--build=never",
+                "--conf:host",
+                "*:tools.build:download_source=False",
+                *source_args,
+                "--output-folder",
+                str(directory / "out"),
                 *self.source_args,
             ),
         )

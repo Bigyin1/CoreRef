@@ -1,7 +1,7 @@
 """Prepared local recipes and validated recipes obtained from Conan."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Self
 
@@ -9,9 +9,10 @@ import yaml  # type: ignore[import-untyped]  # Validated at this boundary.
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from ..api.errors import InvalidPackage
+from ..api.errors import CatalogError, InvalidPackage
 from ..api.records import LocalRecord, Record, Ref
 from .references import from_conan_reference, to_conan_reference
+from .types import NativePackage
 
 _RECIPE_ENV = Environment(
     loader=PackageLoader("hwcatalog._internal"),
@@ -133,6 +134,21 @@ class StoredRecipe:
         if record.ref != expected:
             raise ValueError("Record coordinates disagree with the recipe")
         return record
+
+    def installed(self, package: NativePackage, *, with_sources: bool) -> Record:
+        """Attach Conan cache paths to this recipe's already validated record."""
+        files: dict[str, Path] = {}
+        if self.record.files:
+            if package.package_folder is None:
+                raise CatalogError("Conan did not install the data package")
+            folder = Path(package.package_folder) / "artifacts"
+            files = {name: folder / name for name in self.record.files}
+        source = None
+        if with_sources:
+            if package.folders.source_folder is None:
+                raise CatalogError("Conan did not provide the SCM source folder")
+            source = Path(package.folders.source_folder) / "source"
+        return replace(self.record, source=source, files=files)
 
     def _validate(self) -> None:
         if self.metadata.has_source:

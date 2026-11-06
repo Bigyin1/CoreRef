@@ -8,6 +8,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -278,3 +279,46 @@ def test_recipes_are_downloaded_once_per_operation(
         operation in ("resolve", "transitive")
     )
     assert sum(args[0] == "install" for args in calls) == (operation == "get")
+
+
+def test_graph_batch_downloads_sources_and_artifacts_into_a_fresh_reader(
+    remote_catalog: Catalog, tmp_path: Path, checkout: Path, git_origin: Path
+) -> None:
+    (remote_catalog._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
+    leaf = remote_catalog.publish(
+        LocalRecord(
+            Ref("soc", "leaf", "rtl", "default", "1.0", catalog=remote_catalog), source=checkout
+        )
+    )
+    artifact = tmp_path / "report.txt"
+    artifact.write_text("server artifact")
+    parent = remote_catalog.publish(
+        LocalRecord(
+            Ref("soc", "parent", "rtl", "default", "1.0", catalog=remote_catalog),
+            source=checkout,
+            files={"report": artifact},
+        ),
+        dependencies=(leaf.ref,),
+    )
+    artifact.unlink()
+    shutil.rmtree(checkout)
+    home = tmp_path / "batch-reader"
+    home.mkdir()
+    shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
+    (home / "global.conf").write_text("core.scm:local_url=allow\n")
+    reader = Catalog(configured_home(home), remote="catalog")
+    graph = Graph(
+        reader,
+        LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=reader)),
+        dependencies=(parent.ref,),
+    )
+    with patch.object(reader._client, "run", wraps=reader._client.run) as command:
+        fetched = graph.get_with_sources((leaf.ref, parent.ref))
+        assert all(
+            record.source is not None and (record.source / "cpu.sv").is_file() for record in fetched
+        )
+        assert fetched[1].files["report"].read_text() == "server artifact"
+        assert all(record.ref._catalog is reader for record in fetched)
+        shutil.rmtree(git_origin)
+        assert graph.get_with_sources((parent.ref,))[0] is fetched[1]
+        assert command.call_count == 1 and command.call_args.args[0] == "install"
