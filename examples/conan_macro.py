@@ -1,46 +1,39 @@
 """Run with ``uv run python examples/conan_macro.py``; uses a disposable local cache."""
 
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from conan_config import configured_home
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.models.query import SearchQuery
-from hwcatalog.api.models.records import Record, Ref
+from hwcatalog.api.graph import Graph
+from hwcatalog.api.query import SearchQuery
+from hwcatalog.api.records import Record, Ref
 
 
 def main() -> None:
-    rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"), {"files": ["/project/cpu.sv"]})
-    intermediate = Record(Ref("dft-run", "3.0", "result", "tools"))
-    macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"))
     with TemporaryDirectory(prefix="hwcatalog-example-") as directory:
         catalog = Catalog(configured_home(Path(directory)))
-        rtl = catalog.publish(rtl)
-        catalog.publish(intermediate, dependencies=(rtl.ref,))
+        rtl = catalog.publish(Record(Ref("soc1", "cpu", "rtl", "default", "2.3")))
+        intermediate = catalog.publish(
+            Record(Ref("tools", "dft-run", "dft", "default", "3.0")), dependencies=(rtl.ref,)
+        )
         inputs = Path(directory) / "inputs"
         inputs.mkdir()
-        (inputs / "cpu.lib").write_text("library(cpu) {}\n")
-        (inputs / "cpu.lef").write_text("MACRO cpu\nEND cpu\n")
-        manifest = inputs / "package.json"
-        manifest.write_text(
-            json.dumps(
-                {
-                    "ref": macro.ref.to_dict(),
-                    "payload": {"corner": "tt"},
-                    "dependencies": [intermediate.ref.to_dict()],
-                    "files": {"cpu.lib": "cpu.lib", "cpu.lef": "cpu.lef"},
-                }
-            )
+        lib, lef = inputs / "cpu.lib", inputs / "cpu.lef"
+        lib.write_text("library(cpu) {}\n")
+        lef.write_text("MACRO cpu\nEND cpu\n")
+        catalog.publish(
+            Record(Ref("soc1", "cpu", "be", "lib-lef", "4.0"), {"corner": "tt"}),
+            dependencies=(intermediate.ref,),
+            files={"cpu.lib": lib, "cpu.lef": lef},
         )
-        catalog.publish_file(manifest)
-        candidates = SearchQuery(namespace="soc1", name="cpu", kind="lib-lef")
+        candidates = SearchQuery(namespace="soc1", component="cpu", view="be", type="lib-lef")
         for result in rtl.ref.find_dependents(candidates=candidates):
             print(result.ref)
             print(result.to_json())
             dependencies = tuple(record.ref for record in result.ref.dependencies())
-            graph = catalog.resolve_local(result, dependencies=dependencies)
+            graph = Graph(catalog, result, dependencies=dependencies).resolve()
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
             content = result.ref.materialize().path
             print((content / "artifacts/cpu.lib").read_text().strip())

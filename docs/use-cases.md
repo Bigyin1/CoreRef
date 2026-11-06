@@ -5,11 +5,11 @@
 
 ## RTL → LIB/LEF
 
-1. Передать локальный Record и прямые зависимости в `catalog.resolve_local()`
+1. Передать локальный Record и прямые зависимости в `Graph(catalog, record, dependencies=...).resolve()`
    и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
    из опубликованного пакета, его читают через `top_ref.get()` и `top_ref.dependencies()`.
 2. Для выбранного RTL вызвать `rtl_ref.find_dependents(
-   candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"))`.
+   candidates=SearchQuery(namespace="soc1", component="cpu", view="be", type="lib-lef"))`.
 3. Из найденных кандидатов приложение выбирает нужную реализацию и читает payload
    с метаданными. Файлы из Conan получают через `ref.materialize()`,
    внешние ресурсы — через `LocatedResource`.
@@ -18,17 +18,17 @@
 
 ```mermaid
 flowchart TB
-    TOP["soc1.top.rtl/1.0"] --> CPU["soc1.cpu.rtl/2.3"]
-    TOP --> GPIO["soc1.gpio.rtl/1.0"]
-    CPU --> COMMON["soc1.common.rtl/1.0"]
+    TOP["soc1.top.rtl.default/1.0"] --> CPU["soc1.cpu.rtl.default/2.3"]
+    TOP --> GPIO["soc1.gpio.rtl.default/1.0"]
+    CPU --> COMMON["soc1.common.rtl.default/1.0"]
     GPIO --> COMMON
-    BE["soc1.cpu.lib-lef/4.0"] --> DFT["tools.dft-run.result/3.0"]
+    BE["soc1.cpu.be.lib-lef/4.0"] --> DFT["tools.dft-run.dft.default/3.0"]
     DFT --> CPU
 ```
 
 Направление стрелки — от пакета к его зависимости. Имя BE определяет представление;
 наличие точного CPU в его графе подтверждает связь с выбранным RTL. Версии CPU и BE
-могут различаться. Промежуточный DFT-узел не обязан иметь те же namespace/name/kind.
+могут различаться. Промежуточный DFT-узел не обязан иметь те же namespace/component/view/type.
 
 Прямой поиск `ref.dependencies()` возвращает Record входов узла;
 `ref.find_dependents(candidates=SearchQuery(), transitive=False)` — непосредственных

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from hwcatalog.api.errors import CatalogError
-from hwcatalog.api.models.resources import LocatedResource, MaterializedResource
+from hwcatalog.api.resources import LocatedResource, MaterializedResource
 
 
 @pytest.mark.parametrize("provider", ["local", "file", "nfs"])

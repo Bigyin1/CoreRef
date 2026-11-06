@@ -5,10 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ...api.errors import InvalidPackage
-from ...api.models.graph import Dependency, GraphResult
-from ...api.models.query import SearchQuery
-from ...api.models.records import Record, Ref
+from ...api.graph import Dependency, GraphResult
 from ...api.protocols import RefCatalog
+from ...api.query import SearchQuery
+from ...api.records import Record, Ref
 from ..validation import normalize_publication, normalize_query, normalize_ref
 from . import records
 from .client import ConanClient
@@ -40,6 +40,15 @@ def resolve_local(
             tuple(sorted(record_map.values(), key=lambda item: item.ref)),
             _graph_dependencies(graph, record_map),
         )
+
+
+def create_lockfile(client: ConanClient, refs: tuple[Ref, ...], path: str | Path) -> Path:
+    """Write a native Conan lockfile for the project's direct dependencies."""
+    output = Path(path).expanduser().resolve()
+    references = tuple(records.locate(client, normalize_ref(ref))[0] for ref in dict.fromkeys(refs))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    client.create_project_lockfile(references, output, seed=output if output.is_file() else None)
+    return output
 
 
 def find_dependents(

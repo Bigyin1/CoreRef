@@ -1,13 +1,13 @@
-"""Publish one package and create project-owned lockfiles."""
+"""Publish one package from Python data using a generated Conan recipe."""
 
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ...api.errors import Conflict, InvalidPackage
-from ...api.models.records import Record, Ref
 from ...api.protocols import RefCatalog
-from ..manifest import Manifest, read_manifest
-from ..validation import normalize_publication, normalize_ref
+from ...api.records import Record, Ref
+from ..validation import normalize_publication, validate_file_name
 from . import records
 from .client import ConanClient
 from .format import (
@@ -17,45 +17,27 @@ from .format import (
 )
 
 
-def publish_file(
-    client: ConanClient,
-    path: str | Path,
-    *,
-    lockfile: Path | None = None,
-    catalog: RefCatalog | None = None,
-) -> Record:
-    manifest = read_manifest(Path(path))
-    return publish(
-        client,
-        manifest.record,
-        manifest.dependencies,
-        manifest=manifest,
-        lockfile=lockfile,
-        catalog=catalog,
-    )
-
-
-def create_lockfile(client: ConanClient, refs: tuple[Ref, ...], path: str | Path) -> Path:
-    """Write a Conan lockfile owned by an RTL repository or BE workspace."""
-    output = Path(path).expanduser().resolve()
-    references = tuple(records.locate(client, normalize_ref(ref))[0] for ref in dict.fromkeys(refs))
-    output.parent.mkdir(parents=True, exist_ok=True)
-    client.create_project_lockfile(references, output, seed=output if output.is_file() else None)
-    return output
-
-
 def publish(
     client: ConanClient,
     record: Record,
     dependencies: tuple[Ref, ...],
     *,
-    manifest: Manifest | None = None,
+    source_path: Path | None = None,
+    files: dict[str, Path] | None = None,
     lockfile: Path | None = None,
     catalog: RefCatalog | None = None,
 ) -> Record:
     record, dependencies = normalize_publication(record, dependencies, catalog=catalog)
-    if record.files and manifest is None:
-        raise InvalidPackage("Publish stored files using a package JSON document")
+    files = _artifact_files(files or {})
+    if record.files and record.files != tuple(sorted(files)):
+        raise InvalidPackage("Provide the stored files declared in Record.files")
+    record = replace(record, files=tuple(sorted(files)))
+    if source_path is not None:
+        if record.source is not None:
+            raise InvalidPackage("Provide either pinned SCM coordinates or a Git checkout")
+        source_path = _local_path(source_path)
+        if not source_path.is_dir():
+            raise InvalidPackage("Git source path must be a repository directory")
     logical = to_conan_reference(record.ref)
     if logical in client.index(f"{logical}*#*"):
         raise Conflict("Record identity already published")
@@ -66,8 +48,8 @@ def publish(
             directory,
             record,
             requirements,
-            source_path=manifest.source_path if manifest else None,
-            files=manifest.files if manifest else None,
+            source_path=source_path,
+            files=files,
         )
         graph = client.export_package(directory, lockfile=lockfile)
         reference = graph.root.ref
@@ -78,3 +60,23 @@ def publish(
         stored, _ = read_recipe(exported, record.ref)
         client.upload(pinned)
         return stored
+
+
+def _local_path(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        raise InvalidPackage(f"Publication input does not exist: {path}") from exc
+
+
+def _artifact_files(files: dict[str, Path]) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    for name, path in files.items():
+        validate_file_name(name)
+        local = _local_path(path)
+        if not local.is_file():
+            raise InvalidPackage(f"Artifact is not a regular file: {path}")
+        if any(name.startswith(other + "/") or other.startswith(name + "/") for other in result):
+            raise InvalidPackage("Artifact paths cannot overlap")
+        result[name] = local
+    return result

@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .._internal.conan.client import ConanClient
-    from .models.query import SearchQuery
-    from .models.records import Record
+    from .query import SearchQuery
+    from .records import Record
 
 
 @runtime_checkable

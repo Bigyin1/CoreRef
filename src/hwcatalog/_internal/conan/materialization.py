@@ -4,8 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ...api.errors import CatalogError
-from ...api.models.records import Ref
-from ...api.models.resources import MaterializedPackage
+from ...api.records import Ref
+from ...api.resources import MaterializedPackage
 from ..validation import normalize_ref
 from . import graph, records
 from .client import ConanClient

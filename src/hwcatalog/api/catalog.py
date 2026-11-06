@@ -2,15 +2,14 @@
 
 from pathlib import Path
 
-from .._internal.conan import graph, publication, records
+from .._internal.conan import publication, records
 from .._internal.conan.client import ConanClient
-from .models.graph import GraphResult
-from .models.query import SearchQuery
-from .models.records import Record, Ref
+from .query import SearchQuery
+from .records import Record, Ref
 
 
 class Catalog:
-    """Publish, query and fetch packages using an already configured Conan client."""
+    """Publish and search packages using an already configured Conan client."""
 
     def __init__(
         self,
@@ -25,29 +24,25 @@ class Catalog:
         """Find records matching the exact coordinate filters."""
         return records.search(self._client, query, catalog=self)
 
-    def resolve_local(
-        self, record: Record, *, dependencies: tuple[Ref, ...] = (), lockfile: Path | None = None
-    ) -> GraphResult:
-        """Resolve local project data independently of its publication status."""
-        return graph.resolve_local(
-            self._client, record, dependencies=dependencies, lockfile=lockfile, catalog=self
-        )
-
     def publish(
-        self, record: Record, *, dependencies: tuple[Ref, ...] = (), lockfile: Path | None = None
+        self,
+        record: Record,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+        source_path: Path | None = None,
+        files: dict[str, Path] | None = None,
+        lockfile: Path | None = None,
     ) -> Record:
-        """Publish one new package with already published dependencies."""
+        """Publish one package with dependencies, optional Git checkout and stored files."""
         return publication.publish(
-            self._client, record, dependencies, lockfile=lockfile, catalog=self
+            self._client,
+            record,
+            dependencies,
+            source_path=source_path,
+            files=files,
+            lockfile=lockfile,
+            catalog=self,
         )
-
-    def publish_file(self, path: str | Path, *, lockfile: Path | None = None) -> Record:
-        """Publish one package described by a JSON document."""
-        return publication.publish_file(self._client, path, lockfile=lockfile, catalog=self)
-
-    def create_lockfile(self, refs: tuple[Ref, ...], path: str | Path) -> Path:
-        """Create or update a project-owned Conan lockfile."""
-        return publication.create_lockfile(self._client, refs, path)
 
 
 __all__ = ["Catalog"]

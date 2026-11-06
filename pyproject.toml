@@ -64,5 +64,5 @@ addopts = "-ra"
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = [
-    "hwcatalog.api.models.query.SearchQuery",
+    "hwcatalog.api.query.SearchQuery",
 ]

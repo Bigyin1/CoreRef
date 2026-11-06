@@ -1,1 +1,1 @@
-"""Public contracts organized into catalog, models, enums, errors, protocols and types."""
+"""Public catalog, project graph, references, queries and resource contracts."""

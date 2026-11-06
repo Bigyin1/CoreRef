@@ -7,8 +7,8 @@ import pytest
 from pydantic import TypeAdapter
 
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.models.records import Record, Ref
-from hwcatalog.api.models.resources import GitResource, LocatedResource
+from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.resources import GitResource, LocatedResource
 
 
 def test_resource_fields_cannot_be_reassigned() -> None:
@@ -30,7 +30,7 @@ def test_consumer_decodes_its_own_resource(
     adapter = TypeAdapter(GitResource | LocatedResource)
     descriptor = adapter.dump_python(resource, mode="json")
     record = Record(
-        Ref("resource", "v1", "release", "demo"),
+        Ref("demo", "resource", "release", "default", "v1"),
         payload=(descriptor,),
     )
     catalog.publish(record)

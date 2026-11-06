@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Self
 
 from frozendict import deepfreeze
 
-from ..errors import CatalogError
-from ..protocols import JSONSerializable, RefCatalog
-from ..types import JSON
+from .errors import CatalogError
+from .protocols import JSONSerializable, RefCatalog
 from .resources import GitResource, MaterializedPackage
+from .types import JSON
 
 if TYPE_CHECKING:
     from .query import SearchQuery
@@ -19,16 +19,17 @@ if TYPE_CHECKING:
 class Ref:
     """Package coordinates with an optional catalog excluded from identity and JSON."""
 
-    name: str
-    version: str
-    kind: str
     namespace: str
+    component: str
+    view: str
+    type: str
+    version: str
     catalog: RefCatalog | None = field(default=None, kw_only=True, repr=False, compare=False)
 
     @property
     def package_name(self) -> str:
         """The namespace, component and representation without a version."""
-        return f"{self.namespace}.{self.name}.{self.kind}"
+        return f"{self.namespace}.{self.component}.{self.view}.{self.type}"
 
     def __str__(self) -> str:
         return f"{self.package_name}/{self.version}"
@@ -36,20 +37,22 @@ class Ref:
     def __lt__(self, other: Ref) -> bool:
         if not isinstance(other, Ref):
             return NotImplemented
-        return (self.namespace, self.name, self.version, self.kind) < (
+        return (self.namespace, self.component, self.view, self.type, self.version) < (
             other.namespace,
-            other.name,
+            other.component,
+            other.view,
+            other.type,
             other.version,
-            other.kind,
         )
 
     def to_dict(self) -> dict[str, str]:
         """Serialize package coordinates without the runtime catalog context."""
         return {
-            "name": self.name,
-            "version": self.version,
-            "kind": self.kind,
             "namespace": self.namespace,
+            "component": self.component,
+            "view": self.view,
+            "type": self.type,
+            "version": self.version,
         }
 
     def _context(self) -> RefCatalog:
@@ -59,14 +62,14 @@ class Ref:
 
     def get(self) -> Record:
         """Read the published record at these exact coordinates."""
-        from ..._internal.conan import records
+        from .._internal.conan import records
 
         catalog = self._context()
         return records.get(catalog._client, self)
 
     def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
         """Read immediate dependencies, optionally filtered by their coordinates."""
-        from ..._internal.conan import records
+        from .._internal.conan import records
         from .query import SearchQuery
 
         catalog = self._context()
@@ -77,7 +80,7 @@ class Ref:
         self, *, candidates: SearchQuery, transitive: bool = True
     ) -> tuple[Record, ...]:
         """Find candidate packages requiring this Ref, directly or transitively."""
-        from ..._internal.conan import graph
+        from .._internal.conan import graph
 
         catalog = self._context()
         return graph.find_dependents(
@@ -90,7 +93,7 @@ class Ref:
 
     def materialize(self, *, with_sources: bool = False) -> MaterializedPackage:
         """Fetch package artifacts and optionally its pinned SCM sources."""
-        from ..._internal.conan import materialization
+        from .._internal.conan import materialization
 
         return materialization.materialize(self._context()._client, self, with_sources=with_sources)
 

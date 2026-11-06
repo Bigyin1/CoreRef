@@ -3,9 +3,9 @@
 from pathlib import Path
 
 from ...api.errors import Conflict, NotFound
-from ...api.models.query import SearchQuery
-from ...api.models.records import Record, Ref
 from ...api.protocols import RefCatalog
+from ...api.query import SearchQuery
+from ...api.records import Record, Ref
 from ..validation import normalize_query, normalize_ref
 from .client import ConanClient
 from .format import (

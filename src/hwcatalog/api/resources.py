@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote, urlsplit
 
-from ..errors import CatalogError
-from ..types import JSON
+from .errors import CatalogError
+from .types import JSON
 
 
 @dataclass(frozen=True)

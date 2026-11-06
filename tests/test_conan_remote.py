@@ -1,6 +1,5 @@
 """Round trips through an owned Conan server, never a configured user server."""
 
-import json
 import secrets
 import shutil
 import socket
@@ -24,8 +23,8 @@ from hwcatalog.api.errors import (
     CatalogError,
     Conflict,
 )
-from hwcatalog.api.models.query import SearchQuery
-from hwcatalog.api.models.records import Record, Ref
+from hwcatalog.api.query import SearchQuery
+from hwcatalog.api.records import Record, Ref
 from tests.helpers import resolve_published
 
 pytestmark = pytest.mark.conan_remote
@@ -96,14 +95,14 @@ def _wait_for_server(url: str, process: subprocess.Popen[str], log: str) -> None
 def test_remote_round_trip_external_ci_and_cache_independence(
     remote_catalog: Catalog, tmp_path: Path
 ) -> None:
-    rtl = Record(Ref("cpu", "1.0", "rtl", "soc"), {"source": "cpu.sv"})
-    be = Record(Ref("cpu", "4.0", "lib-lef", "soc"), {"source": "cpu.lib"})
+    rtl = Record(Ref("soc", "cpu", "rtl", "default", "1.0"), {"source": "cpu.sv"})
+    be = Record(Ref("soc", "cpu", "be", "lib-lef", "4.0"), {"source": "cpu.lib"})
     catalog = remote_catalog
     catalog.publish(rtl)
     catalog.publish(be, dependencies=(rtl.ref,))
     assert (
         Ref(**rtl.ref.to_dict(), catalog=catalog)
-        .find_dependents(candidates=SearchQuery(kind="lib-lef"))[0]
+        .find_dependents(candidates=SearchQuery(type="lib-lef", view="be"))[0]
         .ref
         == be.ref
     )
@@ -114,13 +113,13 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     native_refs = tuple(
         str(dep.ref) for dep in native.root.conanfile.dependencies.host.topological_sort.values()
     )
-    assert native_refs == ("soc.cpu.rtl/1.0",)
+    assert native_refs == ("soc.cpu.rtl.default/1.0",)
     # A conflicting local-only revision must never enter published requirements.
     rogue = tmp_path / "local-only-revision"
     write_recipe(rogue, Record(rtl.ref, {"local-only": True}))
     remote_catalog._client.create_lockfile(rogue)
     remote_catalog._client.export(rogue)
-    another_be = Record(Ref("cpu", "5.0", "lib-lef", "soc"))
+    another_be = Record(Ref("soc", "cpu", "be", "lib-lef", "5.0"))
     catalog.publish(another_be, dependencies=(rtl.ref,))
     assert {r.ref for r in resolve_published(catalog, another_be.ref).records} == {
         another_be.ref,
@@ -132,7 +131,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     reader = Catalog(configured_home(home), remote="catalog")
     assert Ref(**be.ref.to_dict(), catalog=reader).get().payload == {"source": "cpu.lib"}
     assert resolve_published(reader, be.ref) == original_graph
-    new_rtl = Record(Ref("cpu", "2.0", "rtl", "soc"))
+    new_rtl = Record(Ref("soc", "cpu", "rtl", "default", "2.0"))
     external = tmp_path / "ci"
     write_recipe(external, new_rtl)
     remote_catalog._client.create_lockfile(external)
@@ -143,14 +142,14 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     remote_catalog._client.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
     with pytest.raises(CatalogError):
         Ref(**rtl.ref.to_dict(), catalog=catalog).find_dependents(
-            candidates=SearchQuery(kind="lib-lef")
+            candidates=SearchQuery(type="lib-lef", view="be")
         )
 
 
 def test_cached_package_is_not_published_until_remote_upload_succeeds(
     remote_catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    record = Record(Ref("cpu", "1.0", "rtl", "soc"), {"source": "cpu.sv"})
+    record = Record(Ref("soc", "cpu", "rtl", "default", "1.0"), {"source": "cpu.sv"})
     catalog = remote_catalog
 
     def reject_upload(reference: str) -> None:
@@ -174,25 +173,17 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
 ) -> None:
     # The isolated test server deliberately accepts a local SCM URL.
     (remote_catalog._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
-    dependency = Record(Ref("flow", "1.0", "run", "tools"))
+    dependency = Record(Ref("tools", "flow", "run", "default", "1.0"))
     remote_catalog.publish(dependency)
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
-    description = tmp_path / "package.json"
-    description.write_text(
-        json.dumps(
-            {
-                "ref": Ref("cpu", "1.0", "lib-lef", "soc").to_dict(),
-                "source": {"path": "checkout"},
-                "dependencies": [dependency.ref.to_dict()],
-                "files": {"cpu.lib": "cpu.lib"},
-                "payload": {"corner": "tt"},
-            }
-        )
+    published = remote_catalog.publish(
+        Record(Ref("soc", "cpu", "be", "lib-lef", "1.0"), {"corner": "tt"}),
+        dependencies=(dependency.ref,),
+        source_path=checkout,
+        files={"cpu.lib": artifact},
     )
-    published = remote_catalog.publish_file(description)
     artifact.unlink()
-    description.unlink()
     shutil.rmtree(checkout)
     home = tmp_path / "fresh-reader"
     home.mkdir()
@@ -222,7 +213,7 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
 def test_one_configured_remote_is_used_automatically(
     remote_catalog: Catalog, tmp_path: Path
 ) -> None:
-    record = Record(Ref("automatic", "1.0", "rtl", "soc"))
+    record = Record(Ref("soc", "automatic", "rtl", "default", "1.0"))
     publisher = remote_catalog
     assert remote_catalog._client.remote == "catalog"
     publisher.publish(record)

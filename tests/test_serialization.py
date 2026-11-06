@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from hwcatalog._internal.validation import normalize_record
-from hwcatalog.api.models.records import Record
+from hwcatalog.api.records import Record
 from hwcatalog.api.types import JSON
 from tests.helpers import content, release, run
 

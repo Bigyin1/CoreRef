@@ -7,8 +7,8 @@ from pathlib import Path
 
 from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.models.graph import GraphResult
-from hwcatalog.api.models.records import Record, Ref
+from hwcatalog.api.graph import Graph, GraphResult
+from hwcatalog.api.records import Record, Ref
 from hwcatalog.api.types import JSON
 
 
@@ -33,7 +33,7 @@ def release(
 ) -> Record:
     return normalize_record(
         Record(
-            Ref(name, version, "release", f"{team}-{project_type}"),
+            Ref(f"{team}-{project_type}", name, "release", "default", version),
             {
                 "resources": [
                     {
@@ -54,7 +54,7 @@ def release(
 def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS) -> Record:
     return normalize_record(
         Record(
-            Ref(name, "1.0", "run", "flow"),
+            Ref("flow", name, "run", "default", "1.0"),
             {"type_id": type_id, "purpose": "synthesis", "details": {"array": [3, 1, 2]}},
         )
     )
@@ -87,4 +87,4 @@ def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = Non
     ref = Ref(**ref.to_dict(), catalog=catalog)
     record = ref.get()
     dependencies = tuple(item.ref for item in ref.dependencies())
-    return catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
+    return Graph(catalog, record, dependencies=dependencies, lockfile=lockfile).resolve()

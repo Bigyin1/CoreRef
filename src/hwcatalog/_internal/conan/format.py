@@ -11,10 +11,10 @@ from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ...api.errors import InvalidPackage
-from ...api.models.query import SearchQuery
-from ...api.models.records import Record, Ref
-from ...api.models.resources import GitResource
 from ...api.protocols import RefCatalog
+from ...api.query import SearchQuery
+from ...api.records import Record, Ref
+from ...api.resources import GitResource
 from ..validation import normalize_record, normalize_ref
 
 _TOKEN = re.compile(r"[a-z0-9_-]+\Z")
@@ -38,7 +38,7 @@ def to_conan_reference(ref: Ref) -> str:
     """Encode a reference, rejecting names that cannot be represented without loss."""
     ref = normalize_ref(ref)
     if ref.namespace.startswith("-") or not all(
-        _TOKEN.fullmatch(value) for value in (ref.namespace, ref.name, ref.kind)
+        _TOKEN.fullmatch(value) for value in (ref.namespace, ref.component, ref.view, ref.type)
     ):
         raise InvalidPackage("Conan coordinates require lowercase tokens without dots or slashes")
     name = ref.package_name
@@ -56,8 +56,8 @@ def from_conan_reference(value: str, *, catalog: RefCatalog | None = None) -> Re
     """Decode a recipe reference; revisions and timestamps are transport details."""
     try:
         name, version = value.split("#", 1)[0].split("/")
-        namespace, component, kind = name.split(".")
-        ref = Ref(component, version, kind, namespace, catalog=catalog)
+        namespace, component, view, package_type = name.split(".")
+        ref = Ref(namespace, component, view, package_type, version, catalog=catalog)
         if to_conan_reference(ref) != value.split("#", 1)[0]:
             raise ValueError("Noncanonical coordinates")
         return ref
@@ -67,7 +67,7 @@ def from_conan_reference(value: str, *, catalog: RefCatalog | None = None) -> Re
 
 def search_pattern(query: SearchQuery) -> str | None:
     """Use wildcards only for unspecified fields, never for literal query text."""
-    fields = (query.namespace, query.name, query.kind)
+    fields = (query.namespace, query.component, query.view, query.type)
     if any(value is not None and not _TOKEN.fullmatch(value) for value in fields):
         return None
     if query.version is not None and not _VERSION.fullmatch(query.version):

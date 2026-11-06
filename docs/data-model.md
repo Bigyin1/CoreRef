@@ -1,58 +1,59 @@
 # Структуры данных
 
-## Ref и Record
+## Координаты и записи
 
-Ref — неизменяемая точная ссылка с обязательными непустыми строками namespace,
-name, kind и version. Они соответствуют SoC-проекту, компоненту, представлению
-и версии представления. Идентичность включает все четыре поля; package_name
-возвращает namespace.name.kind без версии. str(ref) возвращает полную ссылку.
-Kind — пользовательская строка, встроенного Enum нет.
+Ref содержит пять обязательных строк в порядке `namespace, component, view, type, version`.
+Namespace задаёт проект, component — компонент, view — представление (rtl, be, dft,
+simulation), type — вариант внутри представления. Для текущих flow используются
+rtl/default и be/lib-lef. Это соглашения flow; SDK не ограничивает словарь view/type.
 
-Conan кодирует ссылку как namespace.name.kind/version. Компоненты имени содержат
-lowercase-буквы, цифры, `_`, `-`; точки служат разделителями. Версия и длина ссылки
-проверяются на совместимость с Conan.
+Conan-имя — `namespace.component.view.type`, Conan version — отдельная версия.
+Например, `soc.mmu.rtl.default/1.0`. Части имени содержат lowercase-буквы, цифры, `_`
+и `-`; точки служат разделителями. Пустые значения и неоднозначное кодирование
+отклоняются. Старые name/kind и трёхчастное имя не поддерживаются.
+Все пять полей участвуют в равенстве, хеше и сортировке; каталог в identity не входит.
 
-Record содержит ref, payload, необязательный один source (GitResource) и files
-(имена упакованных артефактов). source/files управляются каталогом и отделены от payload. Payload — произвольное JSON-значение или объект
-с методом to_json(), возвращающим JSON-документ. Сериализация принадлежит модели:
-Record.to_json()/from_json(). При публикации содержимое становится независимым
-неизменяемым снимком: объекты — frozendict, массивы — tuple. Python-классы пользователя
-не сохраняются и не восстанавливаются автоматически. NaN/Infinity запрещены.
+Ref остаётся frozen dataclass для стабильных ключей графа и словарей. Record,
+Dependency, GraphResult и дескрипторы ресурсов также являются неизменяемыми значениями.
+Catalog и Graph — обычные классы: они отвечают за операции и контекст проекта.
 
-## Dependency
+Record содержит ref, произвольный payload, необязательный GitResource source и
+files — tuple имён упакованных файлов. Payload может быть JSON-значением либо
+объектом с to_json() -> str (протокол JSONSerializable). После чтения или публикации
+JSON становится независимым неизменяемым снимком: объекты — frozendict, массивы — tuple.
+Python-классы не сохраняются, NaN/Infinity запрещены.
 
-Dependency(source: Ref, target: Ref) означает, что source требует target.
-Оба конца задаются точно. Дополнительных полей, типов и параллельных привязок нет.
-Модель неизменяема; отдельного формата хранения или JSON-сериализации рёбер нет.
+Record.to_json()/from_json() сериализуют запись; ref.to_dict() — только координаты.
+Git source в Conan хранится отдельно от payload и record.json, в conandata.yml.
+Один пакет имеет не более одного SCM-источника. Карта исходных файлов передаётся
+в publish(files=...); в Record.files сохраняются только имена внутри пакета.
 
-Один вызов publish создаёт один source и принимает его зависимости как tuple[Ref, ...].
-Каждый target должен уже существовать. Dependency(source, target) возвращается при
-чтении графа. Повторная публикация идентичности, дубликаты зависимостей, ссылки
-на отсутствующие узлы и ссылки на себя запрещены. Conan проверяет разрешение графа
-и конфликты версий. Опубликованные данные не изменяются.
+## Зависимости и поиск
 
-## Поиск и графы
+Dependency(source, target) означает, что source требует target. Это точное ребро
+без типа и дополнительных свойств. Один publish создаёт один source с уже
+опубликованными зависимостями. Совместимость требований проверяет Conan.
 
-SearchQuery задаёт необязательные точные фильтры namespace/name/kind/version,
-соединённые через AND. Пустой запрос находит все записи. Поиска по payload нет.
+SearchQuery содержит необязательные точные фильтры namespace/component/view/type/version,
+соединённые через AND. Пустой запрос находит все записи; поиска по payload нет.
+View и type независимы: один компонент может иметь несколько типов одного view
+с одинаковой версией и отдельными Conan-пакетами.
 
-Dependencies и find_dependents возвращают непосредственно tuple[Record, ...],
-отсортированный по Ref. Промежуточной структуры соседней привязки нет.
+## Проектный граф
 
-GraphResult содержит records и dependencies. Корень входит в records;
-записи сортируются по полям Ref, зависимости — по source и target.
+Graph хранит описание одного проекта и явно выбранные dependencies и lockfile.
+Flow сам читает deps.toml или другой формат и добавляет найденные зависимости.
+Graph.resolve() возвращает GraphResult(records, dependencies), включая локальный корень.
+Записи сортируются по Ref, рёбра — по source и target.
 
-To_networkx() создаёт независимый nx.DiGraph с ключами Ref. Атрибут вершины record
-содержит Record, атрибут ребра dependency — Dependency. Изменение экспортированного
-графа не меняет каталог или исходный GraphResult.
+GraphResult.to_networkx() создаёт независимый DiGraph с ключами Ref. Атрибут вершины
+record содержит Record, атрибут ребра dependency — Dependency. Изменение этого
+графа не меняет исходный результат или опубликованные пакеты.
 
 ## Ресурсы
 
-GitResource описывает точный Git-коммит; LocatedResource — абсолютный путь
-к внешнему файлу или каталогу. GitResource не выполняет Git-операций;
-LocatedResource.materialize() возвращает MaterializedResource(path).
-Git source пакета задаётся полем source; в Conan его координаты хранятся в conandata.yml.
-LocatedResource может храниться в payload и не загружается в Conan автоматически.
-Catalog.materialize(ref) возвращает MaterializedPackage: path указывает на артефакты,
-а source_path — на отдельный SCM checkout, если передан with_sources=True.
-Git-код не копируется в новые Conan binaries; source() получает его из GitLab.
+GitResource описывает точный Git-коммит; source() Conan получает его из GitLab.
+Ref.materialize() возвращает MaterializedPackage.path с артефактами, а при
+with_sources=True — отдельный source_path. Git-код не копируется в binary.
+LocatedResource описывает внешний локальный или смонтированный путь и может храниться
+в payload; его файлы не загружаются в Conan автоматически.

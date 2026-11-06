@@ -5,9 +5,9 @@ from dataclasses import replace
 from pathlib import PurePosixPath
 
 from ..api.errors import InvalidPackage
-from ..api.models.query import SearchQuery
-from ..api.models.records import Record, Ref
 from ..api.protocols import RefCatalog
+from ..api.query import SearchQuery
+from ..api.records import Record, Ref
 
 
 def _text(value: str, *, blank: bool = False) -> str:
@@ -22,10 +22,11 @@ def _optional_text(value: str | None) -> str | None:
 
 def normalize_ref(value: Ref) -> Ref:
     return Ref(
-        _text(value.name),
-        _text(value.version),
-        _text(value.kind),
         _text(value.namespace),
+        _text(value.component),
+        _text(value.view),
+        _text(value.type),
+        _text(value.version),
         catalog=value.catalog,
     )
 
@@ -68,10 +69,11 @@ def normalize_publication(
 
 def normalize_query(value: SearchQuery) -> SearchQuery:
     return SearchQuery(
-        name=_optional_text(value.name),
-        version=_optional_text(value.version),
-        kind=_optional_text(value.kind),
         namespace=_optional_text(value.namespace),
+        component=_optional_text(value.component),
+        view=_optional_text(value.view),
+        type=_optional_text(value.type),
+        version=_optional_text(value.version),
     )
 
 

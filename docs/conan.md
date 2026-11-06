@@ -1,176 +1,110 @@
 # Conan: публикация и содержимое пакета
 
-Все операции выполняются через `ConanAPI.command.run()` в процессе Python.
-Нативный `DepsGraph`, `ConanFile` и рецепты остаются внутри адаптера.
-Проект владеет своим lockfile и передаёт его путь, не разбирая формат.
-Пользователь работает с `Record`, `Ref`, `Dependency` и `GraphResult`.
-Зафиксирована версия Conan 2.34.x: Command API пока экспериментален.
+Все команды выполняются через Conan Python Command API в процессе Python.
+Версия закреплена на Conan 2.34.x. DepsGraph, ConanFile и рецепты остаются внутри SDK.
+Пользовательские входы — Record, Ref, прямые dependencies и пути к файлам.
 
-## Один JSON-файл — один пакет
-
-```json
-{
-  "ref": {"namespace": "soc1", "name": "cpu", "kind": "lib-lef", "version": "4.0"},
-  "payload": {"corner": "tt"},
-  "dependencies": [
-    {"namespace": "soc1", "name": "cpu", "kind": "rtl", "version": "2.3"}
-  ],
-  "source": {"path": "../cpu"},
-  "files": {
-    "timing/cpu.lib": "out/cpu.lib",
-    "physical/cpu.lef": "out/cpu.lef"
-  }
-}
-```
-
-Обязательно только `ref`. Зависимости уже должны быть опубликованы. Все пути
-отсчитываются от JSON-файла. Ключи `files` — имена внутри пакета, значения — пути
-к обычным файлам на машине издателя. Имена должны быть относительными POSIX-путями
-без `..`. JSON не принимает дополнительные поля или списки источников.
+## Прямая публикация
 
 ```python
+from pathlib import Path
 from hwcatalog.api.catalog import Catalog
+from hwcatalog.api.records import Record, Ref
 
 catalog = Catalog()
-record = catalog.publish_file("package.json")
-print(record.source, record.files)
-package = record.ref.materialize(with_sources=True)
-print(package.source_path)  # SCM checkout in Conan's source cache
-print(package.path / "artifacts" / "timing/cpu.lib")
+rtl = catalog.publish(
+    Record(Ref("soc", "cpu", "rtl", "default", "1.0"), {"filelist": "rtl.f"}),
+    source_path=Path("/work/cpu"),
+)
+macro = catalog.publish(
+    Record(Ref("soc", "cpu", "be", "lib-lef", "4.0"), {"corner": "tt"}),
+    dependencies=(rtl.ref,),
+    files={"timing/cpu.lib": Path("out/cpu.lib"), "physical/cpu.lef": Path("out/cpu.lef")},
+)
+package = macro.ref.materialize()
+print(package.path / "artifacts/timing/cpu.lib")
 ```
 
-`publish_file()` возвращает сохранённый `Record`. Каталог автоматически создаёт
-промежуточный рецепт, экспортирует его, создаёт пакет и загружает
-его на указанный remote. Без явного remote выбирается единственный включённый
-remote из конфигурации.
-Если включённых remotes нет, используется локальный cache; при нескольких
-нужно указать имя через `remote="catalog"`.
-Содержимое возвращаемого пути принадлежит Conan cache; его следует читать, а для
-изменений копировать в рабочий каталог.
+Ключи files — имена внутри пакета, значения — обычные Path на машине издателя.
+Относительные пути считаются от cwd; flow может разрешить их относительно своего
+манифеста заранее. Встроенного файла публикации SDK не требует и не разбирает.
+Каждый publish создаёт один пакет; dependencies должны уже существовать.
 
-## Один Git source на пакет
+SDK генерирует временный рецепт через Jinja PackageLoader и StrictUndefined.
+Python-литералы экранируются repr. Один export-pkg экспортирует рецепт, разрешает
+Conan-граф и упаковывает файлы; затем upload отправляет пакет на remote.
+Предварительных graph info/export при публикации нет. Имя пакета имеет формат
+namespace.component.view.type/version; revision берётся из нативного результата.
+Канонический рецепт проверяется перед чтением. Старые форматы не поддерживаются.
 
-`source: {"path": "../cpu"}` указывает на локальный checkout. Внутренний
-`export()` вызывает `Git.coordinates_to_conandata(repository=True)`: Conan сам
-проверяет чистоту репозитория и фиксирует URL/commit в `conandata.yml` под ключом
-`scm`. В исходный checkout каталог ничего не записывает. Внутренний `source()`
-использует `Git.checkout_from_conandata_coordinates()`.
+## SCM и артефакты
 
-Можно также передать уже известные координаты:
+source_path задаёт единственный локальный Git checkout. Внутренний export() вызывает
+Git.coordinates_to_conandata(repository=True): Conan проверяет чистоту checkout
+и сохраняет URL/commit в conandata.yml. В исходный репозиторий SDK ничего не записывает.
+Можно передать заранее известный GitResource в Record.source вместо source_path;
+тогда при публикации Git не вызывается. Commit должен быть точным.
 
-```json
-{
-  "source": {
-    "provider": "git",
-    "repository_url": "https://git.example.org/soc/cpu.git",
-    "requested_ref": "release-2.3",
-    "resolved_commit": "0123456789abcdef0123456789abcdef01234567"
-  }
-}
-```
+SCM не входит в payload и record.json. Record.source восстанавливается из метаданных
+Conan. Код остаётся в GitLab и не копируется в binary. Обычные файлы проходят через
+exports и package() и сохраняются под artifacts/. exports_sources не используется.
 
-Этот фрагмент добавляется к полному описанию пакета. Commit обязателен и точен;
-`requested_ref` служит подписью, выбор версии выполняется по commit. Git source
-не записывается в `payload` или в Conan `record.json`: его координаты хранятся
-штатным SCM-механизмом. `Record.source` возвращает `GitResource` из этих координат.
-Второй Git source модель не допускает.
+`ref.materialize()` возвращает артефакты. `ref.materialize(with_sources=True)`
+дополнительно передаёт tools.build:download_source=True в Conan install.
+Conan выполняет source() с Git.checkout_from_conandata_coordinates(); путь к исходникам
+возвращается отдельно в MaterializedPackage.source_path. Без флага source_path=None.
+При первом получении Git remote должен быть доступен; дальнейшие обращения используют
+source cache Conan. Его содержимое принадлежит Conan и предназначено для чтения.
 
-Исходный код остаётся в GitLab (или другом Git remote). В Conan хранится его
-SCM — URL и точный commit. Публикация выполняется через `export-pkg`: Git-исходники
-в бинарный пакет не копируются и для заранее заданных координат не скачиваются.
-Обычные файлы из `files` сохраняются в пакете под `artifacts/`.
+Git/SSH, GitLab и права на commit настраиваются обычными средствами. Conan может
+запретить upload с локальным SCM URL. Тестовый сервер разрешает их только в своих
+изолированных cache. См. [SCM capture](https://docs.conan.io/2/examples/tools/scm/git/capture_scm/git_capture_scm.html)
+и [получение исходников](https://docs.conan.io/2/reference/conanfile/methods/source.html#forced-retrieval-of-sources).
 
-`materialize(ref)` устанавливает артефакты и возвращает `MaterializedPackage.path`.
-Чтобы дополнительно получить код, вызовите `materialize(ref, with_sources=True)`.
-Адаптер передаёт scoped-конфигурацию `tools.build:download_source=True` команде
-Conan install; Conan выполняет `source()` и checkout точного commit. Путь к нему
-возвращается отдельно в `MaterializedPackage.source_path`. При чтении артефактов
-без этого флага `source_path` равен `None`.
+LocatedResource сохраняет внешний локальный или смонтированный NFS-путь.
+Такие файлы не загружаются в Conan автоматически и могут описываться в payload.
 
-Источники должны быть доступны из GitLab при первом получении в новом cache;
-готовый Conan binary исходного кода не содержит. Уже полученный checkout использует
-source cache Conan. Права Git/SSH и GitLab настраиваются обычными средствами Git.
-При захвате SCM из локального пути нужны чистый checkout и установленный Git.
-Conan может запретить upload с локальным SCM URL, если commit не доступен в remote.
-См. [принудительное получение source в Conan](https://docs.conan.io/2/reference/conanfile/methods/source.html#forced-retrieval-of-sources)
-и [SCM capture](https://docs.conan.io/2/examples/tools/scm/git/capture_scm/git_capture_scm.html).
-
-`LocatedResource` сохраняет прежний смысл: внешний локальный или смонтированный
-NFS-путь. Такой ресурс не загружается в Conan автоматически. Дополнительные
-внешние ресурсы можно описывать в пользовательском `payload`.
-
-## Граф и remote
+## Проектные графы и lockfile
 
 ```python
-catalog = Catalog(remote="catalog", timeout=60)
+from hwcatalog.api.graph import Graph
+
+project = Graph(
+    catalog,
+    Record(Ref("soc", "top", "rtl", "default", "1.0")),
+    dependencies=(rtl.ref,),
+    lockfile=Path("/work/top/conan.lock"),
+)
+lockfile = project.create_lockfile()
+resolved = project.resolve()
+record = catalog.publish(project.record, dependencies=project.dependencies, lockfile=lockfile)
 ```
 
-Без аргумента `home` используется стандартный cache Conan (обычно `~/.conan2`).
-Путь выбирает `ConanAPI().home_folder`, с учётом `CONAN_HOME` и `.conanrc`.
-Явный `home` также должен быть настроен заранее. SDK не создаёт профили
-и не запускает `profile detect`. Применяются стандартные профили Conan, включая
-`CONAN_DEFAULT_PROFILE` / `CONAN_DEFAULT_BUILD_PROFILE` и `core:default_profile` /
-`core:default_build_profile` из `global.conf`.
-Remote и аутентификация настраиваются обычными средствами Conan в выбранном home.
-При нескольких включённых remotes адаптер требует явный выбор имени.
-Адаптер читает и публикует в один remote; локальные конфликтующие revisions не
-подменяют удалённую идентичность. Настройки процесса `CONAN_HOME` и cwd после
-операций сохраняются. Timeout ограничивает отдельный HTTP-запрос, а не полное
-время публикации или Git-команды.
+Один Graph соответствует одному описанию проекта. Парсинг deps.toml принадлежит flow,
+который может дополнить зависимости результатами поиска до создания Graph.
+create_lockfile фиксирует прямые dependencies и их транзитивный граф; корень не
+должен быть опубликован. Существующий lockfile используется при явном обновлении.
+resolve и publish не изменяют его. Несколько Graph могут иметь разные имена lockfile
+и находиться в одной директории. RTL хранит файл в Git, BE — в своём workspace.
 
-Проектный `conan.lock` хранится в RTL-репозитории или BE workspace. Создание и
-обновление выполняет `catalog.create_lockfile(refs, path)` через штатные команды
-Conan. Формат, версия схемы и содержимое файла принадлежат Conan; каталог не
-парсит его JSON. Зависимости и топологический порядок берутся из нативного графа.
+SDK не парсит JSON lockfile и не задаёт версию схемы. Материализация опубликованного
+Ref не принимает проектный lockfile: точные revisions уже закреплены в requirements.
+Для одной идентичности допускается только одна revision, иначе Conflict.
+Посторонний conan.lock из cwd явно отключается.
 
-```python
-lockfile = catalog.create_lockfile((rtl_ref,), "/work/project/conan.lock")
-record = catalog.publish_file("package.json", lockfile=lockfile)
-dependencies = tuple(item.ref for item in record.ref.dependencies())
-graph = catalog.resolve_local(record, dependencies=dependencies, lockfile=lockfile)
-package = record.ref.materialize(with_sources=True)
-```
+## Настройки и ограничения
 
-Существующий файл используется как вход при явном обновлении. При обычном чтении
-или публикации он не изменяется. Materialize не принимает lockfile: Ref выбирает
-единственную опубликованную revision, а requirements пакета уже закреплены.
-Если для Ref существует несколько revisions, каталог сообщает Conflict.
-При materialize Conan получает явно пустой `--lockfile`, чтобы не подобрать
-случайный файл из cwd. Это также применяется к разрешению и публикации без `lockfile`.
-Типы рёбер, settings/options, build requirements, overrides и диапазоны версий
-в публичной модели не поддерживаются. Поиск RTL → BE проверяет граф каждого
-кандидата из `SearchQuery`.
+Catalog() использует стандартный Conan home, обычно ~/.conan2, включая CONAN_HOME
+и .conanrc. Явный home должен быть настроен заранее. SDK не создаёт профили и не
+запускает profile detect. Используются настройки global.conf и стандартные переменные
+CONAN_DEFAULT_PROFILE / CONAN_DEFAULT_BUILD_PROFILE.
 
-При настроенном remote сервер является источником опубликованных данных: get,
-search и проверка наличия Ref обращаются к нему. Локальные пакеты, ещё не загруженные
-на этот сервер, не считаются опубликованными. Недоступность сервера даёт ошибку,
-без переключения на содержимое cache.
+При одном включённом remote он выбирается автоматически; при нескольких необходимо
+remote="catalog". Без включённых remotes используется cache. Сервер определяет наличие
+опубликованных записей; недоступность сервера не переключает чтение на локальные
+неопубликованные данные. Cache не копируется. Timeout ограничивает HTTP-запрос.
 
-Один publish создаёт один пакет. Зависимости передаются как tuple[Ref, ...] и
-должны быть опубликованы заранее. Проверка наличия выполняется по точному Ref;
-полный каталог перед публикацией не загружается.
-После создания временного рецепта вызывается один `export-pkg`: Conan сам
-экспортирует рецепт, вычисляет граф, проверяет совместимость требований и вызывает
-package(). Отдельные предварительные `graph info` и `export` не выполняются.
-SCM фиксируется единственным export() внутри export-pkg. Полная ссылка с revision
-берётся из возвращённого нативного графа, а пакет отправляется через upload.
-Home не копируется, cache save/restore не используется. После ошибки в cache
-могут остаться рецепт или пакет. Сбой upload сообщается как CatalogError;
-автоматического rollback или retry нет.
-
-Рецепт генерируется Jinja-шаблоном
-`src/hwcatalog/_internal/conan/templates/conanfile.py.j2`.
-Шаблон загружается из установленного пакета через PackageLoader; переменные
-проверяются StrictUndefined, Python-литералы выводятся через repr.
-JSON-метаданные и SCM-координаты сериализуются моделями.
-
-Поддерживается один текущий шаблон рецепта. Точные recipe revisions прямых зависимостей
-фиксируются в `requirements`, а lockfile не экспортируется. `exports_sources` не используется.
-Обычные файлы артефактов входят в `exports` и копируются из `recipe_folder` методом `package()`;
-`source()` получает Git отдельно. Совместимость с прежними шаблонами не поддерживается.
-Внешний CI использует тот же `catalog.publish_file()`, без написания рецепта Conan. Ручные рецепты
-не являются поддерживаемым входным форматом.
-
-GitResource — описание SCM без собственной реализации Git-кэша. Сгенерированный
-source() получает исходники штатным conan.tools.scm.Git. Для записи без файлов
-и source materialize() вызывает CatalogError.
+Settings/options, build requirements, overrides и диапазоны версий не поддерживаются.
+Прямой обратный поиск читает requirements; транзитивный разрешает граф каждого кандидата.
+Сбой может оставить рецепт или пакет в cache. Автоматических rollback и retry нет.
+Внешний CI использует тот же Catalog.publish с Python-моделями, без ручного Conan-рецепта.

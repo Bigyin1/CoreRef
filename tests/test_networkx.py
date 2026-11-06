@@ -5,7 +5,7 @@ from dataclasses import replace
 import networkx as nx
 import pytest
 
-from hwcatalog.api.models.graph import Dependency, GraphResult
+from hwcatalog.api.graph import Dependency, GraphResult
 from tests.helpers import graph_json, release
 
 

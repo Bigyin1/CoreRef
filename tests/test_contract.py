@@ -8,9 +8,9 @@ import pytest
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
-from hwcatalog.api.models.graph import Dependency
-from hwcatalog.api.models.query import SearchQuery
-from hwcatalog.api.models.records import Record, Ref
+from hwcatalog.api.graph import Dependency
+from hwcatalog.api.query import SearchQuery
+from hwcatalog.api.records import Record, Ref
 from hwcatalog.api.types import JSON
 from tests.helpers import graph_json, release, resolve_published
 
@@ -98,13 +98,15 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
         left,
         right,
     )
-    assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies(SearchQuery(name="left")) == (
-        left,
-    )
+    assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies(
+        SearchQuery(component="left")
+    ) == (left,)
     assert Ref(**shared.ref.to_dict(), catalog=catalog).find_dependents(
-        candidates=SearchQuery(name="right"), transitive=False
+        candidates=SearchQuery(component="right"), transitive=False
     ) == (right,)
-    assert not Ref(**root.ref.to_dict(), catalog=catalog).dependencies(SearchQuery(name="absent"))
+    assert not Ref(**root.ref.to_dict(), catalog=catalog).dependencies(
+        SearchQuery(component="absent")
+    )
     assert resolve_published(catalog, shared.ref).records == (shared,)
 
 

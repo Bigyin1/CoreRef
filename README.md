@@ -1,113 +1,111 @@
 # hwcatalog-conan
 
-Экспериментальный каталог hardware-проектов на Conan 2.34. Отдельный проект создан
-на основе hwcatalog, коммит `3dba7e2`; имя дистрибутива — hwcatalog-conan,
-Python-импорты — `hwcatalog`.
+Экспериментальный каталог hardware-проектов на Conan 2.34. За основу взят hwcatalog,
+коммит `3dba7e2`. Дистрибутив называется `hwcatalog-conan`, Python-пакет — `hwcatalog`.
 
-API описывает записи и точные зависимости пакетов. `str(ref)` возвращает
-`namespace.name.kind/version`, `ref.package_name` — имя без версии.
-JSON-ключи identity/family и отдельная JSON-сериализация рёбер удалены.
-Узел хранится как рецепт Conan
-с JSON-содержимым и точными requirements. `conan.lock` принадлежит использующему
-пакеты проекту: RTL-репозиторию или BE workspace. Имя пакета имеет формат
-`namespace.name.kind/version`, например `soc1.cpu.lib-lef/4.0`.
-Тип представления задаётся полем Ref.kind; типизации рёбер нет.
+Ссылка имеет формат **`namespace.component.view.type/version`**:
 
-Conan должен быть настроен заранее: профили, remotes и аутентификация.
-Библиотека использует стандартные настройки Conan и не создаёт собственных профилей.
-При одном включённом remote он выбирается автоматически; при нескольких задаётся
-`remote="catalog"`. Без включённых remotes используется локальный cache.
-
-```python
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.models.query import SearchQuery
-from hwcatalog.api.models.records import Record, Ref
-
-rtl = Record(Ref("cpu", "2.3", "rtl", "soc1"))
-macro = Record(Ref("cpu", "4.0", "lib-lef", "soc1"), {"files": ["/artifacts/cpu.lib"]})
-catalog = Catalog()
-rtl = catalog.publish(rtl)
-macro = catalog.publish(macro, dependencies=(rtl.ref,))
-inputs = macro.ref.dependencies()  # tuple[Record, ...]
-implementations = rtl.ref.find_dependents(
-    candidates=SearchQuery(namespace="soc1", name="cpu", kind="lib-lef"),
-)
-graph = catalog.resolve_local(macro, dependencies=(rtl.ref,))
-print(graph.dependencies)
+```text
+soc.cpu.rtl.default/1.0
+soc.cpu.be.lib-lef/4.0
 ```
 
-Для существующего пакета ссылка создаётся как
-`Ref("cpu", "2.3", "rtl", "soc1", catalog=catalog)`; затем доступны
-`ref.get()`, `ref.dependencies()`, `ref.find_dependents(...)` и `ref.materialize(...)`.
-Ссылки в результатах каталога сразу содержат его контекст, описанный протоколом
-`RefCatalog`; дополнительного объекта `view` или шага привязки нет. Контекст
-не входит в равенство, хеш и JSON координат (`ref.to_dict()`).
+Namespace задаёт проект, component — компонент, view — представление, type — его
+вариант. Версия хранится в Conan version. Все пять полей обязательны; старый формат
+не поддерживается. Версии RTL и BE независимы. Связь подтверждается точной
+зависимостью BE от RTL, типов рёбер нет.
 
-Один `publish(record, dependencies=(ref1, ref2, ...))` создаёт один пакет и возвращает
-его сохранённый `Record`. Зависимости должны быть опубликованы заранее. Публикация
-использует один `export-pkg`, который экспортирует рецепт, проверяет граф Conan и
-упаковывает файлы, затем `upload` отправляет пакет на сервер.
+`Catalog` предоставляет только `search` и `publish`. Операции одного пакета находятся
+в `Ref`; разрешение зависимостей и lockfile одного локального описания — в `Graph`.
+Публичные модули расположены прямо в `hwcatalog.api`: `catalog`, `graph`, `records`,
+`query`, `resources`, `protocols`, `errors`, `types`. Поддиректории `models` нет.
 
-Устанавливается через Python 3.15 и uv. Dev-окружение включает Conan и тестовый сервер:
+```python
+from pathlib import Path
+
+from hwcatalog.api.catalog import Catalog
+from hwcatalog.api.graph import Graph
+from hwcatalog.api.query import SearchQuery
+from hwcatalog.api.records import Record, Ref
+
+catalog = Catalog()
+rtl = catalog.publish(Record(Ref("soc", "cpu", "rtl", "default", "1.0")))
+macro = catalog.publish(
+    Record(Ref("soc", "cpu", "be", "lib-lef", "4.0"), {"corner": "tt"}),
+    dependencies=(rtl.ref,),
+    files={"cpu.lib": Path("out/cpu.lib"), "cpu.lef": Path("out/cpu.lef")},
+)
+implementations = rtl.ref.find_dependents(
+    candidates=SearchQuery(namespace="soc", component="cpu", view="be", type="lib-lef"),
+    transitive=False,
+)
+package = macro.ref.materialize()
+
+project = Graph(
+    catalog,
+    Record(Ref("soc", "top", "rtl", "default", "1.0")),
+    dependencies=(rtl.ref,),
+    lockfile=Path("workspace/top.lock"),
+)
+project.create_lockfile()
+resolved = project.resolve()
+print(resolved.records, resolved.dependencies)
+```
+
+Каждый `Graph` соответствует одному описанию проекта, например одному `deps.toml`.
+Парсинг TOML, JSON или другого формата принадлежит flow. В SDK передаются Python-модели.
+Граф может получать дополнительные зависимости, найденные flow, вместе с явно
+заданными в файле. Локальный корень не требуется публиковать для разрешения графа.
+Несколько Graph могут использовать один Conan cache и разные lockfile в одной директории.
+
+`Ref(..., catalog=catalog)` позволяет вызвать `get()`, `dependencies()`,
+`find_dependents(...)` и `materialize(...)`. Ссылки в результатах каталога и графа
+сразу содержат контекст `RefCatalog`. Он исключён из равенства, хеша и JSON;
+`ref.to_dict()` возвращает только координаты. Без контекста Ref можно хранить
+и сравнивать, но нельзя выполнять операции Conan.
+
+Один `publish` создаёт один пакет. Его зависимости должны быть опубликованы заранее.
+SDK генерирует рецепт Jinja-шаблоном, вызывает один Conan `export-pkg`, затем `upload`.
+Пользовательские `conanfile.py` и отдельный формат файла публикации не требуются.
+Обычные файлы передаются через `files`, их имена внутри пакета возвращаются в `Record.files`.
+
+Для RTL указывается локальный Git checkout:
+
+```python
+record = catalog.publish(
+    Record(Ref("soc", "mmu", "rtl", "default", "1.0")),
+    source_path=Path("/work/mmu"),
+)
+package = record.ref.materialize(with_sources=True)
+print(package.source_path)
+```
+
+Conan сам фиксирует SCM URL и commit. Исходники остаются в GitLab и получаются
+через `source()`; они не копируются в binary. Можно передать заранее закреплённый
+`GitResource` в `Record.source` вместо `source_path`. Внешние NFS-пути остаются
+в payload и доступны через `LocatedResource`.
+
+Lockfile принадлежит проекту и передаётся Conan как непрозрачный файл.
+`Graph.create_lockfile()` создаёт или обновляет его для прямых зависимостей графа
+и запоминает путь для дальнейших `resolve()`. При публикации путь передаётся
+явно через `publish(..., lockfile=...)`. `Ref.materialize()` lockfile не принимает:
+опубликованные requirements уже фиксируют точные revisions.
+
+Conan должен быть настроен заранее: профили, remotes и аутентификация.
+`Catalog()` использует стандартный cache, включая `CONAN_HOME` и `.conanrc`.
+Один включённый remote выбирается автоматически, несколько требуют `remote="catalog"`.
+Без включённых remotes используется локальный cache. Cache не копируется.
+Операции выполняются последовательно, соединения открывать и закрывать не требуется.
+
+Для разработки нужны Python 3.15 и uv:
 
 ```sh
 uv sync --frozen
 uv run python examples/conan_macro.py
-make check unit build
-make integration  # собственный временный Conan server
+make check test build
 ```
 
-Публикация файлов и Git-исходников:
-
-```python
-catalog = Catalog()
-record = catalog.publish_file("package.json")
-package = record.ref.materialize(with_sources=True)
-```
-
-JSON описывает один пакет: `ref`, `payload`, `dependencies`, необязательный один
-`source` и карту `files`. Git-координаты фиксируются SCM-механизмом Conan и хранятся
-в `conandata.yml`. Git-код остаётся в GitLab. Новые рецепты не содержат
-`exports_sources`; обычные файлы артефактов проходят через `exports` и `package()`.
-Опция `with_sources=True` получает его штатным `source()` Conan и возвращает
-отдельный `package.source_path`. `LocatedResource` остаётся внешним путём. Пример полного описания — [в документации](docs/conan.md).
-
-Conan-рецепты и нативный граф создаются внутри адаптера. Все команды выполняются
-через Conan Python API; нативные dependencies и топологический порядок используются
-внутри библиотеки. Все тесты работы с пакетами используют настоящий Conan
-с изолированными временными cache.
-
-Локальный корень не нужно публиковать для получения общего графа зависимостей:
-
-```python
-catalog = Catalog()
-local = Record(Ref("soc", "1.0", "rtl", "soc1"))
-graph = catalog.resolve_local(local, dependencies=(rtl.ref,))
-```
-
-Адаптер создаёт временный consumer-рецепт и получает весь граф одним `graph info`
-через Conan API. Conan проверяет совместимость требований между всеми ветками.
-Корень берётся из локальных данных, даже если такой Ref уже опубликован;
-разрешение графа не экспортирует и не загружает пакет. В `resolve_local` также
-можно передать проектный `lockfile`.
-
-Проектный lockfile создаётся штатной командой Conan и передаётся как непрозрачный файл:
-
-```python
-catalog = Catalog()
-lockfile = catalog.create_lockfile((rtl.ref,), "workspace/conan.lock")
-graph = catalog.resolve_local(macro, dependencies=(rtl.ref,), lockfile=lockfile)
-```
-
-Каталог не разбирает JSON lockfile и не задаёт версию его формата. Новые пакеты
-не экспортируют собственный lockfile.
-
-При настроенном remote сервер Conan — источник опубликованных данных, а стандартный
-локальный cache используется для получения рецептов, файлов и подготовки публикации.
-Cache не копируется; готовые пакеты загружаются на сервер обычным Conan upload.
-Прямой поиск зависимых записей читает requirements кандидатов без разрешения
-их графов. Транзитивный поиск разрешает граф каждого кандидата.
-
+Тесты используют настоящий Conan, собственные временные cache и локальный сервер.
 Документация: [API](docs/interfaces.md), [модели](docs/data-model.md),
 [Conan и внешний CI](docs/conan.md), [сценарии](docs/use-cases.md),
-[решения и ограничения](docs/decisions.md), [разработка](docs/development.md).
+[решения](docs/decisions.md), [разработка](docs/development.md).

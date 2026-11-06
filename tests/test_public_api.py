@@ -19,28 +19,26 @@ def test_public_models_import_independently_of_conan() -> None:
 
         from hwcatalog.api import errors
 
-        assert "hwcatalog.api.models" not in sys.modules
+        assert "hwcatalog.api.records" not in sys.modules
         assert "pydantic" not in sys.modules
         assert "conan" not in sys.modules
 
-        from hwcatalog.api import models
+        from hwcatalog.api import resources
 
-        assert "pydantic" not in sys.modules
-        assert "networkx" not in sys.modules
-
-        from hwcatalog.api.models import resources
-
-        assert "hwcatalog.api.models.records" not in sys.modules
+        assert "hwcatalog.api.records" not in sys.modules
         assert "networkx" not in sys.modules
         assert "conan" not in sys.modules
 
-        from hwcatalog.api.models import records
+        from hwcatalog.api import records
 
         assert "networkx" not in sys.modules
         assert "pydantic" not in sys.modules
+
+        from hwcatalog.api.graph import Graph
+        assert "conan" not in sys.modules
 
         from hwcatalog.api import catalog, types
-        from hwcatalog.api.models import query
+        from hwcatalog.api import query
 
         home = TemporaryDirectory()
         from conan.api.conan_api import ConanAPI
@@ -51,7 +49,7 @@ def test_public_models_import_independently_of_conan() -> None:
         (profiles / "default").write_text("[settings]\\nos=Linux\\n")
         manifest: dict[str, types.JSON] = {"views": ["rtl", "timing"]}
         record = records.Record(
-            ref=records.Ref("rtl", "v1", "rtl-project", "public"),
+            ref=records.Ref("public", "rtl", "rtl", "default", "v1"),
             payload=manifest,
         )
         instance = catalog.Catalog(Path(home.name))
@@ -61,9 +59,9 @@ def test_public_models_import_independently_of_conan() -> None:
         assert stored.payload["views"] == ("rtl", "timing")
         assert instance.search(query.SearchQuery()) == (stored,)
         assert record.ref.dependencies() == ()
-        assert instance.resolve_local(stored).records == (stored,)
+        assert Graph(instance, stored).resolve().records == (stored,)
         try:
-            records.Ref("absent", "v1", "rtl-project", "public", catalog=instance).get()
+            records.Ref("public", "absent", "rtl", "default", "v1", catalog=instance).get()
         except errors.NotFound:
             pass
         else:

@@ -9,7 +9,8 @@ import pytest
 from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError
-from hwcatalog.api.models.records import Record, Ref
+from hwcatalog.api.graph import Graph
+from hwcatalog.api.records import Record, Ref
 
 
 class _Profile(Protocol):
@@ -32,8 +33,8 @@ def test_configured_profile_defaults_are_used_without_rewriting(tmp_path: Path) 
     profiles = cast(Mapping[str, _Profile], catalog._client.run("profile", "show"))
     assert profiles["host"].settings["build_type"] == "Debug"
     assert profiles["build"].settings["build_type"] == "Release"
-    root = Record(Ref("cpu", "1.0", "rtl", "soc"))
-    assert catalog.resolve_local(root).records == (root,)
+    root = Record(Ref("soc", "cpu", "rtl", "default", "1.0"))
+    assert Graph(catalog, root).resolve().records == (root,)
     catalog.publish(root)
     assert before == {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
     assert config.read_text() == (
@@ -48,7 +49,7 @@ def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path) -> None:
     (home / "profiles/default").unlink()
     catalog = Catalog(home)
     with pytest.raises(CatalogError, match="profile"):
-        catalog.resolve_local(Record(Ref("cpu", "1.0", "rtl", "soc")))
+        Graph(catalog, Record(Ref("soc", "cpu", "rtl", "default", "1.0"))).resolve()
     assert not (home / "profiles/default").exists()
 
 

@@ -7,18 +7,20 @@ from .records import Record
 
 @dataclass(frozen=True)
 class SearchQuery:
-    name: str | None = None
-    version: str | None = None
-    kind: str | None = None
     namespace: str | None = None
+    component: str | None = None
+    view: str | None = None
+    type: str | None = None
+    version: str | None = None
 
     def criteria(self) -> dict[str, str]:
         """Return the specified exact filters."""
         values = {
-            "name": self.name,
-            "version": self.version,
-            "kind": self.kind,
             "namespace": self.namespace,
+            "component": self.component,
+            "view": self.view,
+            "type": self.type,
+            "version": self.version,
         }
         return {name: value for name, value in values.items() if value is not None}
 
