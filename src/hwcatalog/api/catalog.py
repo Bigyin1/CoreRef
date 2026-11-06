@@ -35,6 +35,7 @@ class Catalog:
         lockfile: Path | None = None,
     ) -> Record:
         """Publish one package from a detached snapshot of the local description."""
+        self._client.require_remote()
         return self._local_package(record, dependencies, lockfile).publish()
 
     def _package(self, ref: Ref) -> StoredPackage:

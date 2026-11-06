@@ -8,7 +8,7 @@ import pytest
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, InvalidPackage
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record
 
 
@@ -89,5 +89,36 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         patch.setattr(catalog._client, "run", reject)
         lockfile = graph.create_lockfile(tmp_path / "conan.lock")
         assert graph.create_lockfile() == lockfile
-    assert graph.records is records and graph.dependencies is edges
+    assert graph.records == records and graph.dependencies is edges
     assert Graph(catalog, local, dependencies=(dependency.ref,), lockfile=lockfile) == graph
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    ["catalog", "record", "records", "dependencies", "requirements", "networkx", "lockfile"],
+)
+def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: str) -> None:
+    local = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    graph = Graph(catalog, local)
+    expected = graph.ordered_refs(local.ref)
+    with pytest.raises(AttributeError):
+        setattr(graph, attribute, None)
+    assert graph.ordered_refs(local.ref) is expected
+    assert graph.record == local
+
+
+def test_local_views_cannot_change_the_resolved_root(catalog: Catalog) -> None:
+    local = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    graph = Graph(catalog, local)
+    expected = graph.ordered_refs(local.ref)
+    views = (graph.record, graph.records[0], graph.ordered_records(local.ref)[0])
+    for record in views:
+        assert isinstance(record, LocalRecord)
+        record.ref = Ref("soc", "other", "rtl", "default", "1.0", catalog=catalog)
+        record.payload = {"changed": True}
+    assert graph.record.ref == local.ref
+    assert graph.records == (local,)
+    assert graph.ordered_records(local.ref) == (local,)
+    assert graph.ordered_refs(local.ref) is expected
+    assert graph.networkx is graph.networkx
+    assert tuple(graph.networkx) == (local.ref,)

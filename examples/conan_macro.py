@@ -1,10 +1,9 @@
-"""Run with ``uv run python examples/conan_macro.py``; uses a disposable local cache."""
+"""Run with ``uv run python -m examples.conan_macro``; uses an owned local server."""
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from conan_config import configured_home
-
+from examples.local_server import local_server
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
 from hwcatalog.api.query import SearchQuery
@@ -12,8 +11,11 @@ from hwcatalog.api.records import LocalRecord, Ref
 
 
 def main() -> None:
-    with TemporaryDirectory(prefix="hwcatalog-example-") as directory:
-        catalog = Catalog(configured_home(Path(directory)))
+    with (
+        TemporaryDirectory(prefix="hwcatalog-example-") as directory,
+        local_server(Path(directory) / "server") as server,
+    ):
+        catalog = Catalog(server.configure(Path(directory) / "cache"))
         rtl = catalog.publish(
             LocalRecord(Ref("soc1", "cpu", "rtl", "default", "2.3", catalog=catalog))
         )

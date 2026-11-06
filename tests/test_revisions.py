@@ -125,5 +125,5 @@ def test_external_unpinned_requirements_resolve_independently(
     LocalRecipe(root, tuple(str(record.ref.without_revision()) for record in leaves)).write(
         tmp_path
     )
-    catalog._client.export(tmp_path)
+    catalog._client.upload(catalog._client.export(tmp_path))
     assert root.ref.dependencies() == leaves

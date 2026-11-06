@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -10,18 +11,17 @@ from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record
+from tests.test_models import UserPayload
 
 
 class _Profile(Protocol):
     settings: Mapping[str, str]
 
 
-def test_configured_profile_defaults_are_used_without_rewriting(
-    tmp_path: Path, *, catalog: Catalog
-) -> None:
-    home = configured_home(tmp_path / "cache")
+def test_configured_profile_defaults_are_used_without_rewriting(*, catalog: Catalog) -> None:
+    home = catalog._client.home
     default = home / "profiles/default"
     content = default.read_text()
     default.unlink()
@@ -68,3 +68,19 @@ def test_multiple_enabled_remotes_require_an_explicit_selection(tmp_path: Path) 
         Catalog(home)
     selected = Catalog(home, remote="second")
     assert selected._client.remote == "second"
+
+
+def test_publish_without_remote_fails_before_preparing_inputs(tmp_path: Path) -> None:
+    catalog = Catalog(configured_home(tmp_path / "offline"))
+    payload = UserPayload({"test": True})
+    record = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog), payload)
+    with patch.object(
+        catalog._client, "run", side_effect=AssertionError("Unexpected Conan command")
+    ):
+        with pytest.raises(CatalogError, match="requires a configured Conan remote"):
+            catalog.publish(record)
+        with pytest.raises(CatalogError, match="requires a configured Conan remote"):
+            catalog._client.upload(str(record.ref))
+    assert payload.calls == 0
+    assert catalog.search() == ()
+    assert Graph(catalog, record).dependencies == ()

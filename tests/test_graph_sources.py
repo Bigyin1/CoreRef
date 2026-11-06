@@ -138,14 +138,16 @@ def test_unpinned_external_requirement_stays_at_resolved_revision(
     )
     parent = Ref("soc", "parent", "rtl", "default", "1.0", catalog=catalog)
     LocalRecipe(LocalRecord(parent, source=checkout), (str(leaf.ref),)).write(tmp_path / "external")
-    catalog._client.export_package(tmp_path / "external")
+    native = catalog._client.export_package(tmp_path / "external")
+    assert native.root.ref is not None
+    catalog._client.upload(native.root.ref.repr_notime())
     graph = Graph(
         catalog,
         LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(parent,),
     )
     LocalRecipe(LocalRecord(leaf.ref, {"new": "revision"})).write(tmp_path / "new-leaf")
-    catalog._client.export(tmp_path / "new-leaf")
+    catalog._client.upload(catalog._client.export(tmp_path / "new-leaf"))
     assert graph.get_with_sources((parent,))[0].source is not None
     assert leaf.ref.get().ref == leaf.ref
     assert leaf.ref.without_revision().get().ref != leaf.ref
@@ -190,7 +192,7 @@ def test_metadata_only_record_is_not_installed_with_source_packages(
 ) -> None:
     metadata = Ref("soc", "meta", "run", "default", "1.0", catalog=catalog)
     LocalRecipe(LocalRecord(metadata, {"meta": True})).write(tmp_path / "recipe-only")
-    catalog._client.export(tmp_path / "recipe-only")
+    catalog._client.upload(catalog._client.export(tmp_path / "recipe-only"))
     dependency = catalog.publish(
         LocalRecord(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=checkout)
     )

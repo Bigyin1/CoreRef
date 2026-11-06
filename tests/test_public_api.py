@@ -4,12 +4,13 @@ import subprocess
 import sys
 from textwrap import dedent
 
+from hwcatalog.api.catalog import Catalog
 
-def test_public_models_import_independently_of_conan() -> None:
+
+def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
     code = dedent("""
         import sys
         from pathlib import Path
-        from tempfile import TemporaryDirectory
 
         from hwcatalog import api
 
@@ -34,15 +35,8 @@ def test_public_models_import_independently_of_conan() -> None:
         from hwcatalog.api import catalog
         from hwcatalog.api import query
 
-        home = TemporaryDirectory()
-        from conan.api.conan_api import ConanAPI
-        native = ConanAPI(cache_folder=home.name)
-        native.remotes.disable("*")
-        profiles = Path(home.name) / "profiles"
-        profiles.mkdir(exist_ok=True)
-        (profiles / "default").write_text("[settings]\\nos=Linux\\n")
         manifest: dict[str, records.JSON] = {"views": ["rtl", "timing"]}
-        instance = catalog.Catalog(Path(home.name))
+        instance = catalog.Catalog(Path(sys.argv[1]))
         local = records.LocalRecord(
             ref=records.Ref("public", "rtl", "rtl", "default", "v1", catalog=instance),
             payload=manifest,
@@ -63,10 +57,13 @@ def test_public_models_import_independently_of_conan() -> None:
         else:
             raise AssertionError("Domain errors must use the public error contract")
 
-        home.cleanup()
         assert "dulwich" not in sys.modules, "Conan source retrieval uses its native Git helper"
     """)
     result = subprocess.run(  # noqa: S603 - fixed script with the current Python interpreter
-        [sys.executable, "-I", "-c", code], capture_output=True, text=True, check=False, timeout=10
+        [sys.executable, "-I", "-c", code, str(catalog._client.home)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
     )
     assert result.returncode == 0, result.stdout + result.stderr

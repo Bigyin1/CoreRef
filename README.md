@@ -89,7 +89,13 @@ Graph.create_lockfile() сохраняет уже разрешённый гра�
 Lockfile остаётся непрозрачным файлом проекта и явно передаётся при публикации.
 Если lockfile передан конструктору, он должен существовать; новый файл создают
 через project.create_lockfile(path) после разрешения проекта.
-Graph.networkx и результаты ordered_refs(root, stop_at=...) кэшируются.
+Структура Graph доступна только для чтения. Для изменения входов создают новый Graph;
+путь lockfile обновляет только успешный create_lockfile(). record, records и
+ordered_records() возвращают независимую копию изменяемого LocalRecord корня.
+Редактирование этой копии не меняет снимок или его кэши. Опубликованные Record неизменяемы.
+Graph.networkx содержит только топологию Ref, без объектов Record и Dependency
+в атрибутах; записи и связи доступны через Graph. Сам NetworkX и результаты
+ordered_refs(root, stop_at=...) кэшируются; рабочую копию получают через networkx.copy().
 ordered_records(root, stop_at=...) позволяет flow получить зависимости в порядке
 обработки и остановить обход на выбранных макроблоках, сохранив общие зависимости.
 Для пакетов, оставшихся после отбора, вызывают Graph.get_with_sources(refs): проверенные
@@ -121,14 +127,15 @@ Publish и создание Graph создают независимые сним
 
 Conan должен быть настроен заранее: профили, remotes и аутентификация.
 Catalog() использует стандартный cache с учётом CONAN_HOME и .conanrc. Один remote
-выбирается автоматически, несколько требуют remote="catalog". Без remotes используется
-cache. Его копирования, контекстных менеджеров, close и потоковых блокировок нет.
+выбирается автоматически, несколько требуют remote="catalog". Без remotes доступны
+чтение cache и разрешение локального проекта; publish()
+завершается CatalogError до сериализации входов и упаковки. Его копирования, контекстных менеджеров, close и потоковых блокировок нет.
 
 Для разработки нужны Python 3.15 и uv:
 
 ```sh
 uv sync --frozen
-uv run python examples/conan_macro.py
+uv run python -m examples.conan_macro
 make check unit integration build
 ```
 

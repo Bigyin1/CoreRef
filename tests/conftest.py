@@ -1,5 +1,6 @@
 """Real Conan instances and Git fixtures use owned temporary directories."""
 
+from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -9,13 +10,19 @@ from dulwich.objects import Blob, Commit, ObjectID, Tree
 from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
-from examples.conan_config import configured_home
+from examples.local_server import LocalServer, local_server
 from hwcatalog.api.catalog import Catalog
 
 
 @pytest.fixture
-def catalog(tmp_path: Path) -> Catalog:
-    return Catalog(configured_home(tmp_path / "conan-home"))
+def conan_server(tmp_path: Path) -> Iterator[LocalServer]:
+    with local_server(tmp_path / "test-server") as server:
+        yield server
+
+
+@pytest.fixture
+def catalog(tmp_path: Path, conan_server: LocalServer) -> Catalog:
+    return Catalog(conan_server.configure(tmp_path / "conan-home", local_sources=True))
 
 
 @pytest.fixture

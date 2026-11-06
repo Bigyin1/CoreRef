@@ -81,11 +81,17 @@ class ConanClient:
         except GraphLoopError as exc:
             raise InvalidPackage(str(exc)) from exc
         except ConanException as exc:
-            if "not in lockfile" in str(exc):
-                raise InvalidPackage("Recipe dependency is absent from its lockfile") from exc
-            raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
+            raise self._command_error(arguments, exc) from exc
         except OSError as exc:
             raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
+
+    def _command_error(self, arguments: tuple[str, ...], error: ConanException) -> CatalogError:
+        message = str(error)
+        if "not in lockfile" in message:
+            return InvalidPackage("Recipe dependency is absent from its lockfile")
+        if "not found" in message.lower():
+            return NotFound(message)
+        return CatalogError(f"Conan command {arguments[:2]} failed: {message}")
 
     def _execute(self, arguments: tuple[str, ...]) -> object:
         conan = ConanAPI(cache_folder=str(self.home))
@@ -263,9 +269,13 @@ class ConanClient:
         )
         return cast(NativeGraph, result["graph"])
 
+    def require_remote(self) -> str:
+        if self.remote is None:
+            raise CatalogError("Publish requires a configured Conan remote")
+        return self.remote
+
     def upload(self, reference: str) -> None:
-        if self.remote:
-            self.run("upload", reference, "--remote", self.remote, "--confirm")
+        self.run("upload", reference, "--remote", self.require_remote(), "--confirm")
 
     def _configured_remote(self, requested: str | None) -> str | None:
         if requested is not None:

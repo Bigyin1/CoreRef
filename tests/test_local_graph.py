@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency, Graph
@@ -14,8 +13,8 @@ from tests.helpers import local_record
 
 
 @pytest.fixture
-def local_catalog(tmp_path: Path) -> Catalog:
-    return Catalog(configured_home(tmp_path / "cache"))
+def local_catalog(catalog: Catalog) -> Catalog:
+    return catalog
 
 
 def record(name: str, version: str = "1.0", *, catalog: Catalog) -> Record:
@@ -96,9 +95,9 @@ def test_local_graph_rejects_cycles_and_missing_dependencies(local_catalog: Cata
 
 
 def test_conan_resolves_one_consumer_without_exporting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, catalog: Catalog
+    monkeypatch: pytest.MonkeyPatch, *, catalog: Catalog
 ) -> None:
-    connection = Catalog(configured_home(tmp_path / "cache"))
+    connection = Catalog(catalog._client.home)
     catalog = connection
     dependencies = tuple(record(name, catalog=catalog) for name in ("left", "right"))
     for item in dependencies:
@@ -127,7 +126,7 @@ def test_conan_resolves_one_consumer_without_exporting(
 def test_conan_local_consumer_uses_opaque_project_lockfile(
     tmp_path: Path, *, catalog: Catalog
 ) -> None:
-    connection = Catalog(configured_home(tmp_path / "cache"))
+    connection = Catalog(catalog._client.home)
     catalog = connection
     leaf, child, root = (record(name, catalog=catalog) for name in ("leaf", "child", "top"))
     leaf = catalog.publish(local_record(leaf))

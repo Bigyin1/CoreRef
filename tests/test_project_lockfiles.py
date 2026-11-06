@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, InvalidPackage
 from hwcatalog.api.graph import Dependency, Graph
@@ -16,7 +15,7 @@ from tests.helpers import local_record, resolve_published
 def test_project_lock_pins_publication_and_installation(
     tmp_path: Path, *, catalog: Catalog
 ) -> None:
-    catalog = Catalog(configured_home(tmp_path / "cache"))
+    catalog = Catalog(catalog._client.home)
     dependency = catalog.publish(
         local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
     )
@@ -53,7 +52,7 @@ def test_project_lock_pins_publication_and_installation(
 def test_conan_validates_the_supplied_project_lockfile(
     tmp_path: Path, damage: str, exception: type[Exception], *, catalog: Catalog
 ) -> None:
-    catalog = Catalog(configured_home(tmp_path / "cache"))
+    catalog = Catalog(catalog._client.home)
     rtl = catalog.publish(
         local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
     )
@@ -83,7 +82,7 @@ def test_conan_validates_the_supplied_project_lockfile(
 
 
 def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
-    catalog = Catalog(configured_home(tmp_path / "cache"))
+    catalog = Catalog(catalog._client.home)
     root = Record(Ref("soc", "root", "rtl", "default", "1.0", catalog=catalog))
     project = Graph(catalog, local_record(root))
     lockfile = project.create_lockfile(tmp_path / "empty/conan.lock")

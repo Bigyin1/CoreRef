@@ -8,7 +8,6 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 from dulwich.repo import Repo
 
-from examples.conan_config import configured_home
 from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, InvalidPackage, NotFound
@@ -18,8 +17,8 @@ from tests.helpers import local_record, resolve_published
 
 
 @pytest.fixture
-def packages(tmp_path: Path) -> Catalog:
-    return Catalog(configured_home(tmp_path / "home"))
+def packages(catalog: Catalog) -> Catalog:
+    return catalog
 
 
 def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path) -> None:
@@ -75,10 +74,8 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
     )
 
 
-def test_pinned_source_round_trip_uses_conan_scm(
-    tmp_path: Path, checkout: Path, *, catalog: Catalog
-) -> None:
-    catalog = Catalog(configured_home(tmp_path / "home"))
+def test_pinned_source_round_trip_uses_conan_scm(checkout: Path, *, catalog: Catalog) -> None:
+    catalog = Catalog(catalog._client.home)
     description = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
     record = catalog.publish(local_record(description, source=checkout))
     folder = catalog._package(record.ref).recipe().directory
@@ -95,11 +92,9 @@ def test_pinned_source_round_trip_uses_conan_scm(
     assert record.ref.get_with_sources().source == fetched.source
 
 
-def test_dirty_source_fails_before_publication(
-    tmp_path: Path, checkout: Path, *, catalog: Catalog
-) -> None:
+def test_dirty_source_fails_before_publication(checkout: Path, *, catalog: Catalog) -> None:
     (checkout / "cpu.sv").write_text("uncommitted")
-    catalog = Catalog(configured_home(tmp_path / "home"))
+    catalog = Catalog(catalog._client.home)
     with pytest.raises(CatalogError, match="dirty"):
         catalog.publish(
             local_record(
@@ -274,6 +269,7 @@ def test_exported_recipe_omits_publisher_paths_and_has_stable_revision(
         catalog._client.export_package(first).root.ref
         == catalog._client.export_package(second).root.ref
     )
+    catalog._client.upload(catalog._client.export(first))
     stored = catalog._package(ref).recipe()
     assert "package_type" not in (stored.directory / "conanfile.py").read_text()
     assert str(checkout) not in (stored.directory / "conanfile.py").read_text()

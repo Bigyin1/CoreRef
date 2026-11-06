@@ -1,12 +1,13 @@
 """References carry operation context without changing stored package identity."""
 
 import json
+from collections.abc import Iterator
 from dataclasses import is_dataclass
 from pathlib import Path
 
 import pytest
 
-from examples.conan_config import configured_home
+from examples.local_server import local_server
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
 from hwcatalog.api.query import SearchQuery
@@ -14,8 +15,14 @@ from hwcatalog.api.records import Record, Ref
 from tests.helpers import local_record
 
 
-def test_same_coordinates_use_their_own_catalog(catalog: Catalog, tmp_path: Path) -> None:
-    other = Catalog(configured_home(tmp_path / "other-home"))
+@pytest.fixture
+def other_catalog(tmp_path: Path) -> Iterator[Catalog]:
+    with local_server(tmp_path / "other-server") as server:
+        yield Catalog(server.configure(tmp_path / "other-home"))
+
+
+def test_same_coordinates_use_their_own_catalog(catalog: Catalog, other_catalog: Catalog) -> None:
+    other = other_catalog
     first = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
     second = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=other)
     catalog.publish(local_record(Record(first, {"origin": "first"})))

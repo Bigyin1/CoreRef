@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
 from hwcatalog.api.query import SearchQuery
@@ -16,7 +15,7 @@ from tests.helpers import local_record
 def test_materialize_uses_published_requirements_without_project_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked: bool, *, catalog: Catalog
 ) -> None:
-    catalog = Catalog(configured_home(tmp_path / "cache"))
+    catalog = Catalog(catalog._client.home)
     rtl = catalog.publish(
         local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
     )
@@ -57,9 +56,9 @@ def test_materialize_uses_published_requirements_without_project_lock(
 
 
 def test_direct_queries_do_not_resolve_dependency_graphs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, catalog: Catalog
+    monkeypatch: pytest.MonkeyPatch, *, catalog: Catalog
 ) -> None:
-    connection = Catalog(configured_home(tmp_path / "cache"))
+    connection = Catalog(catalog._client.home)
     catalog = connection
     rtl = catalog.publish(
         local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))

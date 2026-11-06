@@ -25,8 +25,8 @@ pytestmark = pytest.mark.conan
 
 
 @pytest.fixture
-def conan_catalog(tmp_path: Path) -> Catalog:
-    return Catalog(configured_home(tmp_path / "home"))
+def conan_catalog(catalog: Catalog) -> Catalog:
+    return catalog
 
 
 def record(
@@ -257,7 +257,7 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
         str(build / "conan.lock"),
         "--no-remote",
     )
-    cli.run("export", str(build), "--no-remote")
+    cli.upload(cli.export(build))
     assert Ref(**be.ref.to_dict(), catalog=conan_catalog).get().ref.without_revision() == be.ref
     assert resolve_published(conan_catalog, be.ref).dependencies == (Dependency(be.ref, rtl.ref),)
 
@@ -293,7 +293,7 @@ def test_latest_and_explicit_revisions_are_independently_accessible(
     folder = tmp_path / "replacement"
     LocalRecipe(local_record(replace(original, payload={"different": True}))).write(folder)
     conan_catalog._client.create_lockfile(folder)
-    conan_catalog._client.export(folder)
+    conan_catalog._client.upload(conan_catalog._client.export(folder))
     assert original.ref.get().ref == original.ref
     assert original.ref.without_revision().get().payload == {"different": True}
 
@@ -398,6 +398,9 @@ def test_native_graph_reports_missing_pinned_dependency(conan_catalog: Catalog) 
     )
     rtl = conan_catalog.publish(local_record(rtl))
     macro = conan_catalog.publish(local_record(macro), dependencies=(rtl.ref,))
+    conan_catalog._client.run(
+        "remove", to_conan_reference(rtl.ref), "--remote", "catalog-test", "--confirm"
+    )
     conan_catalog._client.run("remove", to_conan_reference(rtl.ref), "--confirm")
     with pytest.raises(CatalogError):
         conan_catalog._client.graph(conan_catalog._package(macro.ref).recipe().directory)
@@ -469,7 +472,7 @@ def test_default_cache_uses_conan_home_and_stays_bound_to_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, catalog: Catalog
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    home = configured_home(tmp_path / "native-home")
+    home = catalog._client.home
     monkeypatch.setenv("CONAN_HOME", str(home))
     connection = Catalog()
     assert connection._client.home == home.resolve()

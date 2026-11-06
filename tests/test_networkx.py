@@ -1,7 +1,5 @@
 """Resolved project graphs expose cached topology and dependency-first traversals."""
 
-from dataclasses import replace
-
 import networkx as nx
 import pytest
 
@@ -19,7 +17,7 @@ def test_local_root_without_dependencies(*, catalog: Catalog) -> None:
     assert graph.number_of_nodes() == 1 and graph.number_of_edges() == 0
     assert graph.graph == {}
     assert tuple(graph.nodes) == (record.ref,)
-    assert graph.nodes[record.ref]["record"] is snapshot.record
+    assert graph.nodes[record.ref] == {}
 
 
 def test_export_preserves_exact_dependency_directions(*, catalog: Catalog) -> None:
@@ -32,30 +30,26 @@ def test_export_preserves_exact_dependency_directions(*, catalog: Catalog) -> No
     assert graph.number_of_nodes() == 3 and graph.number_of_edges() == 2
     assert not graph.has_edge(left.ref, source.ref)
     for edge in snapshot.dependencies:
-        assert graph.edges[edge.source, edge.target]["dependency"] is edge
+        assert graph.edges[edge.source, edge.target] == {}
     reordered = Graph(catalog, local_record(source), dependencies=(right.ref, left.ref))
     assert set(reordered.networkx.edges) == set(graph.edges)
 
 
-def test_export_is_detached_and_payloads_stay_frozen(*, catalog: Catalog) -> None:
+def test_working_topology_copy_does_not_change_snapshot(*, catalog: Catalog) -> None:
     source = release("source", manifest={"nested": {"ports": [1, 2]}}, catalog=catalog)
     source = catalog.publish(local_record(source))
     result = release("result", catalog=catalog)
     snapshot = Graph(catalog, local_record(result), dependencies=(source.ref,))
-    edge = snapshot.dependencies[0]
-    stored_source = next(record for record in snapshot.records if record.ref == source.ref)
     before = graph_json(snapshot)
     graph = snapshot.networkx.copy()
-    with pytest.raises(TypeError):
-        graph.nodes[source.ref]["record"].payload["changed"] = True
-    graph.nodes[source.ref]["record"] = replace(source, payload={"changed": True})
+    graph.nodes[source.ref]["annotation"] = "local edits"
     graph.edges[result.ref, source.ref]["dependency"] = Dependency(source.ref, result.ref)
     graph.graph["annotation"] = "local edits"
     graph.remove_node(result.ref)
     assert graph_json(snapshot) == before
     fresh = snapshot.networkx
-    assert fresh.nodes[source.ref]["record"] is stored_source
-    assert fresh.edges[result.ref, source.ref]["dependency"] is edge
+    assert fresh.nodes[source.ref] == {}
+    assert fresh.edges[result.ref, source.ref] == {}
     assert fresh.graph == {} and snapshot.networkx is fresh
     with pytest.raises(nx.NetworkXError, match="Frozen graph"):
         fresh.remove_node(result.ref)

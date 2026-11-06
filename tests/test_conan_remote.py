@@ -1,26 +1,19 @@
 """Round trips through an owned Conan server, never a configured user server."""
 
-import secrets
 import shutil
-import socket
-import subprocess
-import sys
-import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
-from urllib.error import URLError
-from urllib.request import urlopen
 
 import pytest
-from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
-from conan.cli.cli import Cli  # type: ignore[import-untyped]
 from dulwich import porcelain
 from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
 from examples.conan_config import configured_home
+from examples.local_server import local_server
 from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import (
@@ -37,65 +30,9 @@ pytestmark = pytest.mark.conan_remote
 
 @pytest.fixture
 def remote_catalog(tmp_path: Path) -> Iterator[Catalog]:
-    server_executable = Path(sys.executable).parent / "conan_server"
-    if not server_executable.is_file():
-        pytest.skip("Install Conan and conan-server development dependencies")
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-    folder = tmp_path / "server"
-    folder.mkdir()
-    password = secrets.token_hex(16)
-    config = (
-        "[server]\n"
-        f"jwt_secret: {secrets.token_hex(32)}\n"
-        "jwt_expire_minutes: 120\nssl_enabled: False\n"
-        f"port: {port}\npublic_port: {port}\nhost_name: 127.0.0.1\n"
-        "authorize_timeout: 1800\ndisk_authorize_timeout: 1800\n"
-        f"updown_secret: {secrets.token_hex(32)}\n"
-        f"disk_storage_path: {folder / 'data'}\n"
-        "[write_permissions]\n*/*@*/*: test\n"
-        "[read_permissions]\n*/*@*/*: *\n"
-        f"[users]\ntest: {password}\n"
-    )
-    (folder / "server.conf").write_text(config)
-    with (folder / "server.log").open("w+") as log:
-        process = subprocess.Popen(  # noqa: S603 - owned server, isolated config
-            [str(server_executable), "--server_dir", str(folder)], stdout=log, stderr=log, text=True
-        )
-        try:
-            _wait_for_server(f"http://127.0.0.1:{port}/v2/ping", process, log.name)
-            home = configured_home(tmp_path / "publisher")
-            api = ConanAPI(cache_folder=str(home))
-            Cli(api).add_commands()
-            api.command.run(["remote", "add", "catalog", f"http://127.0.0.1:{port}", "-vquiet"])
-            api.command.run(
-                ["remote", "login", "catalog", "test", "--password", password, "-vquiet"]
-            )
-            connection = Catalog(home)
-            yield connection
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=10)
-
-
-def _wait_for_server(url: str, process: subprocess.Popen[str], log: str) -> None:
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        try:
-            with urlopen(url, timeout=0.5) as response:  # noqa: S310 - owned loopback URL
-                status = response.status
-            if status == 200:
-                return
-        except URLError, TimeoutError:
-            if process.poll() is not None:
-                break
-            time.sleep(0.05)
-    pytest.fail(f"Temporary Conan server did not become ready: {Path(log).read_text()}")
+    with local_server(tmp_path / "server") as server:
+        configured = replace(server, remote="catalog")
+        yield Catalog(configured.configure(tmp_path / "publisher"))
 
 
 def test_remote_round_trip_external_ci_and_cache_independence(

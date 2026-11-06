@@ -1,6 +1,6 @@
 """Resolved project snapshots, dependency ordering and project-owned lockfiles."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,8 +31,8 @@ class Dependency:
 class Graph:
     """One resolved project with records, edges, traversals and lockfile operations."""
 
-    records: tuple[LocalRecord | Record, ...]
-    dependencies: tuple[Dependency, ...]
+    _records: tuple[LocalRecord | Record, ...]
+    _dependencies: tuple[Dependency, ...]
 
     def __init__(
         self,
@@ -42,23 +42,51 @@ class Graph:
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
-        self.catalog = catalog
+        self._catalog = catalog
         self._package = catalog._local_package(record, dependencies, lockfile)
-        self.record = self._package.record
-        self.lockfile = lockfile
-        self.records, self.dependencies = self._package.result
-        self.requirements = tuple(
-            edge.target for edge in self.dependencies if edge.source == self.record.ref
+        self._lockfile = lockfile
+        self._records, self._dependencies = self._package.result
+        self._requirements = tuple(
+            edge.target for edge in self._dependencies if edge.source == self._package.record.ref
         )
         self._orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = {}
+
+    @property
+    def catalog(self) -> Catalog:
+        return self._catalog
+
+    @property
+    def record(self) -> LocalRecord:
+        """Return an editable local description detached from the resolved snapshot."""
+        return replace(self._package.record)
+
+    @property
+    def records(self) -> tuple[LocalRecord | Record, ...]:
+        """Expose records without sharing the mutable local root."""
+        return tuple(
+            replace(record) if isinstance(record, LocalRecord) else record
+            for record in self._records
+        )
+
+    @property
+    def dependencies(self) -> tuple[Dependency, ...]:
+        return self._dependencies
+
+    @property
+    def requirements(self) -> tuple[Ref, ...]:
+        return self._requirements
+
+    @property
+    def lockfile(self) -> Path | None:
+        return self._lockfile
 
     def create_lockfile(self, path: str | Path | None = None) -> Path:
         """Save the resolved graph through Conan; remember the path only after success."""
         output = path if path is not None else self.lockfile
         if output is None:
             raise CatalogError("Provide a lockfile path in Graph or create_lockfile")
-        self.lockfile = self._package.create_lockfile(output)
-        return self.lockfile
+        self._lockfile = self._package.create_lockfile(output)
+        return self._lockfile
 
     def get(self, refs: tuple[Ref, ...]) -> tuple[Record, ...]:
         """Fetch selected package files together without requesting SCM sources."""
@@ -68,14 +96,17 @@ class Graph:
         """Fetch selected published dependencies in one install and reuse this snapshot."""
         return self._package.get_with_sources(refs)
 
-    @cached_property
+    @property
     def networkx(self) -> _RefGraph:
+        """Expose the cached read-only topology; use .copy() for a working graph."""
+        return self._networkx
+
+    @cached_property
+    def _networkx(self) -> _RefGraph:
         """Build topology once; use .copy() when a mutable working graph is needed."""
         graph: nx.DiGraph[Ref] = nx.DiGraph()
-        graph.add_nodes_from((record.ref, {"record": record}) for record in self.records)
-        graph.add_edges_from(
-            (edge.source, edge.target, {"dependency": edge}) for edge in self.dependencies
-        )
+        graph.add_nodes_from(record.ref for record in self._records)
+        graph.add_edges_from((edge.source, edge.target) for edge in self._dependencies)
         nx.freeze(graph)
         return graph
 
@@ -95,11 +126,15 @@ class Graph:
         self, root: Ref, *, stop_at: tuple[Ref, ...] = ()
     ) -> tuple[LocalRecord | Record, ...]:
         """Return records in the same dependency-first order as ordered_refs."""
-        return tuple(self._records_by_ref[ref] for ref in self.ordered_refs(root, stop_at=stop_at))
+        records: list[LocalRecord | Record] = []
+        for ref in self.ordered_refs(root, stop_at=stop_at):
+            record = self._records_by_ref[ref]
+            records.append(replace(record) if isinstance(record, LocalRecord) else record)
+        return tuple(records)
 
     @cached_property
     def _records_by_ref(self) -> dict[Ref, LocalRecord | Record]:
-        return {record.ref: record for record in self.records}
+        return {record.ref: record for record in self._records}
 
     def _order(self, root: Ref, stop_at: tuple[Ref, ...]) -> tuple[Ref, ...]:
         if root not in self.networkx:
