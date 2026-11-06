@@ -9,6 +9,7 @@ from ..api.records import Ref
 if TYPE_CHECKING:
     from ..api.catalog import Catalog
 
+COMPONENT_PART = re.compile(r"[a-z0-9-]+\Z")
 NAME_PART = re.compile(r"[a-z0-9_-]+\Z")
 VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
 _MAX_NAME_LENGTH = 101
@@ -21,6 +22,12 @@ def to_conan_reference(ref: Ref) -> str:
         NAME_PART.fullmatch(value) for value in (ref.namespace, ref.component, ref.view, ref.type)
     ):
         raise InvalidPackage("Conan coordinates require lowercase tokens without dots or slashes")
+    if not COMPONENT_PART.fullmatch(ref.component):
+        raise InvalidPackage(
+            "Underscore separates component from subcomponent; use hyphens in component"
+        )
+    if ref.subcomponent is not None and not NAME_PART.fullmatch(ref.subcomponent):
+        raise InvalidPackage("Subcomponent must be a nonempty lowercase token")
     name = ref.package_name
     value = str(ref)
     if (
@@ -37,7 +44,16 @@ def from_conan_reference(value: str, *, catalog: Catalog) -> Ref:
     try:
         name, version = value.split("#", 1)[0].split("/")
         namespace, component, view, package_type = name.split(".")
-        ref = Ref(namespace, component, view, package_type, version, catalog=catalog)
+        component, separator, subcomponent = component.partition("_")
+        ref = Ref(
+            namespace,
+            component,
+            view,
+            package_type,
+            version,
+            subcomponent=subcomponent if separator else None,
+            catalog=catalog,
+        )
         if to_conan_reference(ref) != value.split("#", 1)[0]:
             raise ValueError("Noncanonical coordinates")
         return ref

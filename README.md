@@ -3,10 +3,17 @@
 Экспериментальный каталог hardware-проектов на Conan 2.34, выделенный из hwcatalog
 (коммит `3dba7e2`). Дистрибутив — `hwcatalog-conan`, Python-пакет — `hwcatalog`.
 
-Ссылка имеет формат **namespace.component.view.type/version**, например
-`soc.cpu.rtl.default/1.0` и `soc.cpu.be.lib-lef/4.0`. Все пять полей обязательны.
+Ссылка имеет формат **namespace.component[_subcomponent].view.type/version**, например
+`soc.cpu.rtl.default/1.0` и `soc.cpu_alu.be.lib-lef/4.0`. Пять основных полей обязательны;
+`subcomponent` — необязательная часть компонента, задаваемая именованным аргументом.
+Без неё имя сохраняет вид `soc.cpu.be.lib-lef/4.0`. Первый `_` отделяет subcomponent;
+сам component использует буквы, цифры и `-`.
 Версии RTL и BE независимы; их связь подтверждается точной зависимостью BE от RTL.
 Типов рёбер и поддержки старого формата нет.
+
+Поиск `SearchQuery(namespace="soc", component="cpu", view="be")` возвращает и целое
+BE-представление, и его части. `subcomponent="alu"` сужает поиск до конкретной части.
+Связь с исходным RTL по-прежнему задаётся обычной зависимостью пакета.
 
 В API разделены два состояния:
 

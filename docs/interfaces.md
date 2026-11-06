@@ -16,8 +16,8 @@ Source и files принадлежат LocalRecord. Source — рабочий Gi
 
 ## Ref и Record
 
-`Ref(namespace, component, view, type, version, *, catalog)` задаёт координаты
-namespace.component.view.type/version. Приватный конкретный Catalog не участвует в identity,
+`Ref(namespace, component, view, type, version, *, subcomponent=None, catalog)` задаёт координаты
+namespace.component[_subcomponent].view.type/version. Приватный конкретный Catalog не участвует в identity,
 хеше или JSON. Ссылки результатов создаются сразу с нужным контекстом.
 
 | Метод Ref | Контракт |
@@ -30,7 +30,7 @@ namespace.component.view.type/version. Приватный конкретный C
 
 Непосредственные зависимости и обратный поиск читают requirements; транзитивный поиск
 использует нативный граф. Сам Ref исключается. Отсутствующий пакет вызывает NotFound.
-Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все пять полей.
+Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все шесть координат.
 
 Record — представление уже полученного пакета: ref, payload, source (Path | None),
 files (Mapping[str, Path]).
@@ -51,14 +51,17 @@ source и исходные пути files исключаются, сохраня
 
 ## SearchQuery
 
-Пять опциональных полей задают точные AND-фильтры координат.
+Шесть опциональных полей задают точные AND-фильтры координат.
 
 - `criteria()` возвращает отдельный словарь заданных условий.
+- `matches_ref(ref)` проверяет координаты до скачивания рецепта.
 - `matches(record)` проверяет LocalRecord или Record по их Ref.
 - `select(records)` принимает коллекцию или итератор записей, фильтрует и возвращает
   tuple в порядке Ref. Поддерживает `graph.records`, сохраняя исходные объекты.
-- `conan_pattern` — кэшируемый шаблон поиска, например `soc.cpu.be.lib-lef/*#*`.
-  Звёздочки подставляются только вместо None. Непредставимое точное условие даёт None;
+- `conan_pattern` — кэшируемый шаблон поиска, например `soc.cpu*.be.lib-lef/*#*`.
+  Без ограничения subcomponent поиск включает целый компонент и его части; точность
+  component проверяется до загрузки рецептов. С subcomponent="alu" сегмент равен cpu_alu.
+  Непредставимое точное условие даёт None;
   пользовательские строки не интерпретируются как wildcard или регулярные выражения.
 
 SearchQuery не хранит каталог и не выполняет запросы к Conan. Catalog.search и

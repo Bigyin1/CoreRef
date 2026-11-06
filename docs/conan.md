@@ -27,7 +27,8 @@ LocalRecord.source — текущий Git checkout. При export() Conan сам
 чистоту и фиксирует координаты через Git.coordinates_to_conandata(repository=True).
 SDK не клонирует Git самостоятельно. Публикация принимает один LocalRecord; его
 зависимости должны быть опубликованы заранее. Пакеты имеют имена
-namespace.component.view.type/version, например soc.cpu.be.lib-lef/4.0.
+namespace.component[_subcomponent].view.type/version, например soc.cpu_alu.be.lib-lef/4.0.
+Первый `_` отделяет часть; component не содержит `_`, пустой subcomponent недопустим.
 
 LocalRecord.to_json() готовит переносимые ref/payload и список имён файлов.
 Пути исходного checkout и файлов издателя туда не попадают. Временный Jinja-рецепт

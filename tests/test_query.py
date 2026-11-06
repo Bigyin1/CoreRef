@@ -132,7 +132,7 @@ def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catal
         (SearchQuery(), "*.*.*.*/*#*"),
         (
             SearchQuery(namespace="soc", component="cpu", view="be", type="lib-lef"),
-            "soc.cpu.be.lib-lef/*#*",
+            "soc.cpu*.be.lib-lef/*#*",
         ),
         (SearchQuery(version="1.0"), "*.*.*.*/1.0#*"),
         (SearchQuery(component="cpu*"), None),

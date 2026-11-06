@@ -32,6 +32,7 @@ class Ref:
     view: str
     type: str
     version: str
+    subcomponent: str | None = field(default=None, kw_only=True)
     catalog: InitVar[Catalog] = field(kw_only=True)
     _catalog: Catalog = field(init=False, repr=False, compare=False)
 
@@ -43,7 +44,10 @@ class Ref:
     @property
     def package_name(self) -> str:
         """The namespace, component and representation without a version."""
-        return f"{self.namespace}.{self.component}.{self.view}.{self.type}"
+        component = self.component
+        if self.subcomponent is not None:
+            component = f"{component}_{self.subcomponent}"
+        return f"{self.namespace}.{component}.{self.view}.{self.type}"
 
     def __str__(self) -> str:
         return f"{self.package_name}/{self.version}"
@@ -51,9 +55,17 @@ class Ref:
     def __lt__(self, other: Ref) -> bool:
         if not isinstance(other, Ref):
             return NotImplemented
-        return (self.namespace, self.component, self.view, self.type, self.version) < (
+        return (
+            self.namespace,
+            self.component,
+            self.subcomponent or "",
+            self.view,
+            self.type,
+            self.version,
+        ) < (
             other.namespace,
             other.component,
+            other.subcomponent or "",
             other.view,
             other.type,
             other.version,
@@ -61,13 +73,16 @@ class Ref:
 
     def to_dict(self) -> dict[str, str]:
         """Serialize package coordinates without the runtime catalog context."""
-        return {
+        coordinates = {
             "namespace": self.namespace,
             "component": self.component,
             "view": self.view,
             "type": self.type,
             "version": self.version,
         }
+        if self.subcomponent is not None:
+            coordinates["subcomponent"] = self.subcomponent
+        return coordinates
 
     def get(self) -> Record:
         """Get package metadata and stored files without fetching Git sources."""

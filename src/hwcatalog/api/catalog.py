@@ -44,10 +44,12 @@ class Catalog:
         pattern = query.conan_pattern
         if pattern is None:
             return ()
-        return tuple(
-            StoredPackage.from_index(from_conan_reference(ref, catalog=self), revisions)
-            for ref, revisions in self._client.index(pattern).items()
-        )
+        packages = []
+        for reference, revisions in self._client.index(pattern).items():
+            ref = from_conan_reference(reference, catalog=self)
+            if query.matches_ref(ref):
+                packages.append(StoredPackage.from_index(ref, revisions))
+        return tuple(packages)
 
 
 __all__ = ["Catalog"]
