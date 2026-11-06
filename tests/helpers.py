@@ -79,9 +79,7 @@ def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = Non
     ref = Ref(**ref.to_dict(), catalog=catalog)
     record = ref.get()
     dependencies = tuple(item.ref for item in ref.dependencies())
-    return Graph(
-        catalog, local_record(record), dependencies=dependencies, lockfile=lockfile
-    ).resolve()
+    return Graph(catalog, local_record(record), dependencies=dependencies, lockfile=lockfile).result
 
 
 def local_record(

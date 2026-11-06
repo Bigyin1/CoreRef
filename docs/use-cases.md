@@ -5,7 +5,7 @@
 
 ## RTL → LIB/LEF
 
-1. Передать LocalRecord и прямые зависимости в `Graph(catalog, record, dependencies=...).resolve()`
+1. Передать LocalRecord и прямые зависимости в `Graph(catalog, record, dependencies=...).result`
    и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
    из опубликованного пакета, его читают через `top_ref.get()` и `top_ref.dependencies()`.
 2. Для выбранного RTL вызвать `rtl_ref.find_dependents(
@@ -13,8 +13,9 @@
 3. Из найденных кандидатов приложение выбирает нужную реализацию и читает payload
    с метаданными. Файлы из Conan получают через `ref.get().files`,
    внешние ресурсы flow читает из собственной схемы `record.payload`.
-4. Приложение исключает заменённые RTL-ветки из собственных входов, сохраняя общие
-   зависимости остальных блоков, подготавливает ресурсы и запускает инструмент.
+4. Вызвать result.ordered_records(top_ref, stop_at=(rtl_ref,)) и исключить сам
+   заменённый RTL из списка исходников. SDK сохраняет общие зависимости остальных
+   блоков; flow подготавливает ресурсы BE и запускает инструмент.
 
 ```mermaid
 flowchart TB
@@ -32,7 +33,7 @@ flowchart TB
 
 Прямой поиск `ref.dependencies()` возвращает Record входов узла;
 `ref.find_dependents(candidates=SearchQuery(), transitive=False)` — непосредственных
-потребителей. Для собственного анализа GraphResult.to_networkx()
+потребителей. Для собственного анализа GraphResult.networkx
 предоставляет DiGraph. Экспорт и обработка выбранного графа не меняют публикации.
 
 Полный исполняемый пример находится в examples/conan_macro.py.

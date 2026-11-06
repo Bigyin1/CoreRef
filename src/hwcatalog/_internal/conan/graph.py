@@ -1,6 +1,7 @@
 """Validation and projection of a native Conan graph, without package I/O."""
 
 from collections.abc import Mapping
+from functools import cached_property
 
 from ...api.errors import InvalidPackage
 from ...api.graph import Dependency, GraphResult
@@ -12,23 +13,23 @@ class ResolvedConanGraph:
     """A native resolution with checked host dependencies and exact references."""
 
     def __init__(self, graph: NativeGraph) -> None:
-        self._graph = graph
+        self.native = graph
         self._packages = tuple(graph.root.conanfile.dependencies.host.topological_sort.values())
         for package in self._packages:
             self._validate_package(package)
 
-    @property
+    @cached_property
     def references(self) -> tuple[str, ...]:
         return tuple(package.ref.repr_notime() for package in self._packages)
 
     def package(self, ref: Ref) -> NativePackage:
-        return self._graph.root.conanfile.dependencies.host[str(ref)]
+        return self.native.root.conanfile.dependencies.host[str(ref)]
 
     def contains(self, ref: Ref) -> bool:
         return any(reference.split("#", 1)[0] == str(ref) for reference in self.references)
 
     def result(self, root: LocalRecord | Record, dependencies: tuple[Record, ...]) -> GraphResult:
-        package = self._graph.root.conanfile
+        package = self.native.root.conanfile
         if self._logical(package) != str(root.ref):
             raise InvalidPackage("Conan graph root differs from the requested reference")
         self._validate_package(package)
@@ -40,7 +41,7 @@ class ResolvedConanGraph:
 
     def _edges(self, records: Mapping[str, LocalRecord | Record]) -> tuple[Dependency, ...]:
         edges: set[Dependency] = set()
-        for package in (self._graph.root.conanfile, *self._packages):
+        for package in (self.native.root.conanfile, *self._packages):
             source = self._logical(package)
             for target in package.dependencies.direct_host.values():
                 destination = self._logical(target)

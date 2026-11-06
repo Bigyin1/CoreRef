@@ -12,7 +12,7 @@ from hwcatalog.api.types import JSON
 from tests.test_models import UserPayload
 
 
-def test_resolve_snapshots_mutable_project_on_each_call(catalog: Catalog, tmp_path: Path) -> None:
+def test_construction_snapshots_mutable_project(catalog: Catalog, tmp_path: Path) -> None:
     items: list[JSON] = ["original"]
     payload = UserPayload({"items": items})
     files = {"report": tmp_path / "original.txt"}
@@ -20,12 +20,12 @@ def test_resolve_snapshots_mutable_project_on_each_call(catalog: Catalog, tmp_pa
         Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog), payload, files=files
     )
     project = Graph(catalog, local)
-    first = project.resolve().records[0]
+    first = project.result.records[0]
     assert payload.calls == 1
     items.append("changed")
     files.clear()
     local.source = tmp_path
-    second = project.resolve().records[0]
+    second = Graph(catalog, local).result.records[0]
     assert payload.calls == 2
     assert first is not local and second is not local
     assert first.payload == {"items": ("original",)}
@@ -67,23 +67,26 @@ def test_publish_snapshots_before_conan_commands(
     assert local.payload == {"changed": True} and local.files == {}
 
 
-def test_graph_changes_during_resolution_do_not_change_result(
+def test_construction_resolves_once_and_snapshots_before_conan(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dependency = catalog.publish(
         LocalRecord(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
     )
     local = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    project = Graph(catalog, local, dependencies=(dependency.ref,))
     resolve = catalog._client.graph
+    calls = 0
 
     def change_inputs(directory: Path, *, lockfile: Path | None = None) -> NativeGraph:
+        nonlocal calls
+        calls += 1
         local.payload = {"edited": True}
-        project.dependencies = ()
         return resolve(directory, lockfile=lockfile)
 
     monkeypatch.setattr(catalog._client, "graph", change_inputs)
-    result = project.resolve()
+    project = Graph(catalog, local, dependencies=(dependency.ref,))
+    assert calls == 1
+    result = project.result
     assert len(result.dependencies) == 1
     assert next(record for record in result.records if record.ref == local.ref).payload is None
-    assert project.resolve().dependencies == ()
+    assert project.result is result and calls == 1

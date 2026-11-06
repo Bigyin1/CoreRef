@@ -57,9 +57,9 @@ SDK сохраняет эти данные как JSON и не проверяе�
 ```python
 from hwcatalog.api.graph import Graph
 
-project = Graph(catalog, local, dependencies=(), lockfile=Path("/work/cpu/conan.lock"))
-lockfile = project.create_lockfile()
-result = project.resolve()
+project = Graph(catalog, local, dependencies=())
+lockfile = project.create_lockfile(Path("/work/cpu/conan.lock"))
+result = project.result
 ```
 
 Graph соответствует одному описанию проекта. Парсинг deps.toml и добавление зависимостей
@@ -68,7 +68,7 @@ GraphResult содержит LocalRecord корня и Record зависимос
 корня уже доступен, для зависимостей flow вызывает Ref.get_with_sources().
 
 Lockfile принадлежит проекту и передаётся явно при публикации и разрешении. SDK не
-парсит его JSON и не задаёт версию схемы. Создание/обновление выполняет Conan;
+парсит его JSON и не задаёт версию схемы. Создание/обновление выполняет Conan LockfileAPI из уже разрешённого графа;
 обычные чтение и публикация файл не изменяют. Несколько Graph могут иметь разные
 lockfile в одной директории. Посторонний conan.lock из cwd отключён.
 

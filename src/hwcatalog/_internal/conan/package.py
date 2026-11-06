@@ -3,6 +3,7 @@
 import json
 import shutil
 from dataclasses import replace
+from functools import cached_property
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self
@@ -160,21 +161,22 @@ class LocalPackage:
         self.lockfile = lockfile
         self._packages = {ref: StoredPackage(ref) for ref in self.dependencies}
 
-    def resolve(self) -> GraphResult:
+    @cached_property
+    def graph(self) -> ResolvedConanGraph:
         recipe = LocalRecipe(self.record, self._requirements())
         with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
             directory = Path(temporary)
             recipe.write(directory)
-            graph = ResolvedConanGraph(self._client.graph(directory, lockfile=self.lockfile))
-            return graph.result(self.record, self._read_records(graph.references))
+            return ResolvedConanGraph(self._client.graph(directory, lockfile=self.lockfile))
+
+    @cached_property
+    def result(self) -> GraphResult:
+        return self.graph.result(self.record, self._read_records(self.graph.references))
 
     def create_lockfile(self, path: str | Path) -> Path:
         output = Path(path).expanduser().resolve()
-        references = self._requirements()
         output.parent.mkdir(parents=True, exist_ok=True)
-        self._client.create_project_lockfile(
-            references, output, seed=output if output.is_file() else None
-        )
+        self._client.save_lockfile(self.graph.native, output)
         return output
 
     def publish(self) -> Record:

@@ -1,6 +1,7 @@
-"""Project dependency resolution, exact edges and detached graph results."""
+"""Resolved project snapshots, dependency ordering and project-owned lockfiles."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,21 +29,64 @@ class Dependency:
 
 @dataclass(frozen=True)
 class GraphResult:
+    """A dependency snapshot with cached topology and dependency-first traversals."""
+
     records: tuple[LocalRecord | Record, ...]
     dependencies: tuple[Dependency, ...]
+    _orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
-    def to_networkx(self) -> _RefGraph:
-        """Export graph structure with record snapshots and exact dependency attributes."""
+    @cached_property
+    def networkx(self) -> _RefGraph:
+        """Build topology once; use .copy() when a mutable working graph is needed."""
         graph: nx.DiGraph[Ref] = nx.DiGraph()
         graph.add_nodes_from((record.ref, {"record": record}) for record in self.records)
         graph.add_edges_from(
             (edge.source, edge.target, {"dependency": edge}) for edge in self.dependencies
         )
+        nx.freeze(graph)
         return graph
+
+    def ordered_refs(self, root: Ref, *, stop_at: tuple[Ref, ...] = ()) -> tuple[Ref, ...]:
+        """Order reachable dependencies first, treating stop_at references as leaves."""
+        key = (root, tuple(sorted(set(stop_at))))
+        if key not in self._orders:
+            self._orders[key] = self._order(root, key[1])
+        return self._orders[key]
+
+    def ordered_records(
+        self, root: Ref, *, stop_at: tuple[Ref, ...] = ()
+    ) -> tuple[LocalRecord | Record, ...]:
+        """Return records in the same dependency-first order as ordered_refs."""
+        return tuple(self._records_by_ref[ref] for ref in self.ordered_refs(root, stop_at=stop_at))
+
+    @cached_property
+    def _records_by_ref(self) -> dict[Ref, LocalRecord | Record]:
+        return {record.ref: record for record in self.records}
+
+    def _order(self, root: Ref, stop_at: tuple[Ref, ...]) -> tuple[Ref, ...]:
+        if root not in self.networkx:
+            raise ValueError("Unknown dependency graph root")
+        stops = frozenset(stop_at)
+        if root in stops or not stops.issubset(self.networkx):
+            raise ValueError("Stop references must be dependencies of the root")
+        graph = nx.subgraph_view(
+            self.networkx, filter_edge=lambda source, _target: source not in stops
+        )
+        reachable = {root, *nx.descendants(graph, root)}
+        if not stops.issubset(reachable):
+            raise ValueError("A stop reference is hidden or unreachable from the root")
+        try:
+            return tuple(
+                nx.lexicographical_topological_sort(graph.subgraph(reachable).reverse(copy=False))
+            )
+        except nx.NetworkXUnfeasible as error:
+            raise ValueError("Cycle in dependency graph") from error
 
 
 class Graph:
-    """One project's root, direct dependencies and optional project-owned lockfile."""
+    """Resolve a local project once at construction and retain its exact graph snapshot."""
 
     def __init__(
         self,
@@ -53,22 +97,18 @@ class Graph:
         lockfile: Path | None = None,
     ) -> None:
         self.catalog = catalog
-        self.record = record
-        self.dependencies = dependencies
+        self._package = catalog._local_package(record, dependencies, lockfile)
+        self.record = self._package.record
+        self.dependencies = self._package.dependencies
         self.lockfile = lockfile
-
-    def resolve(self) -> GraphResult:
-        """Resolve the local root and published dependencies using this project's lockfile."""
-        return self.catalog._local_package(self.record, self.dependencies, self.lockfile).resolve()
+        self.result = self._package.result
 
     def create_lockfile(self, path: str | Path | None = None) -> Path:
-        """Create or update the dependency lockfile and use it for subsequent resolution."""
+        """Save the resolved graph through Conan; remember the path only after success."""
         output = path if path is not None else self.lockfile
         if output is None:
             raise CatalogError("Provide a lockfile path in Graph or create_lockfile")
-        self.lockfile = self.catalog._local_package(
-            self.record, self.dependencies, self.lockfile
-        ).create_lockfile(output)
+        self.lockfile = self._package.create_lockfile(output)
         return self.lockfile
 
 

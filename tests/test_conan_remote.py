@@ -266,7 +266,9 @@ def test_recipes_are_downloaded_once_per_operation(
     monkeypatch.setattr(remote_catalog._client, "run", track)
     actions: dict[str, Callable[[], object]] = {
         "get": root.ref.get,
-        "resolve": Graph(remote_catalog, local_record(root), dependencies=(leaf.ref,)).resolve,
+        "resolve": lambda: (
+            Graph(remote_catalog, local_record(root), dependencies=(leaf.ref,)).result
+        ),
         "dependents": lambda: leaf.ref.find_dependents(candidates=SearchQuery(), transitive=False),
         "transitive": lambda: leaf.ref.find_dependents(candidates=SearchQuery()),
         "search": remote_catalog.search,

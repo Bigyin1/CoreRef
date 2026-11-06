@@ -53,7 +53,7 @@ def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog
         catalog,
         local_record(Record(Ref("soc", "local", "rtl", "default", "1.0", catalog=catalog))),
         dependencies=(root.ref,),
-    ).resolve()
+    ).result
     records = {record.ref: record for record in graph.records}
     for graph_record in graph.records:
         assert graph_record.ref._catalog is catalog

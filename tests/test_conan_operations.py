@@ -35,7 +35,7 @@ def test_materialize_uses_published_requirements_without_project_lock(
         dependencies=(record.ref,),
     )
     lock = project.create_lockfile(tmp_path / "conan.lock") if locked else None
-    assert record in project.resolve().records
+    assert record in project.result.records
     if lock:
         lock.unlink()
     caller = tmp_path / "caller"

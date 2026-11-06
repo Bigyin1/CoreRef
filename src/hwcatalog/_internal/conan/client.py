@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
+from conan.api.subapi.lockfile import LockfileAPI  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 from conan.errors import ConanException  # type: ignore[import-untyped]
 from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
@@ -139,19 +140,14 @@ class ConanClient:
             *self.source_args,
         )
 
-    def create_project_lockfile(
-        self, references: tuple[str, ...], output: Path, *, seed: Path | None = None
-    ) -> None:
-        """Ask Conan to capture a consumer's complete dependency graph."""
-        arguments = ["lock", "create"] if references else ["lock", "add"]
-        if not references:
-            seed = None
-        arguments.extend(f"--requires={reference}" for reference in references)
-        arguments.extend(("--lockfile", str(seed) if seed is not None else ""))
-        arguments.extend(("--lockfile-out", str(output)))
-        if references:
-            arguments.extend(("--lockfile-clean", *self.source_args))
-        self.run(*arguments)
+    @staticmethod
+    def save_lockfile(graph: NativeGraph, output: Path) -> None:
+        """Let Conan create an opaque lockfile from an already resolved graph."""
+        try:
+            lockfile = LockfileAPI.update_lockfile(None, graph, clean=True)
+            LockfileAPI.save_lockfile(lockfile, str(output))
+        except (ConanException, OSError) as error:
+            raise CatalogError(f"Conan could not save lockfile {output}: {error}") from error
 
     def export(self, directory: Path) -> str:
         result = cast(Mapping[str, object], self.run("export", str(directory), "--no-remote"))

@@ -44,7 +44,7 @@ def main() -> None:
                 catalog,
                 LocalRecord(result.ref, result.payload, files=result.files),
                 dependencies=dependencies,
-            ).resolve()
+            ).result
             print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
             print(result.ref.get().files["cpu.lib"].read_text().strip())
 

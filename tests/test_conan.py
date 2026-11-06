@@ -135,7 +135,7 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert not catalog.search(SearchQuery(component=""))
     expected = resolve_published(catalog, be.ref)
     assert expected.dependencies == (edge,)
-    assert len(expected.to_networkx()) == 2
+    assert len(expected.networkx) == 2
     assert Ref(**be.ref.to_dict(), catalog=catalog).dependencies()[0] == stored
     assert (
         Ref(**rtl.ref.to_dict(), catalog=catalog)

@@ -43,7 +43,7 @@ implementations = published.ref.find_dependents(
 )
 project = Graph(catalog, local, dependencies=())
 lockfile = project.create_lockfile(Path("/work/cpu/conan.lock"))
-resolved = project.resolve()
+resolved = project.result
 ```
 
 `Catalog` предоставляет только `search` и `publish`. Публикация принимает один LocalRecord
@@ -59,11 +59,16 @@ Conan: SDK не клонирует Git самостоятельно. Файлы 
 зависимостей запрашиваются отдельно; рабочее дерево локального корня уже доступно.
 
 `Graph` — обычный класс для одного описания проекта, например deps.toml. Формат файла
-и добавление найденных зависимостей определяет flow. Graph.resolve() не требует
+и добавление найденных зависимостей определяет flow. Graph разрешается при создании и не требует
 публикации корня; результат содержит LocalRecord корня и Record зависимостей.
-Graph.create_lockfile() использует dependencies и запоминает путь. Несколько Graph
+Graph.create_lockfile() сохраняет уже разрешённый граф через Conan и запоминает путь. Несколько Graph
 могут находиться в одной директории и иметь разные манифесты и lockfile.
 Lockfile остаётся непрозрачным файлом проекта и явно передаётся при публикации.
+Если lockfile передан конструктору, он должен существовать; новый файл создают
+через project.create_lockfile(path) после разрешения проекта.
+GraphResult.networkx и результаты ordered_refs(root, stop_at=...) кэшируются.
+ordered_records(root, stop_at=...) позволяет flow получить зависимости в порядке
+обработки и остановить обход на выбранных макроблоках, сохранив общие зависимости.
 
 LocalRecord.to_json() готовит переносимые метаданные: ref, payload и имена files.
 Рабочие source/files-пути туда не попадают. Record.from_json(data, *, catalog) восстанавливает
@@ -74,8 +79,8 @@ inspection-снимок с явными путями. Метаданные па�
 Публичные модули находятся прямо в hwcatalog.api: catalog, graph, records, query,
 protocols, errors, types. Ref — неизменяемые координаты с обязательным приватным _catalog;
 контекст исключён из равенства, хеша и сериализации. Ссылки результатов уже содержат
-этот контекст. Ref и Record неизменяемы, LocalRecord и Graph можно редактировать.
-Publish и resolve создают независимые снимки входов; пользовательский payload
+этот контекст. Ref и Record неизменяемы, LocalRecord можно редактировать. Graph — готовый снимок.
+Publish и создание Graph создают независимые снимки входов; пользовательский payload
 сериализуется один раз за операцию. Create_lockfile запоминает путь только после успеха.
 
 Внутренние LocalPackage и StoredPackage выполняют операции над пакетами, LocalRecipe
