@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import InitVar, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Self, cast, runtime_checkable
 
@@ -23,23 +23,79 @@ class JSONSerializable(Protocol):
     def to_json(self) -> str: ...
 
 
-@dataclass(frozen=True)
 class Ref:
     """Package coordinates with a required private catalog excluded from identity and JSON."""
 
-    namespace: str
-    component: str
-    view: str
-    type: str
-    version: str
-    subcomponent: str | None = field(default=None, kw_only=True)
-    catalog: InitVar[Catalog] = field(kw_only=True)
-    _catalog: Catalog = field(init=False, repr=False, compare=False)
+    __slots__ = (
+        "_catalog",
+        "_component",
+        "_namespace",
+        "_subcomponent",
+        "_type",
+        "_version",
+        "_view",
+    )
 
-    def __post_init__(self, catalog: Catalog) -> None:
+    def __init__(  # noqa: PLR0913, PLR0917 - One argument per coordinate and context.
+        self,
+        namespace: str,
+        component: str,
+        view: str,
+        type: str,
+        version: str,
+        *,
+        subcomponent: str | None = None,
+        catalog: Catalog,
+    ) -> None:
         if catalog is None:
             raise TypeError("Ref requires a catalog")
-        object.__setattr__(self, "_catalog", catalog)
+        self._namespace = namespace
+        self._component = component
+        self._view = view
+        self._type = type
+        self._version = version
+        self._subcomponent = subcomponent
+        self._catalog = catalog
+
+    @property
+    def namespace(self) -> str:
+        return self._namespace
+
+    @property
+    def component(self) -> str:
+        return self._component
+
+    @property
+    def view(self) -> str:
+        return self._view
+
+    @property
+    def type(self) -> str:
+        return self._type
+
+    @property
+    def version(self) -> str:
+        return self._version
+
+    @property
+    def subcomponent(self) -> str | None:
+        return self._subcomponent
+
+    @property
+    def _identity(self) -> tuple[str, str, str, str, str, str | None]:
+        return self.namespace, self.component, self.view, self.type, self.version, self.subcomponent
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Ref):
+            return NotImplemented
+        return self._identity == other._identity
+
+    def __hash__(self) -> int:
+        return hash(self._identity)
+
+    def __repr__(self) -> str:
+        coordinates = ", ".join(f"{name}={value!r}" for name, value in self.to_dict().items())
+        return f"Ref({coordinates})"
 
     @property
     def package_name(self) -> str:

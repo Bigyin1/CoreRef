@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Literal, Self
 
 import yaml  # type: ignore[import-untyped]  # Validated at this boundary.
+from edify import RegexBuilder
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from ..api.errors import CatalogError, InvalidPackage
 from ..api.records import LocalRecord, Record, Ref
@@ -24,6 +25,18 @@ _RECIPE_ENV = Environment(
 )
 _RECIPE_ENV.filters["pyrepr"] = repr
 _RECIPE_TEMPLATE = _RECIPE_ENV.get_template("conanfile.py.j2")
+_HEX_DIGIT = RegexBuilder().any_of().range("a", "f").range("0", "9").end()
+_COMMIT = (
+    RegexBuilder()
+    .any_of()
+    .exactly(40)
+    .use(_HEX_DIGIT)
+    .exactly(64)
+    .use(_HEX_DIGIT)
+    .end()
+    .to_regex()
+    .compiled
+)
 
 
 class RecipeMetadata(BaseModel):
@@ -41,8 +54,15 @@ def _recipe_text(ref: Ref, requirements: tuple[str, ...]) -> str:
 class _SCM(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     url: str
-    commit: str = Field(pattern=r"^(?:[a-f0-9]{40}|[a-f0-9]{64})\z")
+    commit: str
     requested_ref: str = "HEAD"
+
+    @field_validator("commit")
+    @classmethod
+    def validate_commit(cls, value: str) -> str:
+        if not _COMMIT.fullmatch(value):
+            raise ValueError("Git commit must be a full lowercase SHA-1 or SHA-256")
+        return value
 
     @field_validator("url")
     @classmethod

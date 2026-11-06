@@ -1,7 +1,8 @@
 """Pure conversions between catalog coordinates and Conan references."""
 
-import re
 from typing import TYPE_CHECKING
+
+from edify import RegexBuilder
 
 from ..api.errors import InvalidPackage
 from ..api.records import Ref
@@ -9,9 +10,17 @@ from ..api.records import Ref
 if TYPE_CHECKING:
     from ..api.catalog import Catalog
 
-COMPONENT_PART = re.compile(r"[a-z0-9-]+\Z")
-NAME_PART = re.compile(r"[a-z0-9_-]+\Z")
-VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}\Z")
+_ALPHANUMERIC = RegexBuilder().any_of().range("a", "z").range("0", "9").end()
+_COMPONENT_CHARACTER = RegexBuilder().any_of().use(_ALPHANUMERIC).char("-").end()
+_NAME_CHARACTER = RegexBuilder().any_of().use(_ALPHANUMERIC).any_of_chars("_-").end()
+_VERSION_START = RegexBuilder().any_of().use(_ALPHANUMERIC).char("_").end()
+_VERSION_CHARACTER = RegexBuilder().any_of().use(_ALPHANUMERIC).any_of_chars("_+.-").end()
+
+COMPONENT_PART = RegexBuilder().one_or_more().use(_COMPONENT_CHARACTER).to_regex().compiled
+NAME_PART = RegexBuilder().one_or_more().use(_NAME_CHARACTER).to_regex().compiled
+VERSION = (
+    RegexBuilder().use(_VERSION_START).between(1, 100).use(_VERSION_CHARACTER).to_regex().compiled
+)
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 

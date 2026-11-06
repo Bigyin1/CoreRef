@@ -122,6 +122,10 @@ def test_dirty_source_fails_before_publication(
         ("url", "https://gitlab.invalid/project.git\n"),
         ("commit", "main"),
         ("commit", "a" * 39),
+        ("commit", "a" * 41),
+        ("commit", "a" * 63),
+        ("commit", "a" * 65),
+        ("commit", "A" * 40),
         ("commit", "a" * 40 + "\n"),
         ("extra", "unsupported"),
     ],
@@ -214,3 +218,17 @@ def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
 def _commit(checkout: Path) -> str:
     with Repo(checkout) as repo:
         return repo.head().decode()
+
+
+@pytest.mark.parametrize("length", [40, 64])
+def test_full_git_commit_metadata_is_accepted(
+    tmp_path: Path, length: int, *, catalog: Catalog
+) -> None:
+    record = LocalRecord(
+        Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=tmp_path
+    )
+    LocalRecipe(record).write(tmp_path)
+    (tmp_path / "conandata.yml").write_text(
+        json.dumps({"scm": {"url": "https://gitlab.invalid/cpu.git", "commit": "a" * length}})
+    )
+    assert StoredRecipe.read(tmp_path, record.ref, reference=str(record.ref)).metadata.has_source

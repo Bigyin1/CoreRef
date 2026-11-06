@@ -262,6 +262,15 @@ wheels = [
 ]
 
 [[package]]
+name = "edify"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/0f/6c9e1da3b9e2e36d85c787b0a1c5b4e7873e7940865625f8fa7a789ff778/edify-1.1.2.tar.gz", hash = "sha256:2fc7886dc60e5c9ce5106953e598c8aa5e24d041d30741de32c06083832f9982", size = 559478, upload-time = "2026-10-22T14:09:34.984Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/dd/a5d464d52521e1a6c7794a55afa664a4e8ed465c1fe5861e574bf8e2ebb6/edify-1.1.2-py3-none-any.whl", hash = "sha256:959ba373479c7a02560c271c07f06ad9eb16aa15fd20dfe3e2d27401f89b67c4", size = 277667, upload-time = "2026-10-22T14:09:33.336Z" },
+]
+
+[[package]]
 name = "fasteners"
 version = "0.20"
 source = { registry = "https://pypi.org/simple" }
@@ -285,6 +294,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "conan" },
+    { name = "edify" },
     { name = "frozendict" },
     { name = "jinja2" },
     { name = "networkx" },
@@ -306,6 +316,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "conan", specifier = ">=2.34,<2.35" },
+    { name = "edify", specifier = ">=1.1.2,<2" },
     { name = "frozendict", specifier = ">=2.4.7,<3" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
     { name = "networkx", specifier = ">=3.7,<4" },

@@ -19,13 +19,15 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
         local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
     )
     second = catalog.publish(
-        local_record(Record(replace(first.ref, version="2.0", catalog=catalog)))
+        local_record(Record(Ref(**(first.ref.to_dict() | {"version": "2.0"}), catalog=catalog)))
     )
     root = Record(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
     left = Graph(catalog, local_record(root), dependencies=(first.ref,))
     right = Graph(
         catalog,
-        local_record(replace(root, ref=replace(root.ref, component="other", catalog=catalog))),
+        local_record(
+            replace(root, ref=Ref(**(root.ref.to_dict() | {"component": "other"}), catalog=catalog))
+        ),
         dependencies=(second.ref,),
     )
     left_path = left.create_lockfile(tmp_path / "left.lock")

@@ -62,9 +62,9 @@ def test_reference_round_trip(*, catalog: Catalog) -> None:
     with pytest.raises(InvalidPackage):
         from_conan_reference("ordinary-library/1.0@user/channel", catalog=catalog)
     with pytest.raises(InvalidPackage):
-        to_conan_reference(replace(ref, component="a" * 101, catalog=catalog))
+        to_conan_reference(Ref(**(ref.to_dict() | {"component": "a" * 101}), catalog=catalog))
     with pytest.raises(InvalidPackage):
-        to_conan_reference(replace(ref, namespace="-invalid", catalog=catalog))
+        to_conan_reference(Ref(**(ref.to_dict() | {"namespace": "-invalid"}), catalog=catalog))
 
 
 def test_publish_uses_one_export_pkg_without_graph_or_export_commands(

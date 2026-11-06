@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import FrozenInstanceError, dataclass, replace
+from dataclasses import FrozenInstanceError, dataclass
 from enum import StrEnum
 
 import pytest
@@ -84,10 +84,13 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
 def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
     ref = Ref("rtl-ip", "core", "release", "default", "1.0", catalog=catalog)
     same = Ref("rtl-ip", "core", "release", "default", "1.0", catalog=catalog)
-    other = replace(ref, namespace="connection-ip", catalog=catalog)
+    other = Ref(**(ref.to_dict() | {"namespace": "connection-ip"}), catalog=catalog)
     assert ref == same
     assert hash(ref) == hash(same)
-    assert ref.package_name == replace(ref, version="2.0", catalog=catalog).package_name
+    assert (
+        ref.package_name
+        == Ref(**(ref.to_dict() | {"version": "2.0"}), catalog=catalog).package_name
+    )
     assert ref != other
     assert ref.package_name != other.package_name
     catalog.publish(local_record(Record(ref)))

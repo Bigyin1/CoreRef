@@ -1,7 +1,6 @@
 """Optional component parts retain exact identity through Conan and project snapshots."""
 
 import json
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -30,8 +29,8 @@ def test_ref_and_record_roundtrip(catalog: Catalog, subcomponent: str | None) ->
 
 def test_parts_have_distinct_hashes_and_a_stable_order(catalog: Catalog) -> None:
     root = Ref("soc", "cpu", "be", "lib-lef", "1.0", catalog=catalog)
-    alu = replace(root, subcomponent="alu", catalog=catalog)
-    cache = replace(root, subcomponent="cache", catalog=catalog)
+    alu = Ref(**(root.to_dict() | {"subcomponent": "alu"}), catalog=catalog)
+    cache = Ref(**(root.to_dict() | {"subcomponent": "cache"}), catalog=catalog)
     assert len({root, alu, cache}) == 3
     assert tuple(sorted((cache, root, alu))) == (root, alu, cache)
     assert tuple(
@@ -75,9 +74,9 @@ def test_component_search_includes_parts_but_excludes_prefix_neighbours(catalog:
         catalog.publish(LocalRecord(ref))
         for ref in (
             base,
-            replace(base, subcomponent="alu", catalog=catalog),
-            replace(base, subcomponent="cache", catalog=catalog),
-            replace(base, component="cpu-extra", catalog=catalog),
+            Ref(**(base.to_dict() | {"subcomponent": "alu"}), catalog=catalog),
+            Ref(**(base.to_dict() | {"subcomponent": "cache"}), catalog=catalog),
+            Ref(**(base.to_dict() | {"component": "cpu-extra"}), catalog=catalog),
         )
     )
     with patch.object(

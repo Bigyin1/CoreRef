@@ -15,6 +15,7 @@ dependencies = [
  "pydantic>=2.14,<3",
  "networkx>=3.7,<4",
  "frozendict>=2.4.7,<3",
+ "edify>=1.1.2,<2",
 ]
 
 [dependency-groups]

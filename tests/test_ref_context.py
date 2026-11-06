@@ -1,6 +1,7 @@
 """References carry operation context without changing stored package identity."""
 
 import json
+from dataclasses import is_dataclass
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,10 @@ def test_reference_requires_a_private_catalog(catalog: Catalog) -> None:
     ref = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
     assert ref._catalog is catalog
     assert not hasattr(ref, "catalog")
+    assert not is_dataclass(ref)
+    assert tuple(name for name in Ref.__slots__ if "catalog" in name) == ("_catalog",)
+    with pytest.raises(AttributeError):
+        ref.component = "changed"  # type: ignore[misc]
     with pytest.raises(TypeError):
         Ref("soc", "cpu", "rtl", "default", "1.0")  # type: ignore[call-arg]
     with pytest.raises(TypeError, match="requires a catalog"):
