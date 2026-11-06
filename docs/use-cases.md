@@ -5,14 +5,14 @@
 
 ## RTL → LIB/LEF
 
-1. Передать локальный Record и прямые зависимости в `Graph(catalog, record, dependencies=...).resolve()`
+1. Передать LocalRecord и прямые зависимости в `Graph(catalog, record, dependencies=...).resolve()`
    и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
    из опубликованного пакета, его читают через `top_ref.get()` и `top_ref.dependencies()`.
 2. Для выбранного RTL вызвать `rtl_ref.find_dependents(
    candidates=SearchQuery(namespace="soc1", component="cpu", view="be", type="lib-lef"))`.
 3. Из найденных кандидатов приложение выбирает нужную реализацию и читает payload
-   с метаданными. Файлы из Conan получают через `ref.materialize()`,
-   внешние ресурсы — через `LocatedResource`.
+   с метаданными. Файлы из Conan получают через `ref.get().files`,
+   внешние ресурсы — из словаря `record.nfs`.
 4. Приложение исключает заменённые RTL-ветки из собственных входов, сохраняя общие
    зависимости остальных блоков, подготавливает ресурсы и запускает инструмент.
 

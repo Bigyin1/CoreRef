@@ -8,7 +8,7 @@ from pathlib import Path
 from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph, GraphResult
-from hwcatalog.api.records import Record, Ref
+from hwcatalog.api.records import LocalRecord, Record, Ref
 from hwcatalog.api.types import JSON
 
 
@@ -23,17 +23,11 @@ class RunTypeId(StrEnum):
 
 
 def release(
-    name: str,
-    version: str = "v1",
-    *,
-    team: str = "demo",
-    project_type: str = "ip",
-    manifest: Mapping[str, JSON] | None = None,
-    type_id: str = ProjectTypeId.RTL_PROJECT,
+    name: str, version: str = "v1", *, manifest: Mapping[str, JSON] | None = None, catalog: Catalog
 ) -> Record:
     return normalize_record(
         Record(
-            Ref(f"{team}-{project_type}", name, "release", "default", version),
+            Ref("demo-ip", name, "release", "default", version, catalog=catalog),
             {
                 "resources": [
                     {
@@ -43,18 +37,18 @@ def release(
                         "resolved_commit": "a" * 40,
                     }
                 ],
-                "type_id": type_id,
-                "team_id": team,
+                "type_id": ProjectTypeId.RTL_PROJECT,
+                "team_id": "demo",
                 "manifest": manifest or {},
             },
         )
     )
 
 
-def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS) -> Record:
+def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS, catalog: Catalog) -> Record:
     return normalize_record(
         Record(
-            Ref("flow", name, "run", "default", "1.0"),
+            Ref("flow", name, "run", "default", "1.0", catalog=catalog),
             {"type_id": type_id, "purpose": "synthesis", "details": {"array": [3, 1, 2]}},
         )
     )
@@ -73,7 +67,10 @@ def resources(record: Record) -> tuple[JSON, ...]:
 
 def graph_json(result: GraphResult) -> str:
     value = {
-        "records": [json.loads(record.to_json()) for record in result.records],
+        "records": [
+            (json.loads(record.to_json()) if isinstance(record, LocalRecord) else record.to_dict())
+            for record in result.records
+        ],
         "dependencies": [
             {"source": edge.source.to_dict(), "target": edge.target.to_dict()}
             for edge in result.dependencies
@@ -87,4 +84,19 @@ def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = Non
     ref = Ref(**ref.to_dict(), catalog=catalog)
     record = ref.get()
     dependencies = tuple(item.ref for item in ref.dependencies())
-    return Graph(catalog, record, dependencies=dependencies, lockfile=lockfile).resolve()
+    return Graph(
+        catalog, local_record(record), dependencies=dependencies, lockfile=lockfile
+    ).resolve()
+
+
+def local_record(
+    record: Record, *, source: Path | None = None, files: dict[str, Path] | None = None
+) -> LocalRecord:
+    """Use fixture metadata as explicit local publication inputs."""
+    return LocalRecord(
+        record.ref,
+        record.payload,
+        source,
+        record.files if files is None else files,
+        record.nfs,
+    )

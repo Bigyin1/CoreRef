@@ -11,13 +11,16 @@ from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError
 from hwcatalog.api.graph import Graph
 from hwcatalog.api.records import Record, Ref
+from tests.helpers import local_record
 
 
 class _Profile(Protocol):
     settings: Mapping[str, str]
 
 
-def test_configured_profile_defaults_are_used_without_rewriting(tmp_path: Path) -> None:
+def test_configured_profile_defaults_are_used_without_rewriting(
+    tmp_path: Path, *, catalog: Catalog
+) -> None:
     home = configured_home(tmp_path / "cache")
     default = home / "profiles/default"
     content = default.read_text()
@@ -33,9 +36,9 @@ def test_configured_profile_defaults_are_used_without_rewriting(tmp_path: Path) 
     profiles = cast(Mapping[str, _Profile], catalog._client.run("profile", "show"))
     assert profiles["host"].settings["build_type"] == "Debug"
     assert profiles["build"].settings["build_type"] == "Release"
-    root = Record(Ref("soc", "cpu", "rtl", "default", "1.0"))
-    assert Graph(catalog, root).resolve().records == (root,)
-    catalog.publish(root)
+    root = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+    assert Graph(catalog, local_record(root)).resolve().records == (local_record(root),)
+    catalog.publish(local_record(root))
     assert before == {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
     assert config.read_text() == (
         "core:default_profile=project-host\ncore:default_build_profile=project-build\n"
@@ -44,12 +47,15 @@ def test_configured_profile_defaults_are_used_without_rewriting(tmp_path: Path) 
     assert not (home / "hwcatalog-build-profile").exists()
 
 
-def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path) -> None:
+def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path, *, catalog: Catalog) -> None:
     home = configured_home(tmp_path / "cache")
     (home / "profiles/default").unlink()
     catalog = Catalog(home)
     with pytest.raises(CatalogError, match="profile"):
-        Graph(catalog, Record(Ref("soc", "cpu", "rtl", "default", "1.0"))).resolve()
+        Graph(
+            catalog,
+            local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))),
+        ).resolve()
     assert not (home / "profiles/default").exists()
 
 

@@ -31,13 +31,13 @@ Conan выполняет разрешение своего графа и фик�
 канонический, без settings/options, overrides и диапазонов. Record сериализуется
 в JSON; имя Python-класса пользователя и пользовательские декодеры не хранятся.
 Git source хранится в SCM-метаданных Conan; код остаётся в GitLab и получается
-через tools.build:download_source=True при materialize(with_sources=True).
-В binaries копируются только обычные файлы. LocatedResource остаётся внешним путём.
+через tools.build:download_source=True при Ref.get(with_sources=True).
+В binaries копируются только обычные файлы. Именованные внешние пути находятся в Record.nfs.
 
 Lockfile принадлежит проекту: хранится в RTL-репозитории или BE workspace и явно
 передаётся Conan при публикации и разрешении графа. Каталог не
 парсит, не сериализует и не проверяет JSON-схему lockfile. Создание и обновление
-делегированы штатным командам Conan. Materialize получает опубликованный пакет
+делегированы штатным командам Conan. Ref.get получает опубликованный пакет
 по точной revision и закреплённым requirements, без проектного lockfile.
 Рецепты используют один текущий формат: точные recipe revisions прямых
 зависимостей находятся в requirements, проектный lockfile не экспортируется.

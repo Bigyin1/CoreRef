@@ -8,7 +8,7 @@ import networkx as nx
 
 from .errors import CatalogError
 from .protocols import RefCatalog
-from .records import Record, Ref
+from .records import LocalRecord, Record, Ref
 
 # NetworkX generics are provided by stubs, not its runtime classes.
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ class Dependency:
 
 @dataclass(frozen=True)
 class GraphResult:
-    records: tuple[Record, ...]
+    records: tuple[LocalRecord | Record, ...]
     dependencies: tuple[Dependency, ...]
 
     def to_networkx(self) -> _RefGraph:
@@ -46,7 +46,7 @@ class Graph:
     def __init__(
         self,
         catalog: RefCatalog,
-        record: Record,
+        record: LocalRecord,
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,

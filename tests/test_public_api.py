@@ -23,12 +23,6 @@ def test_public_models_import_independently_of_conan() -> None:
         assert "pydantic" not in sys.modules
         assert "conan" not in sys.modules
 
-        from hwcatalog.api import resources
-
-        assert "hwcatalog.api.records" not in sys.modules
-        assert "networkx" not in sys.modules
-        assert "conan" not in sys.modules
-
         from hwcatalog.api import records
 
         assert "networkx" not in sys.modules
@@ -48,28 +42,26 @@ def test_public_models_import_independently_of_conan() -> None:
         profiles.mkdir(exist_ok=True)
         (profiles / "default").write_text("[settings]\\nos=Linux\\n")
         manifest: dict[str, types.JSON] = {"views": ["rtl", "timing"]}
-        record = records.Record(
-            ref=records.Ref("public", "rtl", "rtl", "default", "v1"),
+        instance = catalog.Catalog(Path(home.name))
+        local = records.LocalRecord(
+            ref=records.Ref("public", "rtl", "rtl", "default", "v1", catalog=instance),
             payload=manifest,
         )
-        instance = catalog.Catalog(Path(home.name))
-        record = instance.publish(record=record)
+        record = instance.publish(record=local)
         stored = record.ref.get()
         assert stored.ref == record.ref
         assert stored.payload["views"] == ("rtl", "timing")
         assert instance.search(query.SearchQuery()) == (stored,)
         assert record.ref.dependencies() == ()
-        assert Graph(instance, stored).resolve().records == (stored,)
+        resolved = Graph(instance, local).resolve()
+        assert isinstance(resolved.records[0], records.LocalRecord)
+        assert resolved.records[0].payload == stored.payload
         try:
             records.Ref("public", "absent", "rtl", "default", "v1", catalog=instance).get()
         except errors.NotFound:
             pass
         else:
             raise AssertionError("Domain errors must use the public error contract")
-
-        with TemporaryDirectory() as directory:
-            local = resources.LocatedResource("nfs", directory).materialize()
-            assert local.path == Path(directory).resolve()
 
         home.cleanup()
         assert "dulwich" not in sys.modules, "Conan source retrieval uses its native Git helper"

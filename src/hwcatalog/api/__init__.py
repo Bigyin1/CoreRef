@@ -1,1 +1,1 @@
-"""Public catalog, project graph, references, queries and resource contracts."""
+"""Public catalog, project graph, records, queries and serialization protocols."""

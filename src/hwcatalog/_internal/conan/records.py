@@ -27,13 +27,18 @@ def locate(client: ConanClient, ref: Ref) -> tuple[str, Path]:
     return pinned, client.cache_path(pinned)
 
 
-def get(client: ConanClient, ref: Ref) -> Record:
+def get(client: ConanClient, ref: Ref, *, with_sources: bool = False) -> Record:
     ref = normalize_ref(ref)
-    return read_records(client, (to_conan_reference(ref),), catalog=ref.catalog)[ref]
+    record = read_records(client, (to_conan_reference(ref),), catalog=ref._catalog)[ref]
+    if record.files or (with_sources and record.scm):
+        from .materialization import materialize
+
+        return materialize(client, record, with_sources=with_sources)
+    return record
 
 
 def read_records(
-    client: ConanClient, references: tuple[str, ...], *, catalog: RefCatalog | None = None
+    client: ConanClient, references: tuple[str, ...], *, catalog: RefCatalog
 ) -> dict[Ref, Record]:
     records = {}
     for reference in dict.fromkeys(references):
@@ -49,7 +54,7 @@ def search(
     client: ConanClient,
     query: SearchQuery = SearchQuery(),
     *,
-    catalog: RefCatalog | None = None,
+    catalog: RefCatalog,
 ) -> tuple[Record, ...]:
     query = normalize_query(query)
     pattern = search_pattern(query)
@@ -66,7 +71,7 @@ def dependencies(
     ref, filters = normalize_ref(ref), normalize_query(filters)
     _, directory = locate(client, ref)
     requirements = read_recipe(directory, ref)[1].requires
-    records = read_records(client, requirements, catalog=ref.catalog).values()
+    records = read_records(client, requirements, catalog=ref._catalog).values()
     return tuple(sorted((r for r in records if filters.matches(r)), key=lambda r: r.ref))
 
 

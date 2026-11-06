@@ -5,7 +5,7 @@ from pathlib import Path
 from .._internal.conan import publication, records
 from .._internal.conan.client import ConanClient
 from .query import SearchQuery
-from .records import Record, Ref
+from .records import LocalRecord, Record, Ref
 
 
 class Catalog:
@@ -26,11 +26,9 @@ class Catalog:
 
     def publish(
         self,
-        record: Record,
+        record: LocalRecord,
         *,
         dependencies: tuple[Ref, ...] = (),
-        source_path: Path | None = None,
-        files: dict[str, Path] | None = None,
         lockfile: Path | None = None,
     ) -> Record:
         """Publish one package with dependencies, optional Git checkout and stored files."""
@@ -38,8 +36,6 @@ class Catalog:
             self._client,
             record,
             dependencies,
-            source_path=source_path,
-            files=files,
             lockfile=lockfile,
             catalog=self,
         )

@@ -13,8 +13,7 @@ from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency
 from hwcatalog.api.records import Record, Ref
-from hwcatalog.api.resources import GitResource
-from tests.helpers import resolve_published
+from tests.helpers import local_record, resolve_published
 
 
 @pytest.fixture
@@ -23,15 +22,19 @@ def packages(tmp_path: Path) -> Catalog:
 
 
 def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path) -> None:
-    rtl = packages.publish(Record(Ref("soc", "cpu", "rtl", "default", "1.0")))
+    rtl = packages.publish(
+        local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=packages)))
+    )
     artifact = tmp_path / "cpu.lib"
     artifact.write_bytes(b"library(cpu) {}\n\x00")
     record = packages.publish(
-        Record(Ref("soc", "cpu", "be", "lib-lef", "4.0"), {"corner": "tt"}),
+        local_record(
+            Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=packages), {"corner": "tt"}),
+            files={"timing/cpu.lib": artifact},
+        ),
         dependencies=(rtl.ref,),
-        files={"timing/cpu.lib": artifact},
     )
-    assert record.files == ("timing/cpu.lib",)
+    assert tuple(record.files) == ("timing/cpu.lib",)
     assert record.source is None
     assert record.ref.get() == record
     assert record.ref.dependencies() == (rtl,)
@@ -39,61 +42,76 @@ def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path
         Dependency(record.ref, rtl.ref),
     )
     artifact.unlink()
-    content = record.ref.materialize().path
-    assert (content / "artifacts/timing/cpu.lib").read_bytes() == b"library(cpu) {}\n\x00"
-    assert record.ref.materialize().path == content
-    with pytest.raises(InvalidPackage):
-        packages.publish(record)
+    content = record.ref.get().files["timing/cpu.lib"]
+    assert content.read_bytes() == b"library(cpu) {}\n\x00"
+    assert record.ref.get().files["timing/cpu.lib"] == content
+    with pytest.raises(Conflict):
+        packages.publish(local_record(record))
 
 
 def test_local_source_is_captured_once_outside_payload(packages: Catalog, checkout: Path) -> None:
     record = packages.publish(
-        Record(Ref("soc", "cpu", "rtl", "default", "1.0"), {"tool": "synthesis"}),
-        source_path=checkout,
+        local_record(
+            Record(
+                Ref("soc", "cpu", "rtl", "default", "1.0", catalog=packages), {"tool": "synthesis"}
+            ),
+            source=checkout,
+        )
     )
-    assert record.source is not None
+    assert record.scm is not None
     with Repo(checkout) as repository:
-        assert record.source.resolved_commit == repository.head().decode()
+        assert record.scm["commit"] == repository.head().decode()
     assert record.payload == {"tool": "synthesis"}
     assert record.ref.get() == record
-    artifacts = record.ref.materialize()
-    assert artifacts.source_path is None
-    assert not (artifacts.path / "source").exists()
-    fetched = record.ref.materialize(with_sources=True)
-    assert fetched.source_path is not None
-    assert (fetched.source_path / "cpu.sv").read_text() == "module cpu; endmodule\n"
-    assert not fetched.source_path.is_relative_to(fetched.path)
+    artifacts = record.ref.get()
+    assert artifacts.source is None
+    assert artifacts.files == {}
+    fetched = record.ref.get(with_sources=True)
+    assert fetched.source is not None
+    assert (fetched.source / "cpu.sv").read_text() == "module cpu; endmodule\n"
+    assert fetched.source.is_relative_to(packages._client.home)
     shutil.rmtree(checkout)
-    assert record.ref.materialize(with_sources=True).source_path == fetched.source_path
-    assert Record.from_json(record.to_json()) == record
+    assert record.ref.get(with_sources=True).source == fetched.source
+    assert (
+        Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=packages) == record
+    )
 
 
-def test_pinned_source_round_trip_uses_conan_scm(tmp_path: Path, checkout: Path) -> None:
-    source = GitResource(str(checkout), "main", _commit(checkout))
+def test_pinned_source_round_trip_uses_conan_scm(
+    tmp_path: Path, checkout: Path, *, catalog: Catalog
+) -> None:
+    source = {"url": str(checkout), "requested_ref": "main", "commit": _commit(checkout)}
     catalog = Catalog(configured_home(tmp_path / "home"))
-    description = Record(Ref("soc", "cpu", "rtl", "default", "1.0"), source=source)
-    record = catalog.publish(description)
-    assert record.source == source
+    description = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), scm=source)
+    record = catalog.publish(local_record(description, source=checkout))
+    assert record.scm is not None
+    assert record.scm["commit"] == source["commit"]
     _, folder = conan_records.locate(catalog._client, record.ref)
     assert "exports_sources" not in (folder / "conanfile.py").read_text()
     assert "source" not in json.loads((folder / "record.json").read_text())
     assert "scm" in (folder / "conandata.yml").read_text()
     assert str(checkout) not in (folder / "conanfile.py").read_text()
-    fetched = record.ref.materialize(with_sources=True)
-    assert fetched.source_path is not None
-    assert (fetched.source_path / "cpu.sv").is_file()
+    fetched = record.ref.get(with_sources=True)
+    assert fetched.source is not None
+    assert (fetched.source / "cpu.sv").is_file()
     with pytest.raises(Conflict):
-        catalog.publish(description)
+        catalog.publish(local_record(description))
     (folder / "conandata.yml").write_text("scm: {commit: nope}")
     with pytest.raises(InvalidPackage):
         record.ref.get()
 
 
-def test_dirty_source_fails_before_publication(tmp_path: Path, checkout: Path) -> None:
+def test_dirty_source_fails_before_publication(
+    tmp_path: Path, checkout: Path, *, catalog: Catalog
+) -> None:
     (checkout / "cpu.sv").write_text("uncommitted")
     catalog = Catalog(configured_home(tmp_path / "home"))
     with pytest.raises(CatalogError, match="dirty"):
-        catalog.publish(Record(Ref("soc", "cpu", "rtl", "default", "1.0")), source_path=checkout)
+        catalog.publish(
+            local_record(
+                Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)), source=checkout
+            )
+        )
     assert not catalog.search()
 
 
@@ -106,17 +124,22 @@ def test_invalid_artifact_names_do_not_publish(
     artifact = tmp_path / "input.txt"
     artifact.write_text("input")
     with pytest.raises(InvalidPackage):
-        packages.publish(Record(Ref("soc", "cpu", "be", "lib-lef", "4.0")), files={name: artifact})
+        packages.publish(
+            local_record(
+                Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=packages)),
+                files={name: artifact},
+            )
+        )
     assert not packages.search()
 
 
-@pytest.mark.parametrize("problem", ["missing", "directory", "overlap", "mismatch"])
+@pytest.mark.parametrize("problem", ["missing", "directory", "overlap"])
 def test_invalid_artifact_inputs_do_not_publish(
     packages: Catalog, tmp_path: Path, problem: str
 ) -> None:
     artifact = tmp_path / "input.txt"
     artifact.write_text("input")
-    record = Record(Ref("soc", "cpu", "be", "lib-lef", "4.0"))
+    record = Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=packages))
     files = {"a": artifact}
     if problem == "missing":
         files = {"a": tmp_path / "missing"}
@@ -124,71 +147,47 @@ def test_invalid_artifact_inputs_do_not_publish(
         files = {"a": tmp_path}
     elif problem == "overlap":
         files["a/b"] = artifact
-    else:
-        record = Record(record.ref, files=("different",))
     with pytest.raises(InvalidPackage):
-        packages.publish(record, files=files)
+        packages.publish(local_record(record, files=files))
     assert not packages.search()
 
 
-@pytest.mark.parametrize("problem", ["missing", "file", "both-sources"])
+@pytest.mark.parametrize("problem", ["missing", "file"])
 def test_invalid_source_inputs_do_not_publish(
     packages: Catalog, tmp_path: Path, problem: str
 ) -> None:
     source_path = tmp_path / "checkout"
-    record = Record(Ref("soc", "cpu", "rtl", "default", "1.0"))
+    record = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=packages))
     if problem == "file":
         source_path.write_text("not a checkout")
-    elif problem == "both-sources":
-        record = Record(
-            record.ref, source=GitResource("https://example.invalid/cpu.git", "v1", "a" * 40)
-        )
     with pytest.raises(InvalidPackage):
-        packages.publish(record, source_path=source_path)
+        packages.publish(local_record(record, source=source_path))
     assert not packages.search()
 
 
 def test_missing_content_and_record(packages: Catalog) -> None:
     record = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=packages))
     with pytest.raises(NotFound):
-        record.ref.materialize()
-    packages.publish(record)
-    with pytest.raises(CatalogError):
-        record.ref.materialize()
+        record.ref.get()
+    packages.publish(local_record(record))
+    assert record.ref.get().files == {}
 
 
 def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
     packages: Catalog, checkout: Path
 ) -> None:
-    source = GitResource(str(checkout), "HEAD", _commit(checkout))
-    record = packages.publish(Record(Ref("soc", "cpu", "rtl", "default", "1.0"), source=source))
+    record = packages.publish(
+        local_record(
+            Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=packages)), source=checkout
+        )
+    )
     shutil.rmtree(checkout)
     assert record.ref.get() == record
-    result = record.ref.materialize()
-    assert result.source_path is None
-    assert not (result.path / "source").exists()
+    result = record.ref.get()
+    assert result.source is None
+    assert result.files == {}
     with pytest.raises(CatalogError):
-        record.ref.materialize(with_sources=True)
-
-
-def test_publishing_pinned_scm_does_not_contact_git(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import subprocess
-
-    def reject(*args: object, **kwargs: object) -> object:
-        raise AssertionError("SCM publication must not clone or check out Git")
-
-    monkeypatch.setattr(subprocess, "run", reject)
-    monkeypatch.setattr(subprocess, "Popen", reject)
-    source = GitResource("https://gitlab.example.invalid/rtl/cpu.git", "v1", "a" * 40)
-    record = Record(Ref("soc", "cpu", "rtl", "default", "1.0"), source=source)
-    catalog = Catalog(configured_home(tmp_path / "home"))
-    record = catalog.publish(record)
-    assert record.ref.get() == record
-    package = record.ref.materialize()
-    assert package.source_path is None
-    assert not (package.path / "source").exists()
+        record.ref.get(with_sources=True)
 
 
 def _commit(checkout: Path) -> str:

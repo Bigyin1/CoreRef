@@ -1,43 +1,47 @@
-"""Resource helpers are optional consumer codecs, independent of catalog payloads."""
+"""SCM dictionaries and named filesystem paths stay outside consumer payloads."""
 
+import json
 from collections.abc import Mapping
-from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
-from pydantic import TypeAdapter
 
+from hwcatalog._internal.validation import normalize_record
 from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.records import Record, Ref
-from hwcatalog.api.resources import GitResource, LocatedResource
+from hwcatalog.api.errors import InvalidPackage
+from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
-def test_resource_fields_cannot_be_reassigned() -> None:
-    resource = LocatedResource("nfs", "/data")
-    with pytest.raises(FrozenInstanceError):
-        resource.provider = "changed"  # type: ignore[misc]
-
-
-@pytest.mark.parametrize(
-    "resource",
-    [
-        LocatedResource("nfs", "/reports", attributes={"ports": [1, 2]}),
-        GitResource("https://example.invalid/repo", "main", "a" * 40),
-    ],
-)
-def test_consumer_decodes_its_own_resource(
-    catalog: Catalog, resource: GitResource | LocatedResource
+def test_paths_and_scm_roundtrip_as_immutable_snapshots(
+    tmp_path: Path, *, catalog: Catalog
 ) -> None:
-    adapter = TypeAdapter(GitResource | LocatedResource)
-    descriptor = adapter.dump_python(resource, mode="json")
-    record = Record(
-        Ref("demo", "resource", "release", "default", "v1"),
-        payload=(descriptor,),
+    nfs = {"lib": tmp_path / "cpu.lib"}
+    source = {"url": "https://gitlab.example.invalid/cpu.git", "commit": "a" * 40}
+    record = normalize_record(
+        Record(
+            Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+            scm=source,
+            files={"report": tmp_path / "report.txt"},
+            nfs=nfs,
+        )
     )
-    catalog.publish(record)
-    stored = Ref(**record.ref.to_dict(), catalog=catalog).get()
-    assert isinstance(stored.payload, tuple)
-    payload = stored.payload[0]
-    assert isinstance(payload, Mapping)
-    restored = adapter.validate_python(dict(payload))
-    assert type(restored) is type(resource)
-    assert adapter.dump_python(restored, mode="json") == descriptor
+    nfs.clear()
+    source.clear()
+    restored = Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
+    assert restored == record
+    assert restored.nfs["lib"] == tmp_path / "cpu.lib"
+    assert restored.files["report"] == tmp_path / "report.txt"
+    assert isinstance(restored.scm, Mapping)
+    with pytest.raises(TypeError):
+        restored.nfs["other"] = tmp_path  # type: ignore[index]
+
+
+@pytest.mark.parametrize("name,path", [("lib", Path("relative")), ("", Path("/data/lib"))])
+def test_nfs_paths_require_names_and_absolute_paths(
+    catalog: Catalog, name: str, path: Path
+) -> None:
+    record = LocalRecord(
+        Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), nfs={name: path}
+    )
+    with pytest.raises(InvalidPackage):
+        catalog.publish(record)

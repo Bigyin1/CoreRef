@@ -97,20 +97,14 @@ class ConanClient:
                 ],
                 raise_on_errors=False,
             )
-            if isinstance(result, Mapping):
-                if "graph" in result:
-                    cast(NativeGraph, result["graph"]).report_graph_error()
-                if result.get("conan_error") is not None:
-                    raise ConanException(str(result["conan_error"]))
+            self._validate_result(result)
             return result
         except GraphConflictError as exc:
             raise Conflict(str(exc)) from exc
         except GraphLoopError as exc:
             raise InvalidPackage(str(exc)) from exc
         except ConanException as exc:
-            if "not in lockfile" in str(exc):
-                raise InvalidPackage("Recipe dependency is absent from its lockfile") from exc
-            raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
+            raise self._command_error(arguments, exc) from exc
         except OSError as exc:
             raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
 
@@ -222,3 +216,18 @@ class ConanClient:
     def upload(self, reference: str) -> None:
         if self.remote:
             self.run("upload", reference, "--remote", self.remote, "--confirm")
+
+    @staticmethod
+    def _validate_result(result: object) -> None:
+        if not isinstance(result, Mapping):
+            return
+        if "graph" in result:
+            cast(NativeGraph, result["graph"]).report_graph_error()
+        if result.get("conan_error") is not None:
+            raise ConanException(str(result["conan_error"]))
+
+    @staticmethod
+    def _command_error(arguments: tuple[str, ...], error: Exception) -> CatalogError:
+        if "not in lockfile" in str(error):
+            return InvalidPackage("Recipe dependency is absent from its lockfile")
+        return CatalogError(f"Conan command {arguments[:2]} failed: {error}")

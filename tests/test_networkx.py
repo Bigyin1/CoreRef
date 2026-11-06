@@ -5,24 +5,25 @@ from dataclasses import replace
 import networkx as nx
 import pytest
 
+from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Dependency, GraphResult
 from tests.helpers import graph_json, release
 
 
-def test_empty_graph_and_isolated_record() -> None:
+def test_empty_graph_and_isolated_record(*, catalog: Catalog) -> None:
     empty = GraphResult((), ()).to_networkx()
     assert isinstance(empty, nx.DiGraph)
     assert not empty.is_multigraph()
     assert empty.number_of_nodes() == empty.number_of_edges() == 0
     assert empty.graph == {}
-    record = release("isolated")
+    record = release("isolated", catalog=catalog)
     graph = GraphResult((record,), ()).to_networkx()
     assert tuple(graph.nodes) == (record.ref,)
     assert graph.nodes[record.ref]["record"] is record
 
 
-def test_export_preserves_exact_dependency_directions() -> None:
-    source, left, right = (release(name) for name in ("source", "left", "right"))
+def test_export_preserves_exact_dependency_directions(*, catalog: Catalog) -> None:
+    source, left, right = (release(name, catalog=catalog) for name in ("source", "left", "right"))
     edges = (Dependency(source.ref, left.ref), Dependency(source.ref, right.ref))
     snapshot = GraphResult((source, left, right), edges)
     graph = snapshot.to_networkx()
@@ -36,9 +37,9 @@ def test_export_preserves_exact_dependency_directions() -> None:
     )
 
 
-def test_export_is_detached_and_payloads_stay_frozen() -> None:
-    source = release("source", manifest={"nested": {"ports": [1, 2]}})
-    result = release("result")
+def test_export_is_detached_and_payloads_stay_frozen(*, catalog: Catalog) -> None:
+    source = release("source", manifest={"nested": {"ports": [1, 2]}}, catalog=catalog)
+    result = release("result", catalog=catalog)
     edge = Dependency(result.ref, source.ref)
     snapshot = GraphResult((source, result), (edge,))
     before = graph_json(snapshot)

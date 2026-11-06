@@ -1,13 +1,15 @@
 """Catalog input normalization, independent of Conan graph resolution."""
 
+import json
 import re
+from collections.abc import Mapping
 from dataclasses import replace
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from ..api.errors import InvalidPackage
 from ..api.protocols import RefCatalog
 from ..api.query import SearchQuery
-from ..api.records import Record, Ref
+from ..api.records import LocalRecord, Record, Ref
 
 
 def _text(value: str, *, blank: bool = False) -> str:
@@ -27,36 +29,40 @@ def normalize_ref(value: Ref) -> Ref:
         _text(value.view),
         _text(value.type),
         _text(value.version),
-        catalog=value.catalog,
+        catalog=value._catalog,
     )
 
 
 def normalize_record(value: Record, *, catalog: RefCatalog | None = None) -> Record:
-    if value.source is not None:
-        url = _text(value.source.repository_url)
-        if url.startswith("-") or any(char in url for char in ('"', "`", "$", "\n", "\r", "\0")):
-            raise InvalidPackage("Git URL contains characters unsafe for Conan SCM helpers")
-        if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", value.source.resolved_commit):
-            raise InvalidPackage("Git source requires an exact commit")
-        if value.source.provider != "git":
-            raise InvalidPackage("Only one Git source is supported")
-    for name in value.files:
-        validate_file_name(name)
-    if len(set(value.files)) != len(value.files):
-        raise InvalidPackage("Duplicate artifact names")
+    if value.scm is not None:
+        _validate_scm(value.scm)
+    _validate_paths(value.files, artifacts=True)
+    _validate_paths(value.nfs)
     record = replace(value, ref=normalize_ref(value.ref))
     return Record.from_json(
-        record.to_json(), catalog=catalog if catalog is not None else value.ref.catalog
+        json.dumps(record.to_dict(), allow_nan=False),
+        catalog=catalog if catalog is not None else value.ref._catalog,
     )
 
 
+def normalize_local(value: LocalRecord, *, catalog: RefCatalog | None = None) -> LocalRecord:
+    """Freeze project data while retaining its local filesystem paths."""
+    if not isinstance(value, LocalRecord):
+        raise InvalidPackage("Expected one LocalRecord")
+    snapshot = normalize_record(
+        Record(value.ref, value.payload, files=value.files, nfs=value.nfs), catalog=catalog
+    )
+    source_path = value.source
+    if source_path is not None:
+        source_path = source_path.expanduser().absolute()
+    return LocalRecord(snapshot.ref, snapshot.payload, source_path, snapshot.files, snapshot.nfs)
+
+
 def normalize_publication(
-    record: Record, dependencies: tuple[Ref, ...], *, catalog: RefCatalog | None = None
-) -> tuple[Record, tuple[Ref, ...]]:
-    """Validate one new package and its direct dependency references."""
-    if not isinstance(record, Record):
-        raise InvalidPackage("Publish accepts one Record")
-    record = normalize_record(record, catalog=catalog)
+    record: LocalRecord, dependencies: tuple[Ref, ...], *, catalog: RefCatalog | None = None
+) -> tuple[LocalRecord, tuple[Ref, ...]]:
+    """Validate a local package description and its direct dependencies."""
+    record = normalize_local(record, catalog=catalog)
     if any(not isinstance(ref, Ref) for ref in dependencies):
         raise InvalidPackage("Dependencies must be Ref values")
     dependencies = tuple(normalize_ref(ref) for ref in dependencies)
@@ -65,6 +71,25 @@ def normalize_publication(
     if record.ref in dependencies:
         raise InvalidPackage("A package cannot depend on itself")
     return record, dependencies
+
+
+def _validate_scm(source: Mapping[str, str]) -> None:
+    url = _text(source.get("url", ""))
+    if url.startswith("-") or any(char in url for char in ('"', "`", "$", "\n", "\r", "\0")):
+        raise InvalidPackage("Git URL contains characters unsafe for Conan SCM helpers")
+    if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", _text(source.get("commit", ""))):
+        raise InvalidPackage("Git source requires an exact commit")
+    if set(source) - {"url", "commit", "requested_ref"}:
+        raise InvalidPackage("Unsupported SCM fields")
+
+
+def _validate_paths(paths: Mapping[str, Path], *, artifacts: bool = False) -> None:
+    for name, path in paths.items():
+        _text(name)
+        if artifacts:
+            validate_file_name(name)
+        if not isinstance(path, Path) or not path.is_absolute():
+            raise InvalidPackage("Resource paths must be absolute Path values")
 
 
 def normalize_query(value: SearchQuery) -> SearchQuery:
@@ -79,11 +104,7 @@ def normalize_query(value: SearchQuery) -> SearchQuery:
 
 def validate_file_name(name: str) -> None:
     path = PurePosixPath(_text(name))
-    if (
-        path.is_absolute()
-        or ".." in path.parts
-        or any(char in name for char in ("\\", ":", "\0"))
-        or str(path) != name
-        or name == "."
-    ):
-        raise InvalidPackage("Artifact names must be canonical relative POSIX paths")
+    if path.is_absolute() or any(char in name for char in ("\\", ":", "\0")):
+        raise InvalidPackage("Artifact names must be relative POSIX paths")
+    if ".." in path.parts or str(path) != name or not path.parts:
+        raise InvalidPackage("Artifact names must be canonical without parent traversal")

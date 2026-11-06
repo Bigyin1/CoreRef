@@ -1,100 +1,74 @@
 # Публичный API
 
-Модели находятся в `hwcatalog.api`. Все операции используют заранее
-настроенный Conan. Контекстный менеджер и закрытие соединения не требуются.
-
 ## Catalog
 
-`Catalog(home=None, *, remote=None, timeout=60)` хранит настройки клиента.
+`Catalog(home=None, *, remote=None, timeout=60)` работает с уже настроенным Conan.
 
-| Метод | Результат |
+| Метод | Контракт |
 |---|---|
 | search(query=SearchQuery()) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
-| publish(record, *, dependencies=(), source_path=None, files=None, lockfile=None) | Один новый опубликованный Record |
+| publish(record: LocalRecord, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает Record |
 
-Зависимости уже должны существовать. `source_path` — Path локального Git checkout,
-`files` — dict[str, Path] из имён внутри пакета и исходных файлов. Paths относительно
-cwd обрабатываются обычным pathlib; flow может заранее разрешить их относительно
-своего TOML. Встроенного парсера манифеста публикации нет.
+Source, files и nfs принадлежат LocalRecord. Source — рабочий Git checkout, files —
+карта относительных имён внутри пакета и абсолютных локальных Path. Nfs — карта имён
+внешних ресурсов и абсолютных Path; файлы nfs не загружаются в Conan.
+Зависимости должны существовать. Передача опубликованного Record в publish отклоняется.
 
-Вместо checkout можно задать закреплённый `Record.source`. Одновременно передавать
-оба источника нельзя. Имена files — относительные POSIX-пути без `..`, пересечений
-и абсолютных путей. Если Record.files уже заполнен, он должен соответствовать карте files.
+## Ref и Record
+
+`Ref(namespace, component, view, type, version, *, catalog)` задаёт координаты
+namespace.component.view.type/version. Контекст RefCatalog не участвует в identity,
+хеше или JSON. Ссылки результатов создаются сразу с нужным контекстом.
+
+| Метод Ref | Контракт |
+|---|---|
+| get(*, with_sources=False) | Готовый Record; files содержит пути cache, source заполняется при запросе исходников |
+| dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
+| find_dependents(*, candidates, transitive=True) | Кандидаты, зависящие от точного Ref |
+| to_dict() | Только координаты |
+
+Непосредственные зависимости и обратный поиск читают requirements; транзитивный поиск
+использует нативный граф. Сам Ref исключается. Отсутствующий пакет вызывает NotFound.
+Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все пять полей.
+
+Record — представление уже полученного пакета: ref, payload, source (Path | None),
+files (Mapping[str, Path]), nfs (Mapping[str, Path]), scm (Mapping[str, str] | None).
+SCM содержит URL/commit Conan; отдельного класса Git-ресурса нет.
+
+Record.from_json(data, *, catalog, package_dir=None) читает метаданные пакета.
+Для списка имён файлов нужен package_dir; локальные пути будут заполнены под artifacts/.
+Также поддерживается словарь уже полученных путей из inspection-снимка.
+Record.to_dict() возвращает данные для просмотра или CLI. Публичных to_json и materialize
+у Record нет; получение исходников выполняется через Ref.get(with_sources=True).
+Физические пути files/source не участвуют в равенстве опубликованных записей:
+один пакет может находиться в разных cache. SCM, payload и nfs сравниваются по содержимому.
+
+LocalRecord содержит ref, payload, source, files, nfs. Его создаёт flow из текущего
+проекта. LocalRecord.to_json() — подготовка переносимых метаданных для публикации:
+source и исходные пути files исключаются, сохраняются имена файлов. Nfs остаётся
+картой абсолютных путей. У локальной записи нет получения или материализации данных.
 
 ## Graph
 
-`Graph(catalog, record, *, dependencies=(), lockfile=None)` описывает один локальный
-проект: корневую Record, его прямые зависимости и необязательный Path lockfile.
-Каждый экземпляр может соответствовать отдельному deps.toml с любым именем.
-Это обычный класс с поведением проекта, не dataclass результата разрешения.
+`Graph(catalog, record: LocalRecord, *, dependencies=(), lockfile=None)` соответствует
+одному описанию проекта. Один процесс может иметь несколько таких Graph и lockfile.
 
-| Метод | Результат |
+| Метод | Контракт |
 |---|---|
-| resolve() | GraphResult с корнем и транзитивными зависимостями |
-| create_lockfile(path=None) | Path созданного или обновлённого lockfile |
+| resolve() | GraphResult с LocalRecord корня и Record опубликованных зависимостей |
+| create_lockfile(path=None) | Создаёт/обновляет lockfile dependencies, запоминает путь и возвращает Path |
 
-`resolve()` создаёт временный consumer-рецепт и вызывает один `graph info` без
-экспорта и публикации корня. Локальные данные корня имеют приоритет над сохранённым
-пакетом с такими координатами. Циклы и несовместимые requirements проверяет Conan.
+Корень не требуется публиковать; его локальные данные имеют приоритет над реестром.
+Conan проверяет циклы и конфликты requirements. Разрешение использует временный рецепт
+и один graph info без export/upload. Формат deps.toml принадлежит flow, включая зависимости,
+добавленные на основе поиска. Формат lockfile обрабатывает только Conan.
 
-`create_lockfile` использует dependencies экземпляра, включая найденные flow
-зависимости, а не отдельный массив Ref. Переданный путь запоминается в `graph.lockfile`
-для следующих resolve; без аргумента используется уже заданный путь. При отсутствии
-обоих путей возникает CatalogError. Корень не входит в lockfile как публикуемый пакет.
-Формат lockfile обрабатывает только Conan. При обычном resolve/publish файл не изменяется.
-
-Для разрешения по сохранённым данным:
-
-```python
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import Ref
-
-ref = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
-record = ref.get()
-dependencies = tuple(item.ref for item in ref.dependencies())
-graph = Graph(catalog, record, dependencies=dependencies, lockfile=lockfile).resolve()
-```
-
-## Ref
-
-`Ref(namespace, component, view, type, version, *, catalog=None)` — неизменяемые
-координаты `namespace.component.view.type/version` с необязательным контекстом.
-
-| Метод | Результат |
-|---|---|
-| get() | Record; NotFound при отсутствии |
-| dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
-| find_dependents(*, candidates, transitive=True) | tuple[Record, ...] кандидатов, зависящих от этого точного Ref |
-| materialize(*, with_sources=False) | MaterializedPackage(path, source_path) |
-| to_dict() | dict[str, str] только с координатами |
-
-Ref.catalog имеет тип структурного протокола RefCatalog: публичный search и
-внутренний контекст Conan. Сам Catalog соответствует протоколу; дополнительного
-объекта view или шага привязки нет. Все возвращаемые ссылки, включая концы рёбер
-GraphResult, создаются с этим контекстом. Он исключён из равенства, хеша и JSON.
-`Record.from_json(data, catalog=catalog)` также создаёт готовую ссылку.
-Без каталога можно хранить и сравнивать координаты; операции Conan вызывают CatalogError.
-
-Find_dependents сначала фильтрует кандидатов, затем проверяет их зависимости.
-При transitive=False учитываются прямые requirements без graph info; транзитивный
-поиск использует нативные графы Conan. Сам Ref исключается. Пустой SearchQuery
-разрешает просмотр всего каталога. Filters в dependencies применяются к найденным
-записям. Отсутствующий Ref вызывает NotFound.
-
-## Ресурсы и ошибки
-
-GitResource хранит SCM-координаты без собственного Git-кэша. Исходники получает
-`ref.materialize(with_sources=True)` через Conan source(). LocatedResource.materialize()
-проверяет внешний путь и возвращает MaterializedResource(path).
-
-Все ошибки наследуются от CatalogError:
+## Ошибки
 
 - CatalogError — сбой Conan, конфигурации или получения файлов.
 - NotFound — отсутствующий пакет.
 - Conflict — повторная публикация или несовместимые revisions/версии.
-- InvalidPackage — некорректные координаты, входы, рецепт или граф.
+- InvalidPackage — неверные локальные входы, координаты, рецепт или граф.
 
-Один Ref соответствует одной revision; несколько revisions вызывают Conflict.
-Materialize выполняет один install без проектного lockfile: requirements уже закреплены.
-Случайный conan.lock из cwd явно отключён. Автоматических retry и rollback нет.
-Backend, CatalogGraph, типизированных рёбер и старого формата Ref нет.
+Один Ref соответствует одной revision. Случайный conan.lock из cwd явно отключён.
+Автоматических retry, rollback и управления конкурентными издателями нет.
