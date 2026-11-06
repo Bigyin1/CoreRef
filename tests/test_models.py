@@ -9,8 +9,7 @@ import pytest
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import Conflict
-from hwcatalog.api.protocols import JSONSerializable
-from hwcatalog.api.records import LocalRecord, Record, Ref
+from hwcatalog.api.records import JSONSerializable, LocalRecord, Record, Ref
 from hwcatalog.api.types import JSON
 from tests.helpers import local_record
 

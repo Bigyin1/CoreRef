@@ -4,16 +4,22 @@ import json
 from collections.abc import Mapping
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Self, cast
+from typing import TYPE_CHECKING, Protocol, Self, cast, runtime_checkable
 
 from frozendict import deepfreeze, frozendict
 
-from .protocols import JSONSerializable
 from .types import JSON
 
 if TYPE_CHECKING:
     from .catalog import Catalog
     from .query import SearchQuery
+
+
+@runtime_checkable
+class JSONSerializable(Protocol):
+    """A consumer-owned payload that can serialize itself to a JSON document."""
+
+    def to_json(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -152,4 +158,4 @@ class Record:
         )
 
 
-__all__ = ["LocalRecord", "Record", "Ref"]
+__all__ = ["JSONSerializable", "LocalRecord", "Record", "Ref"]
