@@ -28,6 +28,8 @@ BE-представление, и его части: по умолчанию `su
 одинаковые входы дают ту же revision. Старые revisions остаются доступны.
 
 `catalog.search(query)` возвращает последнюю revision каждого имени/версии.
+Аргумент query обязателен в search и search_refs; для поиска без ограничений
+явно передают `SearchQuery()`, например `catalog.search(SearchQuery())`.
 `catalog.search_refs(query)` делает такой же поиск, возвращая только Ref без загрузки
 рецептов и payload. Найденные ссылки можно сразу передавать другим операциям SDK.
 `catalog.search(query, all_revisions=True)` возвращает историю;

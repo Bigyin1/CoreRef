@@ -47,13 +47,13 @@ def test_search_selects_latest_history_and_explicit_revision(catalog: Catalog) -
     assert first.ref != second.ref
     assert first.ref.get() == first
     assert ref.get() == second
-    assert catalog.search() == (second,)
-    assert set(catalog.search(all_revisions=True)) == {first, second}
+    assert catalog.search(SearchQuery()) == (second,)
+    assert set(catalog.search(SearchQuery(), all_revisions=True)) == {first, second}
     query = SearchQuery(revision=first.ref.revision)
     assert catalog.search(query) == (first,)
     assert catalog.search(query, all_revisions=True) == (first,)
     assert catalog.publish(LocalRecord(ref, {"generation": 2})).ref == second.ref
-    assert len(catalog.search(all_revisions=True)) == 2
+    assert len(catalog.search(SearchQuery(), all_revisions=True)) == 2
 
 
 def test_query_builds_revision_patterns_directly() -> None:
@@ -76,7 +76,7 @@ def test_local_roots_cannot_claim_a_revision(catalog: Catalog, operation: str) -
             catalog.publish(local)
         else:
             Graph(catalog, local)
-    assert catalog.search() == ()
+    assert catalog.search(SearchQuery()) == ()
 
 
 def test_lockfile_and_graph_keep_old_files_after_new_revision(

@@ -7,6 +7,7 @@ import pytest
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError, InvalidPackage
 from hwcatalog.api.graph import Graph
+from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record
 
@@ -46,7 +47,7 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
     assert {record.ref for record in right.records} == {right.record.ref, second.ref}
     right.create_lockfile()
     assert left_path.read_bytes() == left_lock
-    assert catalog.search() == (first, second)
+    assert catalog.search(SearchQuery()) == (first, second)
 
 
 def test_graph_lockfile_requires_a_path(catalog: Catalog) -> None:

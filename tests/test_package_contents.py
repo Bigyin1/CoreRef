@@ -12,6 +12,7 @@ from hwcatalog._internal.types import NativeGraph
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.graph import Graph
+from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import InstalledRecord, LocalRecord, Record, Ref
 from tests.test_models import UserPayload
 
@@ -39,7 +40,9 @@ def test_metadata_operations_leave_artifacts_on_the_server(
         metadata = ref.info()
         assert type(metadata) is Record and metadata.file_names == ("cpu.lib",)
         assert not hasattr(metadata, "files") and not hasattr(metadata, "source")
-        assert reader.search() == tuple(sorted((leaf, parent), key=lambda item: item.ref))
+        assert reader.search(SearchQuery()) == tuple(
+            sorted((leaf, parent), key=lambda item: item.ref)
+        )
         assert Ref.from_fields(**parent.ref.to_dict(), catalog=reader).dependencies() == (metadata,)
         graph = Graph(
             reader,
@@ -182,4 +185,4 @@ def test_incomplete_package_is_rejected_before_upload(
                 )
             )
         upload.assert_not_called()
-    assert catalog.search() == ()
+    assert catalog.search(SearchQuery()) == ()

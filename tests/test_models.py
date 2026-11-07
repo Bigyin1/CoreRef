@@ -9,6 +9,7 @@ import pytest
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import InvalidPackage
+from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import JSON, JSONSerializable, LocalRecord, Record, Ref
 from tests.helpers import local_record
 
@@ -83,7 +84,7 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
                 )
             )
         )
-    assert not catalog.search()
+    assert not catalog.search(SearchQuery())
 
 
 def test_namespace_is_part_of_identity(catalog: Catalog) -> None:

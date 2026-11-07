@@ -6,9 +6,12 @@
 
 | Метод | Контракт |
 |---|---|
-| search(query=SearchQuery(), *, all_revisions=False) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
-| search_refs(query=SearchQuery(), *, all_revisions=False) | tuple[Ref, ...] тех же координат без чтения рецептов и payload |
+| search(query, *, all_revisions=False) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
+| search_refs(query, *, all_revisions=False) | tuple[Ref, ...] тех же координат без чтения рецептов и payload |
 | publish(record: LocalRecord | Graph, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает InstalledRecord |
+
+Аргумент query обязателен для search и search_refs. Поиск без ограничений явно
+задаётся через SearchQuery(): `catalog.search(SearchQuery())`.
 
 Source и files принадлежат LocalRecord. Source — рабочий Git checkout, files —
 карта относительных имён внутри пакета и абсолютных локальных Path. Внешние ресурсы

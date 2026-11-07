@@ -96,7 +96,7 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
             record = catalog.publish(local_record(record))
     directory = remote_catalog._client.cache_path(str(record.ref))
     assert StoredRecipe(directory, record.ref, reference=str(record.ref)).record == record
-    assert catalog.search() == ()
+    assert catalog.search(SearchQuery()) == ()
 
     # A prepared local package must not block another attempt to publish to the server.
     record = catalog.publish(local_record(record))
@@ -215,7 +215,7 @@ def test_warm_operations_do_not_redownload_recipes(
     actions: dict[str, Callable[[], object]] = {
         "get": root.ref.get,
         "resolve": lambda: Graph(remote_catalog, local_record(root), dependencies=(leaf.ref,)),
-        "search": remote_catalog.search,
+        "search": lambda: remote_catalog.search(SearchQuery()),
         "publish": lambda: remote_catalog.publish(local_record(root), dependencies=(leaf.ref,)),
     }
     actions[operation]()
@@ -325,8 +325,8 @@ def test_remote_latest_and_locked_graphs_survive_new_revisions(
         first.ref,
     )
     assert graph.get((dependency,))[0].ref == first.ref
-    assert reader.search() == (second,)
-    assert set(reader.search(all_revisions=True)) == {first, second}
+    assert reader.search(SearchQuery()) == (second,)
+    assert set(reader.search(SearchQuery(), all_revisions=True)) == {first, second}
     missing = Ref.from_fields(**logical.to_dict(), revision="a" * 32, catalog=reader)
     with pytest.raises(CatalogError):
         missing.get()
@@ -380,6 +380,6 @@ def test_deleted_remote_revision_remains_available_by_exact_cached_ref(
     remote_catalog._client.run("remove", str(record.ref), "--remote", "catalog", "--confirm")
     assert record.ref.get() == record
     assert record.ref.graph().record == record
-    assert remote_catalog.search() == ()
+    assert remote_catalog.search(SearchQuery()) == ()
     with pytest.raises(NotFound):
         record.ref.without_revision().get()

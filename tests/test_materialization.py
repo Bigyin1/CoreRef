@@ -7,6 +7,7 @@ import pytest
 from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import InvalidPackage
+from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
@@ -68,7 +69,7 @@ def test_published_record_is_not_a_local_publication_input(catalog: Catalog) -> 
     record = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
     with pytest.raises(InvalidPackage, match="LocalRecord"):
         catalog.publish(record)  # type: ignore[arg-type]  # Deliberate contract misuse.
-    assert catalog.search() == ()
+    assert catalog.search(SearchQuery()) == ()
 
 
 def test_local_metadata_uses_names_and_record_decodes_package_paths(

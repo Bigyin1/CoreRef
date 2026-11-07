@@ -21,7 +21,7 @@ def test_get_returns_published_records_and_reports_missing(catalog: Catalog) -> 
     assert Ref.from_fields(**second.ref.to_dict(), catalog=catalog).get() == second
     with pytest.raises(NotFound):
         Ref.from_fields(**release("absent", catalog=catalog).ref.to_dict(), catalog=catalog).get()
-    assert catalog.search() == (first, second)
+    assert catalog.search(SearchQuery()) == (first, second)
 
 
 def test_new_revision_preserves_previously_published_records(catalog: Catalog) -> None:
@@ -29,7 +29,7 @@ def test_new_revision_preserves_previously_published_records(catalog: Catalog) -
     original = catalog.publish(local_record(original))
     changed = catalog.publish(local_record(Record(original.ref, {"changed": True})))
     assert changed.ref != original.ref
-    assert catalog.search() == (changed,)
+    assert catalog.search(SearchQuery()) == (changed,)
     assert Ref.from_fields(**original.ref.to_dict(), catalog=catalog).get() == original
 
 
@@ -38,7 +38,7 @@ def test_publish_rejects_record_collections(catalog: Catalog, count: int) -> Non
     records = tuple(release(f"record-{index}", catalog=catalog) for index in range(count))
     with pytest.raises(InvalidPackage, match="one LocalRecord"):
         catalog.publish(cast(LocalRecord, records))
-    assert not catalog.search()
+    assert not catalog.search(SearchQuery())
 
 
 @pytest.mark.parametrize("problem", ["duplicate", "missing", "self", "edge-value"])
@@ -58,7 +58,7 @@ def test_invalid_dependencies_do_not_publish(catalog: Catalog, problem: str) -> 
         dependencies = (cast(Ref, Dependency(source.ref, target.ref)),)
     with pytest.raises(exception):
         source = catalog.publish(local_record(source), dependencies=dependencies)
-    assert catalog.search() == (target,)
+    assert catalog.search(SearchQuery()) == (target,)
 
 
 def test_dependencies_must_already_exist(catalog: Catalog) -> None:

@@ -19,18 +19,14 @@ class Catalog:
     ) -> None:
         self._client = ConanClient(Path(home) if home is not None else None, remote, timeout)
 
-    def search(
-        self, query: SearchQuery = SearchQuery(), *, all_revisions: bool = False
-    ) -> tuple[Record, ...]:
+    def search(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Record, ...]:
         """Find latest matching revisions, or history when all_revisions is requested."""
         return tuple(
             self._package(ref).info()
             for ref in self.search_refs(query, all_revisions=all_revisions)
         )
 
-    def search_refs(
-        self, query: SearchQuery = SearchQuery(), *, all_revisions: bool = False
-    ) -> tuple[Ref, ...]:
+    def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
         """Find exact coordinates without downloading recipes or reading payloads."""
         pattern = query.conan_pattern(all_revisions=all_revisions)
         if pattern is None:

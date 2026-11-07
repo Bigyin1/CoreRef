@@ -11,6 +11,7 @@ from examples.conan_config import configured_home
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import CatalogError
 from hwcatalog.api.graph import Graph
+from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record
 from tests.test_models import UserPayload
@@ -86,5 +87,5 @@ def test_publish_without_remote_fails_before_preparing_inputs(tmp_path: Path) ->
         with pytest.raises(CatalogError, match="requires a configured Conan remote"):
             catalog._client.upload(str(record.ref))
     assert payload.calls == 0
-    assert catalog.search() == ()
+    assert catalog.search(SearchQuery()) == ()
     assert Graph(catalog, record).edges == ()

@@ -10,6 +10,7 @@ import pytest
 from examples.local_server import local_server
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
+from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import Record, Ref
 from tests.helpers import local_record
 
@@ -57,7 +58,7 @@ def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog
         ),
         dependencies=(leaf.ref,),
     )
-    for record in (*catalog.search(), root.ref.get(), *root.ref.dependencies()):
+    for record in (*catalog.search(SearchQuery()), root.ref.get(), *root.ref.dependencies()):
         assert record.ref._catalog is catalog
         assert record.ref.get() == record
     graph = Graph(

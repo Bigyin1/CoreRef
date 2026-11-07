@@ -7,6 +7,7 @@ import pytest
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
 from hwcatalog.api.graph import Dependency, Graph
+from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import Record, Ref
 from tests.helpers import local_record
 
@@ -40,7 +41,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     assert stored_root.payload == {"local": ("working-tree",)}
     with pytest.raises(NotFound):
         Ref.from_fields(**root.ref.to_dict(), catalog=catalog).get()
-    assert len(catalog.search()) == 3
+    assert len(catalog.search(SearchQuery())) == 3
 
 
 def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
@@ -48,7 +49,7 @@ def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     graph = Graph(local_catalog, local_record(root))
     assert graph.records == (local_record(root),)
     assert graph.edges == ()
-    assert local_catalog.search() == ()
+    assert local_catalog.search(SearchQuery()) == ()
 
 
 def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:

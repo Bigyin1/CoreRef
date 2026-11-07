@@ -25,11 +25,11 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
         patch.object(reader._client, "download_recipe", side_effect=AssertionError("Metadata")),
         patch.object(reader._client, "run", wraps=reader._client.run) as commands,
     ):
-        refs = reader.search_refs()
+        refs = reader.search_refs(SearchQuery())
         assert refs == (second.ref, part.ref)
         assert all(ref._catalog is reader for ref in refs)
         assert [call.args[0] for call in commands.call_args_list] == ["list"]
-        assert reader.search_refs(all_revisions=True) == tuple(
+        assert reader.search_refs(SearchQuery(), all_revisions=True) == tuple(
             sorted((first.ref, second.ref, part.ref))
         )
         assert reader.search_refs(SearchQuery(subcomponent=None)) == (second.ref,)
@@ -38,7 +38,9 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
         commands.reset_mock()
         assert reader.search_refs(SearchQuery(component="cpu*")) == ()
         commands.assert_not_called()
-    assert reader.search_refs() == tuple(record.ref for record in reader.search())
+    assert reader.search_refs(SearchQuery()) == tuple(
+        record.ref for record in reader.search(SearchQuery())
+    )
 
 
 def test_dependency_refs_downloads_only_the_parent_recipe(
