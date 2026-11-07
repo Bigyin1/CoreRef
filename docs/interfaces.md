@@ -47,22 +47,13 @@ namespace.component[_subcomponent].view.type/version[#revision]
 
 ```mermaid
 classDiagram
-    Catalog <-- Ref : привязан к
-    Catalog ..> SearchQuery : принимает при поиске
-    Catalog ..> LocalRecord : публикует
-    Catalog ..> Record : возвращает поиск
-    Catalog ..> InstalledRecord : возвращает publish
+    Ref --> Catalog : использует
     Ref ..> Graph : graph()
     Graph o-- LocalRecord : локальный корень
     Graph o-- Record : опубликованные узлы
-    Graph o-- Dependency : рёбра
-    Dependency --> Ref : source и target
-    LocalRecord --> Ref
-    Record --> Ref
+    LocalRecord --> Ref : координаты
+    Record --> Ref : координаты
     InstalledRecord --|> Record
-    Graph ..> InstalledRecord : get / get_with_sources
-    Graph --> Workspace : необязательные editable
-    Workspace --> Ref : участники
 ```
 
 Стрелка зависимости в данных графа направлена от потребителя к требуемому пакету.
