@@ -206,6 +206,13 @@ class Ref:
         query = SearchQuery() if filters is None else filters
         return self._catalog._package(self).dependencies(query)
 
+    def dependency_refs(self, filters: SearchQuery | None = None) -> tuple[Ref, ...]:
+        """Read exact direct requirements without fetching their records or package contents."""
+        from .query import SearchQuery
+
+        query = SearchQuery() if filters is None else filters
+        return self._catalog._package(self).dependency_refs(query)
+
 
 @dataclass
 class LocalRecord:

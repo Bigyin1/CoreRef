@@ -116,13 +116,15 @@ class Graph:
         self,
         ref: Ref | None = None,
         *,
+        transitive: bool = False,
         filters: SearchQuery | None = None,
     ) -> tuple[Record, ...]:
-        """Read direct dependencies of a snapshot node; omitted ref selects the root."""
+        """Read dependencies without I/O; transitive results exclude the root, leaves first."""
         selected = self.record.ref if ref is None else self._package.resolve_ref(ref)
         query = SearchQuery() if filters is None else filters
         records = []
-        for target in self._neighbors[selected]:
+        targets = self.ordered_refs(selected)[:-1] if transitive else self._neighbors[selected]
+        for target in targets:
             record = self._records_by_ref[target]
             if isinstance(record, Record) and query.matches(record):
                 records.append(record)
@@ -158,12 +160,12 @@ class Graph:
         self._lockfile = self._package.create_lockfile(output)
         return self._lockfile
 
-    def get(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
-        """Fetch selected package files together without requesting SCM sources."""
+    def get(self, refs: tuple[Ref, ...] | None = None) -> tuple[InstalledRecord, ...]:
+        """Fetch selected files, or all published nodes in dependency-first order when omitted."""
         return self._get(refs, with_sources=False)
 
-    def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
-        """Fetch selected published packages in one install and reuse this snapshot."""
+    def get_with_sources(self, refs: tuple[Ref, ...] | None = None) -> tuple[InstalledRecord, ...]:
+        """Fetch files and sources; omitted refs select all published nodes, leaves first."""
         return self._get(refs, with_sources=True)
 
     @property
@@ -171,7 +173,15 @@ class Graph:
         """The workspace source overrides captured when this graph was resolved."""
         return tuple(self._editables[ref] for ref in sorted(self._editables))
 
-    def _get(self, refs: tuple[Ref, ...], *, with_sources: bool) -> tuple[InstalledRecord, ...]:
+    def _get(
+        self, refs: tuple[Ref, ...] | None, *, with_sources: bool
+    ) -> tuple[InstalledRecord, ...]:
+        if refs is None:
+            refs = tuple(
+                record.ref
+                for record in self.ordered_records(self.record.ref)
+                if isinstance(record, Record)
+            )
         selected = tuple(dict.fromkeys(self._package.resolve_ref(ref) for ref in refs))
         remote = tuple(ref for ref in selected if ref not in self._editables)
         records = (

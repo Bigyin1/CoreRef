@@ -74,6 +74,7 @@ def test_graph_uses_editable_source_and_preserves_working_changes(
         assert ready.source is not None
         assert "modified_cpu" in (ready.source / "cpu.sv").read_text()
         assert graph.get((rtl.ref,))[0] is ready
+        assert graph.get() == graph.get_with_sources() == (ready,)
         assert graph.editables == (ready,)
     assert graph.requirements == (rtl.ref,)
     assert Workspace(catalog, workspace.path).add(rtl.ref).source == ready.source

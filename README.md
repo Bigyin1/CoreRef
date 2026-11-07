@@ -17,14 +17,19 @@ BE-представление, и его части: по умолчанию `su
 выбирает только целые компоненты. Фильтрация выполняется до загрузки метаданных.
 Связь с исходным RTL по-прежнему задаётся обычной зависимостью пакета.
 
-`Ref("soc.cpu.rtl.default/1.0", catalog=catalog)` обозначает последнюю recipe revision (RREV),
-а `revision="…"` закрепляет конкретную. `without_revision()` возвращает логические
+Обычный сценарий предполагает одну revision на имя и версию пакета. Пользователь задаёт
+`Ref("soc.cpu.rtl.default/1.0", catalog=catalog)` без `#revision`, а SDK автоматически
+выбирает и сохраняет конкретную recipe revision (RREV). Если revisions несколько,
+по умолчанию выбирается последняя средствами Conan; история запрашивается отдельно.
+Суффикс `#revision` нужен для явного выбора определённой revision. `without_revision()` возвращает логические
 координаты с тем же каталогом. Полученные Record и опубликованные узлы Graph всегда
 содержат точную revision; локальный корень её не задаёт. Она участвует в равенстве и хеше.
 Повторный publish одной версии разрешён: Conan вычисляет revision по содержимому,
 одинаковые входы дают ту же revision. Старые revisions остаются доступны.
 
 `catalog.search(query)` возвращает последнюю revision каждого имени/версии.
+`catalog.search_refs(query)` делает такой же поиск, возвращая только Ref без загрузки
+рецептов и payload. Найденные ссылки можно сразу передавать другим операциям SDK.
 `catalog.search(query, all_revisions=True)` возвращает историю;
 `SearchQuery(revision="…")` задаёт точный фильтр в обоих режимах.
 Без lockfile незакреплённые зависимости проверяются на настроенном remote;
@@ -75,7 +80,7 @@ lockfile = project.create_lockfile(Path("/work/cpu/conan.lock"))
 print(project.records, project.edges)
 ```
 
-`Catalog` предоставляет только `search` и `publish`. Публикация принимает один LocalRecord или готовый локальный Graph
+`Catalog` предоставляет `search`, `search_refs` и `publish`. Публикация принимает один LocalRecord или готовый локальный Graph
 и уже опубликованные dependencies. При наличии зависимостей один graph info выбирает
 их revisions с учётом lockfile; в рецепт записываются точные ссылки. Рецепт генерируется Jinja-шаблоном; один export-pkg
 создаёт пакет, upload отправляет его на remote. Локальный source передаётся SCM-механизму
@@ -96,14 +101,17 @@ Record без скачивания бинарных файлов или Git-ис
 InstalledRecord выбранных опубликованных узлов одной установкой. Graph.records сохраняет
 Record с метаданными; результат установки возвращается отдельно. Публичного
 materialize нет; рабочее дерево LocalRecord корня уже доступно.
+Без аргументов `graph.get()` и `graph.get_with_sources()` получают все опубликованные
+узлы, начиная с зависимостей. Локальный корень исключается; опубликованный включается.
+Явный пустой кортеж `()` означает пустую выборку и не вызывает Conan.
 
 Полный граф опубликованного пакета получают напрямую через `Ref.graph()`:
 
 ```python
-snapshot = published.ref.graph()
-root = snapshot.record.ref  # Точный Ref самого опубликованного пакета.
-ordered = snapshot.ordered_refs(root)  # Зависимости первыми, корень последним.
-installed = snapshot.get_with_sources(ordered)  # Включая сам корневой пакет.
+cpu = Ref("soc.cpu.rtl.default/1.0", catalog=catalog)
+snapshot = cpu.graph()
+inputs = snapshot.dependencies(transitive=True)
+installed = snapshot.get_with_sources()  # Зависимости первыми, корень последним.
 for item in installed:
     print(item.ref, item.files, item.source)
 snapshot.create_lockfile("/work/stored.lock")
@@ -256,7 +264,7 @@ Ruff 0.17.2 закреплён в uv.lock. Включены строгие пр�
 ## Работа с разрешённым снимком
 
 ```python
-ref = Ref("soc.cpu_alu.rtl.default/1.0#abc123", catalog=catalog)
+ref = Ref("soc.cpu_alu.rtl.default/1.0", catalog=catalog)
 query = SearchQuery.for_component(ref, view="be", type="lib-lef")
 # query сохраняет component/subcomponent, а версия и revision BE выбираются независимо.
 candidates = catalog.search(query)
@@ -272,7 +280,7 @@ published = catalog.publish(project)
 `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)`.
 Оба пути используют один разбор и одинаковые проверки; прежний parse не требуется.
 
-`graph.info(ref)` и `graph.dependencies(ref=None, *, filters=None)` читают только снимок,
+`graph.info(ref)` и `graph.dependencies(ref=None, *, transitive=False, filters=None)` читают только снимок,
 без обращения к Conan. Незакреплённая ссылка сопоставляется с выбранным узлом;
 несовпадающая явная revision вызывает InvalidPackage. `graph.edges` содержит рёбра,
 `graph.requirements` — точные Ref непосредственных входов корня.
@@ -288,3 +296,13 @@ published = catalog.publish(project)
 Представления ищутся по `SearchQuery.for_component`. Точный смысл связи с исходным RTL,
 включая совпадение revision, проверяет flow по требованиям кандидата или своему payload.
 Общего метода find_dependents в SDK нет.
+
+`Ref.dependency_refs(filters=None)` читает прямые требования исходного рецепта без
+загрузки записей зависимостей. Возвращаемые Ref уже содержат выбранные revisions.
+Для незакреплённых требований внешних рецептов Conan выбирает latest; сами дочерние
+record.json не читаются. Для получения payload используют `Ref.dependencies()`.
+
+`Graph.dependencies(transitive=True, filters=...)` возвращает всё поддерево без корня,
+каждый пакет один раз, зависимости первыми. Фильтр применяется после обхода:
+неподходящий промежуточный узел не скрывает подходящие зависимости под ним.
+Все эти выборки Graph используют сохранённый снимок без обращений к Conan.

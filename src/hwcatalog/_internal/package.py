@@ -5,7 +5,7 @@ from dataclasses import replace
 from functools import cached_property
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING
 
 from frozendict import deepfreeze, frozendict
 
@@ -30,11 +30,6 @@ class StoredPackage:
         self._client = self._catalog._client
         self._recipes: dict[Ref, StoredRecipe] = {}
         self._resolved: dict[Ref, Ref] = {}
-
-    def load(self) -> Self:
-        """Fetch this exact package revision obtained from a catalog search."""
-        self._load(str(self.ref))
-        return self
 
     def recipe(self) -> StoredRecipe:
         return self._load(str(self.ref))
@@ -75,15 +70,21 @@ class StoredPackage:
         return PackageGraph(record, graph, packages={record.ref: self})
 
     def dependencies(self, query: SearchQuery) -> tuple[Record, ...]:
-        records = []
+        return tuple(self._load(str(ref)).record for ref in self.dependency_refs(query))
+
+    def dependency_refs(self, query: SearchQuery) -> tuple[Ref, ...]:
+        refs = set()
         logical_query = replace(query, revision=None)
         for reference in dict.fromkeys(self.recipe().requirements):
             ref = from_conan_reference(reference, catalog=self._catalog)
             # Floating requirements need Conan's latest choice before filtering RREV.
             prefilter = logical_query if ref.revision is None else query
-            if prefilter.matches_ref(ref):
-                records.append(self._load(reference).record)
-        return query.select(records)
+            if not prefilter.matches_ref(ref):
+                continue
+            resolved = self._resolve_ref(ref)
+            if query.matches_ref(resolved):
+                refs.add(resolved)
+        return tuple(sorted(refs))
 
     def _get(self, *, with_sources: bool) -> InstalledRecord:
         recipe = self.recipe()
@@ -102,18 +103,19 @@ class StoredPackage:
             ref = from_conan_reference(reference, catalog=self._catalog)
             self.record_at(reference, directory=graph.recipe_directory(ref))
 
+    def _resolve_ref(self, ref: Ref) -> Ref:
+        if ref.revision is not None:
+            return ref
+        if ref not in self._resolved:
+            revisions = self._client.index(f"{ref}*#latest").get(str(ref))
+            if revisions is None or not revisions.revisions:
+                raise NotFound(ref)
+            revision = next(iter(revisions.revisions))
+            self._resolved[ref] = from_conan_reference(f"{ref}#{revision}", catalog=self._catalog)
+        return self._resolved[ref]
+
     def _load(self, reference: str, *, directory: Path | None = None) -> StoredRecipe:
-        ref = from_conan_reference(reference, catalog=self._catalog)
-        if ref.revision is None:
-            if ref not in self._resolved:
-                revisions = self._client.index(f"{ref}*#latest").get(str(ref))
-                if revisions is None or not revisions.revisions:
-                    raise NotFound(ref)
-                revision = next(iter(revisions.revisions))
-                self._resolved[ref] = from_conan_reference(
-                    f"{ref}#{revision}", catalog=self._catalog
-                )
-            ref = self._resolved[ref]
+        ref = self._resolve_ref(from_conan_reference(reference, catalog=self._catalog))
         if ref not in self._recipes:
             if directory is None:
                 directory = self._client.download_recipe(str(ref))

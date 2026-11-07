@@ -7,6 +7,7 @@
 | Метод | Контракт |
 |---|---|
 | search(query=SearchQuery(), *, all_revisions=False) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
+| search_refs(query=SearchQuery(), *, all_revisions=False) | tuple[Ref, ...] тех же координат без чтения рецептов и payload |
 | publish(record: LocalRecord | Graph, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает InstalledRecord |
 
 Source и files принадлежат LocalRecord. Source — рабочий Git checkout, files —
@@ -29,6 +30,7 @@ namespace.component[_subcomponent].view.type/version[#revision]. Приватн�
 | get() | InstalledRecord с доступными файлами пакета; source=None |
 | get_with_sources() | InstalledRecord с файлами и Git-исходниками, если они объявлены |
 | dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
+| dependency_refs(filters=None) | tuple[Ref, ...] точных прямых требований без чтения записей зависимостей |
 | to_dict() | Координаты, включая revision, если она задана |
 | without_revision() | Логические координаты с тем же каталогом |
 
@@ -106,9 +108,9 @@ Graph без lockfile, затем вызывают create_lockfile(path).
 | records | LocalRecord корня и Record всех опубликованных зависимостей |
 | edges | Все рёбра Dependency(source, target) |
 | info(ref) | Метаданные узла снимка без I/O |
-| dependencies(ref=None, *, filters=None) | Прямые Record-зависимости узла или корня без I/O |
-| get(refs) | Получает выбранные InstalledRecord с файлами одной установкой без запроса SCM |
-| get_with_sources(refs) | Получает выбранные InstalledRecord с файлами и SCM-исходниками одной установкой |
+| dependencies(ref=None, *, transitive=False, filters=None) | Прямые или все транзитивные Record-зависимости узла без I/O, исключая сам узел |
+| get(refs=None) | Получает файлы выбранных или всех опубликованных узлов одной установкой |
+| get_with_sources(refs=None) | Получает файлы и SCM-исходники выбранных или всех опубликованных узлов одной установкой |
 | create_lockfile(path=None) | Сохраняет уже разрешённый граф через Conan, запоминает путь и возвращает Path |
 
 catalog, record, records, edges, requirements, networkx и lockfile доступны
@@ -128,8 +130,10 @@ Conan проверяет циклы и конфликты requirements. Разр
 Формат deps.toml принадлежит flow, включая зависимости,
 добавленные на основе поиска. Формат lockfile обрабатывает только Conan.
 
-get(refs) и get_with_sources(refs) принимают опубликованные узлы этого Graph, включая опубликованный корень.
-Локальный корень уже доступен. Дубликаты Ref убираются с сохранением порядка;
+get(refs=None) и get_with_sources(refs=None) без аргумента выбирают все опубликованные
+узлы Graph, зависимости первыми, включая опубликованный корень. Локальный корень
+уже доступен и исключается. Явный набор Ref сохраняет выборочное получение;
+дубликаты Ref убираются с сохранением порядка;
 пустой список и повторные запросы полученных записей не запускают Conan.
 Graph.records сохраняет Record с метаданными, полученные InstalledRecord возвращаются отдельно.
 Если сначала получены только файлы, get_with_sources() добавляет исходники одной
@@ -195,3 +199,20 @@ Graph должен принадлежать тому же экземпляру C
 
 `SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
 сохраняет namespace/component/subcomponent. Версию и revision исходного Ref не наследует.
+
+## Обычный сценарий без выбора revision
+
+Для одной revision на имя/версию достаточно строкового Ref без `#revision`.
+Search и search_refs по умолчанию возвращают одну последнюю revision каждого имени/версии,
+а результаты можно использовать напрямую: revisions сохраняются в Ref автоматически.
+Параметры `revision` и `all_revisions` нужны только для явного выбора и просмотра истории.
+
+Dependency_refs возвращает точные прямые Ref в стабильном порядке без повторений.
+Читается рецепт исходного пакета; наличие и формат метаданных дочерних пакетов этим
+методом не проверяются. Незакреплённое требование разрешается в latest перед проверкой
+фильтра revision. Для поиска старой revision служит search_refs с явным фильтром.
+
+При transitive=True зависимости Graph возвращаются в порядке «зависимости раньше
+потребителей», без самого выбранного узла и без повторений общих зависимостей.
+Фильтр применяется после обхода, не отсекая ветви. Незакреплённый аргумент ref
+сопоставляется с узлом снимка; новая revision на сервере не меняет выбор Graph.

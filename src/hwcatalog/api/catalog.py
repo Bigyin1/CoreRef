@@ -23,11 +23,25 @@ class Catalog:
         self, query: SearchQuery = SearchQuery(), *, all_revisions: bool = False
     ) -> tuple[Record, ...]:
         """Find latest matching revisions, or history when all_revisions is requested."""
-        records = (
-            package.recipe().record
-            for package in self._packages(query, all_revisions=all_revisions)
+        return tuple(
+            self._package(ref).info()
+            for ref in self.search_refs(query, all_revisions=all_revisions)
         )
-        return query.select(records)
+
+    def search_refs(
+        self, query: SearchQuery = SearchQuery(), *, all_revisions: bool = False
+    ) -> tuple[Ref, ...]:
+        """Find exact coordinates without downloading recipes or reading payloads."""
+        pattern = query.conan_pattern(all_revisions=all_revisions)
+        if pattern is None:
+            return ()
+        refs = []
+        for reference, revisions in self._client.index(pattern).items():
+            for revision in revisions.revisions:
+                ref = from_conan_reference(f"{reference}#{revision}", catalog=self)
+                if query.matches_ref(ref):
+                    refs.append(ref)
+        return tuple(sorted(refs))
 
     def publish(
         self,
@@ -55,20 +69,6 @@ class Catalog:
         self, record: LocalRecord, dependencies: tuple[Ref, ...], lockfile: Path | None
     ) -> LocalPackage:
         return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)
-
-    def _packages(
-        self, query: SearchQuery, *, all_revisions: bool = False
-    ) -> tuple[StoredPackage, ...]:
-        pattern = query.conan_pattern(all_revisions=all_revisions)
-        if pattern is None:
-            return ()
-        packages = []
-        for reference, revisions in self._client.index(pattern).items():
-            for revision in revisions.revisions:
-                ref = from_conan_reference(f"{reference}#{revision}", catalog=self)
-                if query.matches_ref(ref):
-                    packages.append(StoredPackage(ref).load())
-        return tuple(packages)
 
 
 __all__ = ["Catalog"]
