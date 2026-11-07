@@ -97,3 +97,11 @@ Revision входит в identity и inspection JSON; её сортировка 
 Локальный корень Graph или publish должен иметь revision=None; зависимости могут быть
 закреплёнными или разрешаться Conan с учётом проектного lockfile. Graph.requirements,
 опубликованные записи и концы рёбер содержат выбранные revisions.
+
+
+Ref(reference, *, catalog) принимает каноническую строку; Ref.from_fields создаёт ссылку
+из отдельных координат через тот же конструктор. Основной конструктор выполняет разбор
+и проверку формата без Conan-вызовов.
+Graph.info(ref) и Graph.dependencies(ref=None, *, filters=None) читают метаданные снимка,
+Graph.edges содержит связи. Catalog.publish(graph) использует захваченный локальный
+снимок и точные requirements без повторного graph info.

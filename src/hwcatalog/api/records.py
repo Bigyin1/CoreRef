@@ -28,8 +28,30 @@ class JSONSerializable(Protocol):
 class Ref:
     """Package coordinates with a required private catalog excluded from identity and JSON."""
 
-    def __init__(  # noqa: PLR0913, PLR0917 - One argument per coordinate and context.
-        self,
+    def __init__(self, reference: str, *, catalog: Catalog) -> None:
+        from .._internal.references import to_conan_reference
+        from .errors import InvalidPackage
+
+        if catalog is None:
+            raise TypeError("Ref requires a catalog")
+        self._catalog = catalog
+        try:
+            name, self._version = reference.split("#", 1)[0].split("/")
+            self._namespace, component, self._view, self._type = name.split(".")
+            self._component, separator, subcomponent = component.partition("_")
+            self._subcomponent = subcomponent if separator else None
+            self._revision = reference.partition("#")[2] or None
+            if to_conan_reference(self) != reference:
+                raise ValueError("Noncanonical coordinates")
+        except (ValueError, InvalidPackage) as error:
+            raise InvalidPackage(
+                "Expected namespace.component[_subcomponent].view.type/version[#revision], "
+                f"got {reference!r}"
+            ) from error
+
+    @classmethod
+    def from_fields(  # noqa: PLR0913, PLR0917 - One argument per coordinate and context.
+        cls,
         namespace: str,
         component: str,
         view: str,
@@ -39,17 +61,19 @@ class Ref:
         subcomponent: str | None = None,
         revision: str | None = None,
         catalog: Catalog,
-    ) -> None:
-        if catalog is None:
-            raise TypeError("Ref requires a catalog")
-        self._namespace = namespace
-        self._component = component
-        self._view = view
-        self._type = type
-        self._version = version
-        self._subcomponent = subcomponent
-        self._revision = revision
-        self._catalog = catalog
+    ) -> Ref:
+        """Construct from separate coordinates using the same canonical text parser."""
+        from .errors import InvalidPackage
+
+        if "_" in component:
+            raise InvalidPackage(
+                "Underscore separates component from subcomponent; use hyphens in component"
+            )
+        part = component if subcomponent is None else f"{component}_{subcomponent}"
+        reference = f"{namespace}.{part}.{view}.{type}/{version}"
+        if revision is not None:
+            reference = f"{reference}#{revision}"
+        return cls(reference, catalog=catalog)
 
     @property
     def namespace(self) -> str:
@@ -155,7 +179,7 @@ class Ref:
         """Return logical coordinates bound to the same catalog."""
         coordinates = self.to_dict()
         coordinates.pop("revision", None)
-        return Ref(**coordinates, catalog=self._catalog)
+        return Ref.from_fields(**coordinates, catalog=self._catalog)
 
     def info(self) -> Record:
         """Read metadata without installing package files or Git sources."""
@@ -181,12 +205,6 @@ class Ref:
 
         query = SearchQuery() if filters is None else filters
         return self._catalog._package(self).dependencies(query)
-
-    def find_dependents(
-        self, *, candidates: SearchQuery, transitive: bool = True
-    ) -> tuple[Record, ...]:
-        """Find candidate packages requiring this Ref, directly or transitively."""
-        return self._catalog._package(self).find_dependents(candidates, transitive=transitive)
 
 
 @dataclass
@@ -282,7 +300,7 @@ class Record:
         if "scm" in value:
             raise ValueError("Git source must be stored in Conan SCM metadata")
         record = Record(
-            Ref(**value["ref"], catalog=catalog),
+            Ref.from_fields(**value["ref"], catalog=catalog),
             value["payload"],
             file_names=tuple(value.get("file_names", ())),
             has_source=value.get("has_source", False),

@@ -29,7 +29,7 @@ def test_export_preserves_exact_dependency_directions(*, catalog: Catalog) -> No
     graph = snapshot.networkx
     assert graph.number_of_nodes() == 3 and graph.number_of_edges() == 2
     assert not graph.has_edge(left.ref, source.ref)
-    for edge in snapshot.dependencies:
+    for edge in snapshot.edges:
         assert graph.edges[edge.source, edge.target] == {}
     reordered = Graph(catalog, local_record(source), dependencies=(right.ref, left.ref))
     assert set(reordered.networkx.edges) == set(graph.edges)

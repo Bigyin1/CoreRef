@@ -16,10 +16,12 @@ def main() -> None:
     ):
         catalog = Catalog(server.configure(Path(directory) / "cache"))
         rtl = catalog.publish(
-            LocalRecord(Ref("soc1", "cpu", "rtl", "default", "2.3", catalog=catalog))
+            LocalRecord(Ref.from_fields("soc1", "cpu", "rtl", "default", "2.3", catalog=catalog))
         )
         intermediate = catalog.publish(
-            LocalRecord(Ref("tools", "dft-run", "dft", "default", "3.0", catalog=catalog)),
+            LocalRecord(
+                Ref.from_fields("tools", "dft-run", "dft", "default", "3.0", catalog=catalog)
+            ),
             dependencies=(rtl.ref,),
         )
         inputs = Path(directory) / "inputs"
@@ -29,20 +31,18 @@ def main() -> None:
         lef.write_text("MACRO cpu\nEND cpu\n")
         catalog.publish(
             LocalRecord(
-                Ref("soc1", "cpu", "be", "lib-lef", "4.0", catalog=catalog),
+                Ref.from_fields("soc1", "cpu", "be", "lib-lef", "4.0", catalog=catalog),
                 {"corner": "tt"},
                 files={"cpu.lib": lib, "cpu.lef": lef},
             ),
             dependencies=(intermediate.ref,),
         )
-        for result in rtl.ref.find_dependents(
-            candidates=SearchQuery(namespace="soc1", component="cpu", view="be", type="lib-lef")
-        ):
+        for result in catalog.search(SearchQuery.for_component(rtl.ref, view="be", type="lib-lef")):
             print(result.ref)
             print(result.to_dict())
             graph = result.ref.graph()
             installed = graph.get((graph.record.ref,))[0]
-            print(f"{len(graph.records)} nodes, {len(graph.dependencies)} edges")
+            print(f"{len(graph.records)} nodes, {len(graph.edges)} edges")
             print(installed.files["cpu.lib"].read_text().strip())
 
 

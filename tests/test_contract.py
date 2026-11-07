@@ -17,10 +17,10 @@ def test_get_returns_published_records_and_reports_missing(catalog: Catalog) -> 
     first, second = release("first", catalog=catalog), release("second", catalog=catalog)
     second = catalog.publish(local_record(second))
     first = catalog.publish(local_record(first))
-    assert Ref(**first.ref.to_dict(), catalog=catalog).get() == first
-    assert Ref(**second.ref.to_dict(), catalog=catalog).get() == second
+    assert Ref.from_fields(**first.ref.to_dict(), catalog=catalog).get() == first
+    assert Ref.from_fields(**second.ref.to_dict(), catalog=catalog).get() == second
     with pytest.raises(NotFound):
-        Ref(**release("absent", catalog=catalog).ref.to_dict(), catalog=catalog).get()
+        Ref.from_fields(**release("absent", catalog=catalog).ref.to_dict(), catalog=catalog).get()
     assert catalog.search() == (first, second)
 
 
@@ -30,7 +30,7 @@ def test_new_revision_preserves_previously_published_records(catalog: Catalog) -
     changed = catalog.publish(local_record(Record(original.ref, {"changed": True})))
     assert changed.ref != original.ref
     assert catalog.search() == (changed,)
-    assert Ref(**original.ref.to_dict(), catalog=catalog).get() == original
+    assert Ref.from_fields(**original.ref.to_dict(), catalog=catalog).get() == original
 
 
 @pytest.mark.parametrize("count", [0, 1, 2])
@@ -69,9 +69,7 @@ def test_dependencies_must_already_exist(catalog: Catalog) -> None:
     first = catalog.publish(local_record(first), dependencies=(second.ref,))
     with pytest.raises(InvalidPackage, match="cycle/loop"):
         catalog.publish(local_record(second), dependencies=(first.ref,))
-    assert resolve_published(catalog, first.ref).dependencies == (
-        Dependency(first.ref, second.ref),
-    )
+    assert resolve_published(catalog, first.ref).edges == (Dependency(first.ref, second.ref),)
 
 
 def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> None:
@@ -95,21 +93,12 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
         right.ref,
         shared.ref,
     }
-    assert graph.dependencies == tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
-    assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies() == (left, right)
-    assert Ref(**shared.ref.to_dict(), catalog=catalog).find_dependents(
-        candidates=SearchQuery(), transitive=False
-    ) == (
-        left,
-        right,
-    )
-    assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies(
+    assert graph.edges == tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
+    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).dependencies() == (left, right)
+    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).dependencies(
         SearchQuery(component="left")
     ) == (left,)
-    assert Ref(**shared.ref.to_dict(), catalog=catalog).find_dependents(
-        candidates=SearchQuery(component="right"), transitive=False
-    ) == (right,)
-    assert not Ref(**root.ref.to_dict(), catalog=catalog).dependencies(
+    assert not Ref.from_fields(**root.ref.to_dict(), catalog=catalog).dependencies(
         SearchQuery(component="absent")
     )
     assert resolve_published(catalog, shared.ref).records == (shared,)
@@ -127,9 +116,6 @@ def test_resolution_is_stable_when_new_consumers_are_published(catalog: Catalog)
     before = graph_json(graph)
     consumer = catalog.publish(local_record(consumer), dependencies=(root.ref,))
     assert graph_json(resolve_published(catalog, root.ref)) == before
-    assert Ref(**root.ref.to_dict(), catalog=catalog).find_dependents(
-        candidates=SearchQuery(), transitive=False
-    ) == (consumer,)
 
 
 @pytest.mark.parametrize("length", [1, 40])
@@ -142,17 +128,13 @@ def test_resolution_returns_the_entire_graph(catalog: Catalog, length: int) -> N
     edges = tuple(Dependency(source.ref, target.ref) for source, target in pairwise(records))
     result = resolve_published(catalog, records[0].ref)
     assert result.records == records
-    assert set(result.dependencies) == set(edges)
+    assert set(result.edges) == set(edges)
 
 
 def test_missing_graph_roots_are_errors(catalog: Catalog) -> None:
     ref = release("missing", catalog=catalog).ref
     with pytest.raises(NotFound):
-        Ref(**ref.to_dict(), catalog=catalog).dependencies()
-    with pytest.raises(NotFound):
-        Ref(**ref.to_dict(), catalog=catalog).find_dependents(
-            candidates=SearchQuery(), transitive=False
-        )
+        Ref.from_fields(**ref.to_dict(), catalog=catalog).dependencies()
 
 
 def test_payload_changes_do_not_change_the_publication(catalog: Catalog) -> None:
@@ -160,5 +142,5 @@ def test_payload_changes_do_not_change_the_publication(catalog: Catalog) -> None
     item = Record(release("data", catalog=catalog).ref, {"items": nested})
     item = catalog.publish(local_record(item))
     nested.clear()
-    stored = Ref(**item.ref.to_dict(), catalog=catalog).get()
+    stored = Ref.from_fields(**item.ref.to_dict(), catalog=catalog).get()
     assert stored.payload == {"items": (1, {"nested": (2,)})}

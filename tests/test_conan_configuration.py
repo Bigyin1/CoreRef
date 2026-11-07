@@ -36,7 +36,7 @@ def test_configured_profile_defaults_are_used_without_rewriting(*, catalog: Cata
     profiles = cast(Mapping[str, _Profile], catalog._client.run("profile", "show"))
     assert profiles["host"].settings["build_type"] == "Debug"
     assert profiles["build"].settings["build_type"] == "Release"
-    root = Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+    root = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
     assert Graph(catalog, local_record(root)).records == (local_record(root),)
     root = catalog.publish(local_record(root))
     assert before == {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
@@ -54,7 +54,9 @@ def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path, *, catalog: C
     with pytest.raises(CatalogError, match="profile"):
         Graph(
             catalog,
-            local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))),
+            local_record(
+                Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+            ),
         )
     assert not (home / "profiles/default").exists()
 
@@ -73,7 +75,9 @@ def test_multiple_enabled_remotes_require_an_explicit_selection(tmp_path: Path) 
 def test_publish_without_remote_fails_before_preparing_inputs(tmp_path: Path) -> None:
     catalog = Catalog(configured_home(tmp_path / "offline"))
     payload = UserPayload({"test": True})
-    record = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog), payload)
+    record = LocalRecord(
+        Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog), payload
+    )
     with patch.object(
         catalog._client, "run", side_effect=AssertionError("Unexpected Conan command")
     ):
@@ -83,4 +87,4 @@ def test_publish_without_remote_fails_before_preparing_inputs(tmp_path: Path) ->
             catalog._client.upload(str(record.ref))
     assert payload.calls == 0
     assert catalog.search() == ()
-    assert Graph(catalog, record).dependencies == ()
+    assert Graph(catalog, record).edges == ()

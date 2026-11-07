@@ -8,6 +8,7 @@ from enum import StrEnum
 import pytest
 
 from hwcatalog.api.catalog import Catalog
+from hwcatalog.api.errors import InvalidPackage
 from hwcatalog.api.records import JSON, JSONSerializable, LocalRecord, Record, Ref
 from tests.helpers import local_record
 
@@ -23,7 +24,7 @@ class UserPayload:
 
 
 def test_minimal_record(*, catalog: Catalog) -> None:
-    record = Record(Ref("demo", "core", "release", "default", "1.0", catalog=catalog))
+    record = Record(Ref.from_fields("demo", "core", "release", "default", "1.0", catalog=catalog))
     assert record.payload is None
     assert (
         Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog) == record
@@ -35,10 +36,11 @@ def test_minimal_record(*, catalog: Catalog) -> None:
 @pytest.mark.parametrize("value", [None, True, 12, "custom", [1, {"size": -10}], {"schema": False}])
 def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
     record = Record(
-        Ref("demo", "opaque", "release", "default", "1.0", catalog=catalog), UserPayload(value)
+        Ref.from_fields("demo", "opaque", "release", "default", "1.0", catalog=catalog),
+        UserPayload(value),
     )
     record = catalog.publish(local_record(record))
-    stored = Ref(**record.ref.to_dict(), catalog=catalog).get()
+    stored = Ref.from_fields(**record.ref.to_dict(), catalog=catalog).get()
     assert stored == Record.from_json(
         json.dumps(record.to_dict(), allow_nan=False), catalog=catalog
     )
@@ -49,11 +51,13 @@ def test_custom_payload_is_serialized_once_and_frozen(catalog: Catalog) -> None:
     nested: list[JSON] = [1, {"ports": [2, 3]}]
     payload = UserPayload({"nested": nested})
     catalog.publish(
-        LocalRecord(Ref("demo", "core", "release", "default", "1.0", catalog=catalog), payload)
+        LocalRecord(
+            Ref.from_fields("demo", "core", "release", "default", "1.0", catalog=catalog), payload
+        )
     )
     assert payload.calls == 1
     nested.append(4)
-    stored = Ref("demo", "core", "release", "default", "1.0", catalog=catalog).get()
+    stored = Ref.from_fields("demo", "core", "release", "default", "1.0", catalog=catalog).get()
     assert isinstance(stored.payload, Mapping)
     assert stored.payload["nested"] == (1, {"ports": (2, 3)})
     with pytest.raises(TypeError):
@@ -72,7 +76,9 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
         catalog.publish(
             local_record(
                 Record(
-                    Ref("demo", "invalid", "release", "default", "1.0", catalog=catalog),
+                    Ref.from_fields(
+                        "demo", "invalid", "release", "default", "1.0", catalog=catalog
+                    ),
                     InvalidPayload(),
                 )
             )
@@ -81,20 +87,20 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
 
 
 def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
-    ref = Ref("rtl-ip", "core", "release", "default", "1.0", catalog=catalog)
-    same = Ref("rtl-ip", "core", "release", "default", "1.0", catalog=catalog)
-    other = Ref(**(ref.to_dict() | {"namespace": "connection-ip"}), catalog=catalog)
+    ref = Ref.from_fields("rtl-ip", "core", "release", "default", "1.0", catalog=catalog)
+    same = Ref.from_fields("rtl-ip", "core", "release", "default", "1.0", catalog=catalog)
+    other = Ref.from_fields(**(ref.to_dict() | {"namespace": "connection-ip"}), catalog=catalog)
     assert ref == same
     assert hash(ref) == hash(same)
     assert (
         ref.package_name
-        == Ref(**(ref.to_dict() | {"version": "2.0"}), catalog=catalog).package_name
+        == Ref.from_fields(**(ref.to_dict() | {"version": "2.0"}), catalog=catalog).package_name
     )
     assert ref != other
     assert ref.package_name != other.package_name
     catalog.publish(local_record(Record(ref)))
     catalog.publish(local_record(Record(other)))
-    stored = Ref(**same.to_dict(), catalog=catalog).get()
+    stored = Ref.from_fields(**same.to_dict(), catalog=catalog).get()
     assert stored.ref.without_revision() == ref
     assert catalog.publish(local_record(Record(same))) == stored
 
@@ -110,11 +116,11 @@ def test_namespace_is_part_of_identity(catalog: Catalog) -> None:
         (" ", "core", "release", "default", "1.0"),
     ],
 )
-def test_reference_input_validation_belongs_to_caller(
+def test_reference_construction_rejects_noncanonical_fields(
     coordinates: tuple[str, str, str, str, str], catalog: Catalog
 ) -> None:
-    ref = Ref(*coordinates, catalog=catalog)
-    assert tuple(ref.to_dict().values()) == coordinates
+    with pytest.raises(InvalidPackage):
+        Ref.from_fields(*coordinates, catalog=catalog)
 
 
 class CustomKind(StrEnum):
@@ -123,9 +129,9 @@ class CustomKind(StrEnum):
 
 @pytest.mark.parametrize("kind", ["artifact", "execution", CustomKind.REPORT, "custom"])
 def test_consumer_kinds(catalog: Catalog, kind: str) -> None:
-    ref = Ref("demo", "core", kind, "default", "1.0", catalog=catalog)
+    ref = Ref.from_fields("demo", "core", kind, "default", "1.0", catalog=catalog)
     catalog.publish(local_record(Record(ref)))
-    stored = Ref(**ref.to_dict(), catalog=catalog).get()
+    stored = Ref.from_fields(**ref.to_dict(), catalog=catalog).get()
     assert stored.ref.view == kind
     assert type(stored.ref.view) is str
 
@@ -141,4 +147,4 @@ def test_coordinate_fields_are_required(field: str, *, catalog: Catalog) -> None
     }
     coordinates.pop(field)
     with pytest.raises(TypeError):
-        Ref(**coordinates, catalog=catalog)
+        Ref.from_fields(**coordinates, catalog=catalog)

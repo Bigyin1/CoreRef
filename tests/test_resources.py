@@ -13,7 +13,7 @@ def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Cata
     paths = {"lib": str(tmp_path / "cpu.lib")}
     record = InstalledRecord(
         Record(
-            Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
             payload={"external": paths},
             file_names=("report",),
             has_source=True,
@@ -37,7 +37,7 @@ def test_package_file_input_validation_belongs_to_caller(
     catalog: Catalog, name: str, path: Path
 ) -> None:
     record = LocalRecord(
-        Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), files={name: path}
+        Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), files={name: path}
     )
     assert record.files == {name: path}
     assert (
@@ -49,7 +49,8 @@ def test_package_file_input_validation_belongs_to_caller(
 @pytest.mark.parametrize("paths", [{"lib": "relative/path"}, {"": "/unmounted/data"}])
 def test_external_paths_are_opaque_payload(catalog: Catalog, paths: dict[str, str]) -> None:
     local = LocalRecord(
-        Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), payload={"resources": paths}
+        Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog),
+        payload={"resources": paths},
     )
     record = catalog.publish(local)
     assert record.ref.get().payload == {"resources": paths}

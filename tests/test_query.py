@@ -58,7 +58,7 @@ def test_query_matching_and_catalog_search_agree(catalog: Catalog, query: Search
 
 def test_payload_cannot_override_identity(catalog: Catalog) -> None:
     record = Record(
-        Ref("demo", "source", "release", "default", "1.0", catalog=catalog),
+        Ref.from_fields("demo", "source", "release", "default", "1.0", catalog=catalog),
         {"name": "wrong", "version": "wrong", "kind": "payload-kind", "namespace": "payload-ns"},
     )
     record = catalog.publish(local_record(record))
@@ -72,11 +72,11 @@ def test_payload_cannot_override_identity(catalog: Catalog) -> None:
 
 def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
     records = tuple(
-        Record(Ref(namespace, "core", kind, "default", "1.0", catalog=catalog))
+        Record(Ref.from_fields(namespace, "core", kind, "default", "1.0", catalog=catalog))
         for namespace in ("rtl", "physical")
         for kind in ("ip", "soc")
     )
-    root = Record(Ref("demo", "top", "release", "default", "1.0", catalog=catalog))
+    root = Record(Ref.from_fields("demo", "top", "release", "default", "1.0", catalog=catalog))
     records = tuple(catalog.publish(local_record(record)) for record in records)
     root = catalog.publish(local_record(root), dependencies=tuple(record.ref for record in records))
     assert len(resolve_published(catalog, root.ref).records) == 5
@@ -86,16 +86,16 @@ def test_namespaces_and_kinds_distinguish_equal_names(catalog: Catalog) -> None:
     assert len(catalog.search(SearchQuery(namespace="rtl"))) == 2
     assert len(catalog.search(SearchQuery(component="core", view="soc", namespace="physical"))) == 1
     for record in records:
-        assert Ref(**record.ref.to_dict(), catalog=catalog).get() == record
+        assert Ref.from_fields(**record.ref.to_dict(), catalog=catalog).get() == record
 
 
 def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) -> None:
     refs = tuple(
-        Ref("demo", "same", kind, "default", "1.0", catalog=catalog)
+        Ref.from_fields("demo", "same", kind, "default", "1.0", catalog=catalog)
         for kind in ("release", "run", "report")
     )
     records = tuple(Record(ref) for ref in refs)
-    root = Record(Ref("demo", "top", "package", "default", "1.0", catalog=catalog))
+    root = Record(Ref.from_fields("demo", "top", "package", "default", "1.0", catalog=catalog))
     records = tuple(catalog.publish(local_record(record)) for record in records)
     root = catalog.publish(local_record(root), dependencies=refs)
     assert len(set(refs)) == len(refs)
@@ -104,18 +104,20 @@ def test_kind_distinguishes_same_namespace_name_and_version(catalog: Catalog) ->
     assert len(resolve_published(catalog, root.ref).records) == 4
     for record in records:
         assert catalog.search(SearchQuery(view=record.ref.view)) == (record,)
-        assert Ref(**record.ref.to_dict(), catalog=catalog).get() == record
+        assert Ref.from_fields(**record.ref.to_dict(), catalog=catalog).get() == record
 
 
 def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catalog) -> None:
     rtl = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+        )
     )
     alternate = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "rtl", "gate", "1.0", catalog=catalog)))
+        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "gate", "1.0", catalog=catalog)))
     )
     be = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "be", "lib-lef", "1.0", catalog=catalog)))
+        local_record(Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0", catalog=catalog)))
     )
     assert len({rtl.ref, alternate.ref, be.ref}) == 3
     assert str(rtl.ref.without_revision()) == "soc.cpu.rtl.default/1.0"
@@ -146,9 +148,9 @@ def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str | None
 def test_selection_supports_local_and_stored_records_without_mutating_inputs(
     catalog: Catalog,
 ) -> None:
-    local = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    leaf = Record(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
-    macro = Record(Ref("soc", "leaf", "be", "lib-lef", "4.0", catalog=catalog))
+    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    leaf = Record(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
+    macro = Record(Ref.from_fields("soc", "leaf", "be", "lib-lef", "4.0", catalog=catalog))
     records: list[LocalRecord | Record] = [local, macro, leaf]
     query = SearchQuery(namespace="soc", view="rtl")
     selected = query.select(iter(records))

@@ -17,13 +17,15 @@ def test_project_lock_pins_publication_and_installation(
 ) -> None:
     catalog = Catalog(catalog._client.home)
     dependency = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+        )
     )
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     project = Graph(
         catalog,
-        LocalRecord(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog)),
         dependencies=(dependency.ref,),
     )
     lockfile = project.create_lockfile(tmp_path / "project/conan.lock")
@@ -38,7 +40,7 @@ def test_project_lock_pins_publication_and_installation(
     assert tuple(record.files) == ("cpu.lib",)
     recipe = catalog._package(project.record.ref).recipe().directory
     assert not (recipe / "conan.lock").exists()
-    assert project.dependencies == (Dependency(project.record.ref, dependency.ref),)
+    assert project.edges == (Dependency(project.record.ref, dependency.ref),)
     installed = record.ref.get()
     assert installed.files["cpu.lib"].read_text() == artifact.read_text()
     assert "conan.lock" not in installed.files
@@ -57,10 +59,14 @@ def test_conan_validates_the_supplied_project_lockfile(
 ) -> None:
     catalog = Catalog(catalog._client.home)
     rtl = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+        )
     )
     macro = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))),
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))
+        ),
         dependencies=(rtl.ref,),
     )
     project = Graph(catalog, local_record(macro), dependencies=(rtl.ref,))
@@ -88,13 +94,13 @@ def test_conan_validates_the_supplied_project_lockfile(
 
 def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
     catalog = Catalog(catalog._client.home)
-    root = Record(Ref("soc", "root", "rtl", "default", "1.0", catalog=catalog))
+    root = Record(Ref.from_fields("soc", "root", "rtl", "default", "1.0", catalog=catalog))
     project = Graph(catalog, local_record(root))
     lockfile = project.create_lockfile(tmp_path / "empty/conan.lock")
     empty_lock = lockfile.read_bytes()
     root = catalog.publish(local_record(root), lockfile=lockfile)
     assert project.records == (local_record(root),)
-    consumer = Record(Ref("soc", "consumer", "rtl", "default", "1.0", catalog=catalog))
+    consumer = Record(Ref.from_fields("soc", "consumer", "rtl", "default", "1.0", catalog=catalog))
     Graph(catalog, local_record(consumer), dependencies=(root.ref,)).create_lockfile(lockfile)
     project.create_lockfile()
     assert lockfile.read_bytes() == empty_lock

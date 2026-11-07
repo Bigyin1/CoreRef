@@ -114,7 +114,7 @@ class StoredRecipe:
             raise ValueError("Unsupported record format")
         if any(name in value for name in ("source", "source_path", "scm")):
             raise ValueError("Git source must be stored in Conan SCM metadata")
-        ref = Ref(**value["ref"], catalog=expected._catalog)
+        ref = Ref.from_fields(**value["ref"], catalog=expected._catalog)
         if ref != expected.without_revision():
             raise ValueError("Record coordinates disagree with the recipe")
         return Record(

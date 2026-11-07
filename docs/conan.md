@@ -13,7 +13,7 @@ from hwcatalog.api.records import LocalRecord, Ref
 
 catalog = Catalog()
 local = LocalRecord(
-    Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+    Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
     payload={"filelist": "rtl.f", "lib": "/nfs/cpu/cpu.lib"},
     source=Path("/work/cpu"),
     files={"report": Path("/work/cpu/out/report.txt")},
@@ -95,8 +95,8 @@ Publish разрешает новые revisions одной версии; оди�
 Собственная revision не записывается в record.json: она вычисляется по экспортированным
 файлам, а при чтении берётся из загруженного рецепта. Package revisions (PREV)
 не входят в публичный Ref. Settings/options, build requirements, overrides и
-диапазоны версий не поддерживаются. Прямой обратный поиск читает requirements,
-транзитивный использует нативный граф кандидата. Автоматических retry и rollback нет.
+диапазоны версий не поддерживаются. Поиск представлений использует поля Ref,
+проверку их происхождения выполняет flow. Автоматических retry и rollback нет.
 
 Единственный включённый remote выбирается автоматически; несколько требуют явного
 remote="catalog". Без remotes доступны чтение cache и локальный Graph; publish() требует настроенный remote. При настроенном сервере локальные

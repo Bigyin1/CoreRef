@@ -6,7 +6,6 @@ import pytest
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import Record, Ref
 from tests.helpers import local_record
 
@@ -17,20 +16,24 @@ def test_materialize_uses_published_requirements_without_project_lock(
 ) -> None:
     catalog = Catalog(catalog._client.home)
     rtl = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+        )
     )
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     record = catalog.publish(
         local_record(
-            Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog)),
+            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog)),
             files={"cpu.lib": artifact},
         ),
         dependencies=(rtl.ref,),
     )
     project = Graph(
         catalog,
-        local_record(Record(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))),
+        local_record(
+            Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+        ),
         dependencies=(record.ref,),
     )
     lock = project.create_lockfile(tmp_path / "conan.lock") if locked else None
@@ -61,10 +64,14 @@ def test_direct_queries_do_not_resolve_dependency_graphs(
     connection = Catalog(catalog._client.home)
     catalog = connection
     rtl = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+        )
     )
     macro = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))),
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))
+        ),
         dependencies=(rtl.ref,),
     )
     run = connection._client.run
@@ -75,7 +82,3 @@ def test_direct_queries_do_not_resolve_dependency_graphs(
 
     monkeypatch.setattr(connection._client, "run", track)
     assert macro.ref.dependencies() == (rtl,)
-    assert rtl.ref.find_dependents(candidates=SearchQuery(), transitive=False) == (macro,)
-    assert rtl.ref.find_dependents(
-        candidates=SearchQuery(type="lib-lef", view="be"), transitive=False
-    ) == (macro,)

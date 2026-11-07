@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 import networkx as nx
 
 from .errors import CatalogError, Conflict, InvalidPackage
+from .query import SearchQuery
 from .records import InstalledRecord, LocalRecord, Record, Ref
 
 # NetworkX generics are provided by stubs, not its runtime classes.
 if TYPE_CHECKING:
+    from .._internal.package import LocalPackage
     from .catalog import Catalog
     from .workspace import Workspace
 
@@ -45,6 +47,7 @@ class Graph:
         workspace: Workspace | None = None,
     ) -> None:
         self._catalog = catalog
+        self._local: LocalPackage | None = None
         members = workspace.members if workspace is not None else {}
         bases = {ref.without_revision(): ref for ref in members}
         dependencies = tuple(bases.get(ref, ref) for ref in dependencies)
@@ -54,7 +57,8 @@ class Graph:
                 raise InvalidPackage("Published graph requirements come from its recipe")
             self._package = catalog._package(record).resolved_graph(lockfile)
         else:
-            self._package = catalog._local_package(record, dependencies, lockfile).resolved
+            self._local = catalog._local_package(record, dependencies, lockfile)
+            self._package = self._local.resolved
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result
         self._editables = self._editable_records(members) if members else {}
@@ -99,8 +103,44 @@ class Graph:
         )
 
     @property
-    def dependencies(self) -> tuple[Dependency, ...]:
+    def edges(self) -> tuple[Dependency, ...]:
         return self._dependencies
+
+    def info(self, ref: Ref) -> LocalRecord | Record:
+        """Read a node from this snapshot, without recipe downloads or package installation."""
+        ref = self._package.resolve_ref(ref)
+        record = self._records_by_ref[ref]
+        return replace(record) if isinstance(record, LocalRecord) else record
+
+    def dependencies(
+        self,
+        ref: Ref | None = None,
+        *,
+        filters: SearchQuery | None = None,
+    ) -> tuple[Record, ...]:
+        """Read direct dependencies of a snapshot node; omitted ref selects the root."""
+        selected = self.record.ref if ref is None else self._package.resolve_ref(ref)
+        query = SearchQuery() if filters is None else filters
+        records = []
+        for target in self._neighbors[selected]:
+            record = self._records_by_ref[target]
+            if isinstance(record, Record) and query.matches(record):
+                records.append(record)
+        return tuple(records)
+
+    @cached_property
+    def _neighbors(self) -> dict[Ref, tuple[Ref, ...]]:
+        neighbors: dict[Ref, list[Ref]] = {record.ref: [] for record in self._records}
+        for edge in self._dependencies:
+            neighbors[edge.source].append(edge.target)
+        return {ref: tuple(targets) for ref, targets in neighbors.items()}
+
+    def _publish(self) -> InstalledRecord:
+        if self._local is None:
+            raise InvalidPackage(
+                "Only a local graph can be published; use a LocalRecord for a new package"
+            )
+        return self._local.publish(resolved=self._package.graph)
 
     @property
     def requirements(self) -> tuple[Ref, ...]:

@@ -39,7 +39,7 @@ def to_conan_reference(ref: Ref) -> str:
     if ref.subcomponent is not None and not NAME_PART.fullmatch(ref.subcomponent):
         raise InvalidPackage("Subcomponent must be a nonempty lowercase token")
     name = ref.package_name
-    value = str(ref.without_revision())
+    value = f"{ref.package_name}/{ref.version}"
     if (
         len(name) > _MAX_NAME_LENGTH
         or len(value) > _MAX_REFERENCE_LENGTH
@@ -55,23 +55,4 @@ def to_conan_reference(ref: Ref) -> str:
 
 def from_conan_reference(value: str, *, catalog: Catalog) -> Ref:
     """Decode coordinates and a recipe revision, omitting transport timestamps."""
-    try:
-        reference = value.split("%", 1)[0]
-        name, version = reference.split("#", 1)[0].split("/")
-        namespace, component, view, package_type = name.split(".")
-        component, separator, subcomponent = component.partition("_")
-        ref = Ref(
-            namespace,
-            component,
-            view,
-            package_type,
-            version,
-            subcomponent=subcomponent if separator else None,
-            revision=reference.partition("#")[2] or None,
-            catalog=catalog,
-        )
-        if to_conan_reference(ref) != reference:
-            raise ValueError("Noncanonical coordinates")
-        return ref
-    except (ValueError, InvalidPackage) as exc:
-        raise InvalidPackage(f"Not a catalog Conan reference: {value!r}") from exc
+    return Ref(value.split("%", 1)[0], catalog=catalog)

@@ -17,7 +17,7 @@ def local_catalog(catalog: Catalog) -> Catalog:
 
 
 def record(name: str, version: str = "1.0", *, catalog: Catalog) -> Record:
-    return Record(Ref("soc", name, "rtl", "default", version, catalog=catalog))
+    return Record(Ref.from_fields("soc", name, "rtl", "default", version, catalog=catalog))
 
 
 def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalog) -> None:
@@ -30,7 +30,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     root = Record(record("top", catalog=local_catalog).ref, {"local": ["working-tree"]})
     graph = Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
-    assert set(graph.dependencies) == {
+    assert set(graph.edges) == {
         Dependency(root.ref, left.ref),
         Dependency(root.ref, right.ref),
         Dependency(left.ref, leaf.ref),
@@ -39,7 +39,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     stored_root = next(item for item in graph.records if item.ref == root.ref)
     assert stored_root.payload == {"local": ("working-tree",)}
     with pytest.raises(NotFound):
-        Ref(**root.ref.to_dict(), catalog=catalog).get()
+        Ref.from_fields(**root.ref.to_dict(), catalog=catalog).get()
     assert len(catalog.search()) == 3
 
 
@@ -47,7 +47,7 @@ def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     root = record("top", catalog=local_catalog)
     graph = Graph(local_catalog, local_record(root))
     assert graph.records == (local_record(root),)
-    assert graph.dependencies == ()
+    assert graph.edges == ()
     assert local_catalog.search() == ()
 
 
@@ -60,9 +60,9 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     local = Record(root.ref, {"local": True})
     graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
-    assert graph.dependencies == (Dependency(root.ref.without_revision(), current.ref),)
-    assert Ref(**root.ref.to_dict(), catalog=catalog).get() == root
-    assert Ref(**root.ref.to_dict(), catalog=catalog).dependencies() == (old,)
+    assert graph.edges == (Dependency(root.ref.without_revision(), current.ref),)
+    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).get() == root
+    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).dependencies() == (old,)
 
 
 def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> None:
@@ -119,7 +119,7 @@ def test_conan_resolves_one_consumer_without_exporting(
     assert not Path(graphs[0][2]).exists()  # Temporary consumer is removed.
     assert not {args[0] for args in operations} & {"export", "export-pkg", "upload"}
     with pytest.raises(NotFound):
-        Ref(**record("top", catalog=catalog).ref.to_dict(), catalog=catalog).get()
+        Ref.from_fields(**record("top", catalog=catalog).ref.to_dict(), catalog=catalog).get()
 
 
 def test_conan_local_consumer_uses_opaque_project_lockfile(

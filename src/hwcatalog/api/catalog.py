@@ -5,6 +5,8 @@ from pathlib import Path
 from .._internal.client import ConanClient
 from .._internal.package import LocalPackage, StoredPackage
 from .._internal.references import from_conan_reference
+from .errors import InvalidPackage
+from .graph import Graph
 from .query import SearchQuery
 from .records import InstalledRecord, LocalRecord, Record, Ref
 
@@ -29,17 +31,25 @@ class Catalog:
 
     def publish(
         self,
-        record: LocalRecord,
+        record: LocalRecord | Graph,
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> InstalledRecord:
-        """Publish one package from a detached snapshot of the local description."""
+        """Publish a local description or reuse a previously resolved local graph."""
         self._client.require_remote()
+        if isinstance(record, Graph):
+            if dependencies or lockfile is not None:
+                raise InvalidPackage(
+                    "A resolved graph already defines its dependencies and lockfile"
+                )
+            if record.catalog is not self:
+                raise InvalidPackage("Publish the graph through its own catalog")
+            return record._publish()
         return self._local_package(record, dependencies, lockfile).publish()
 
     def _package(self, ref: Ref) -> StoredPackage:
-        return StoredPackage(Ref(**ref.to_dict(), catalog=self))
+        return StoredPackage(Ref.from_fields(**ref.to_dict(), catalog=self))
 
     def _local_package(
         self, record: LocalRecord, dependencies: tuple[Ref, ...], lockfile: Path | None

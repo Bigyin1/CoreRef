@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Self
 
 from .._internal.references import COMPONENT_PART, NAME_PART, REVISION, VERSION
 from .records import LocalRecord, Record, Ref
@@ -18,6 +19,27 @@ class SearchQuery:
     version: str | None = None
     subcomponent: str | None = "*"
     revision: str | None = None
+
+    @classmethod
+    def for_component(
+        cls,
+        ref: Ref,
+        *,
+        view: str | None = None,
+        type: str | None = None,
+        version: str | None = None,
+        revision: str | None = None,
+    ) -> Self:
+        """Find representations of exactly this component, with independently selected versions."""
+        return cls(
+            namespace=ref.namespace,
+            component=ref.component,
+            subcomponent=ref.subcomponent,
+            view=view,
+            type=type,
+            version=version,
+            revision=revision,
+        )
 
     def conan_pattern(self, *, all_revisions: bool = False) -> str | None:
         """Narrow the Conan search; matches_ref applies exact filters to the results."""

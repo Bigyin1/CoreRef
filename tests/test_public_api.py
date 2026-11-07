@@ -38,7 +38,7 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         manifest: dict[str, records.JSON] = {"views": ["rtl", "timing"]}
         instance = catalog.Catalog(Path(sys.argv[1]))
         local = records.LocalRecord(
-            ref=records.Ref("public", "rtl", "rtl", "default", "v1", catalog=instance),
+            ref=records.Ref("public.rtl.rtl.default/v1", catalog=instance),
             payload=manifest,
         )
         record = instance.publish(record=local)
@@ -51,7 +51,7 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         assert isinstance(resolved.records[0], records.LocalRecord)
         assert resolved.records[0].payload == stored.payload
         try:
-            records.Ref("public", "absent", "rtl", "default", "v1", catalog=instance).get()
+            records.Ref("public.absent.rtl.default/v1", catalog=instance).get()
         except errors.NotFound:
             pass
         else:

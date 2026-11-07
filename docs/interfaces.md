@@ -7,7 +7,7 @@
 | Метод | Контракт |
 |---|---|
 | search(query=SearchQuery(), *, all_revisions=False) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
-| publish(record: LocalRecord, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает InstalledRecord |
+| publish(record: LocalRecord | Graph, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает InstalledRecord |
 
 Source и files принадлежат LocalRecord. Source — рабочий Git checkout, files —
 карта относительных имён внутри пакета и абсолютных локальных Path. Внешние ресурсы
@@ -19,7 +19,7 @@ Publish всегда публикует на сервер: при отсутст
 
 ## Ref и Record
 
-`Ref(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)` задаёт координаты
+`Ref(reference, *, catalog)` разбирает строковые координаты
 namespace.component[_subcomponent].view.type/version[#revision]. Приватный конкретный Catalog не участвует в identity,
 хеше или JSON. Ссылки результатов создаются сразу с нужным контекстом.
 
@@ -29,16 +29,18 @@ namespace.component[_subcomponent].view.type/version[#revision]. Приватн�
 | get() | InstalledRecord с доступными файлами пакета; source=None |
 | get_with_sources() | InstalledRecord с файлами и Git-исходниками, если они объявлены |
 | dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
-| find_dependents(*, candidates, transitive=True) | Кандидаты, зависящие от точного Ref |
 | to_dict() | Координаты, включая revision, если она задана |
 | without_revision() | Логические координаты с тем же каталогом |
 
-Непосредственные зависимости и обратный поиск читают requirements; транзитивный поиск
-использует нативный граф. Сам Ref исключается. Отсутствующий пакет вызывает NotFound.
-Пустой SearchQuery разрешает просмотр всего каталога. Фильтры включают все семь координат, включая revision.
+`Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)`
+создаёт ту же ссылку из отдельных полей через основной строковый конструктор.
+Ref проверяет канонический формат сразу; неверные координаты вызывают InvalidPackage.
+Непосредственные зависимости читаются из опубликованных requirements.
+Представления выбираются через `Catalog.search(SearchQuery.for_component(ref, ...))`;
+принадлежность конкретному исходному пакету определяет flow.
 
 Record содержит только метаданные: ref, payload, file_names (tuple[str, ...])
-и has_source (bool). Его возвращают info(), search(), dependencies(), find_dependents()
+и has_source (bool). Его возвращают info(), search(), dependencies()
 и опубликованная часть Graph.records. Files и source отсутствуют: поиск не требует
 скачивания содержимого. Has_source вычисляется из SCM-данных Conan, а не дублируется
 в переносимом record.json.
@@ -102,12 +104,14 @@ Graph без lockfile, затем вызывают create_lockfile(path).
 | record | Независимая копия LocalRecord корня |
 | requirements | Прямые зависимости с revisions, выбранными Conan |
 | records | LocalRecord корня и Record всех опубликованных зависимостей |
-| dependencies | Все рёбра Dependency(source, target) |
+| edges | Все рёбра Dependency(source, target) |
+| info(ref) | Метаданные узла снимка без I/O |
+| dependencies(ref=None, *, filters=None) | Прямые Record-зависимости узла или корня без I/O |
 | get(refs) | Получает выбранные InstalledRecord с файлами одной установкой без запроса SCM |
 | get_with_sources(refs) | Получает выбранные InstalledRecord с файлами и SCM-исходниками одной установкой |
 | create_lockfile(path=None) | Сохраняет уже разрешённый граф через Conan, запоминает путь и возвращает Path |
 
-catalog, record, records, dependencies, requirements, networkx и lockfile доступны
+catalog, record, records, edges, requirements, networkx и lockfile доступны
 только для чтения. Изменение структуры требует нового Graph. Выданные LocalRecord
 из record, records и ordered_records() отделены от внутреннего корня: их можно
 редактировать для новых операций. Опубликованные Record остаются неизменяемыми.
@@ -121,7 +125,7 @@ Conan проверяет циклы и конфликты requirements. Разр
 и один graph info без export/upload. Формат deps.toml принадлежит flow, включая зависимости,
 добавленные на основе поиска. Формат lockfile обрабатывает только Conan.
 
-get(refs) и get_with_sources(refs) принимают только опубликованные зависимости этого Graph.
+get(refs) и get_with_sources(refs) принимают опубликованные узлы этого Graph, включая опубликованный корень.
 Локальный корень уже доступен. Дубликаты Ref убираются с сохранением порядка;
 пустой список и повторные запросы полученных записей не запускают Conan.
 Graph.records сохраняет Record с метаданными, полученные InstalledRecord возвращаются отдельно.
@@ -173,3 +177,13 @@ Graph сначала передаёт исходные требования и l
 сопоставляются с выбранными узлами снимка, без нового поиска последней revision.
 Явная несовпадающая revision отклоняется. Случайный conan.lock из cwd явно отключён.
 Автоматических retry, rollback и управления конкурентными издателями нет.
+
+
+`Catalog.publish(graph)` публикует локальный снимок без дополнительного graph info.
+Graph должен принадлежать тому же экземпляру Catalog; его зависимости и lockfile
+нельзя переопределить аргументами publish. Обновлённый или удалённый после разрешения
+проектный lockfile не меняет выбор: временный lock создаётся из нативного графа Conan.
+Для изменения метаданных, состава пакета или зависимостей создаётся новый Graph.
+
+`SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
+сохраняет namespace/component/subcomponent. Версию и revision исходного Ref не наследует.

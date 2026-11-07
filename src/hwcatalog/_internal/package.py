@@ -72,26 +72,6 @@ class StoredPackage:
         records = self._read_records(self.recipe().requirements)
         return query.select(records)
 
-    def find_dependents(self, query: SearchQuery, *, transitive: bool) -> tuple[Record, ...]:
-        recipes = tuple(package.recipe() for package in self._catalog._packages(query))
-        self._recipes.update((recipe.record.ref, recipe) for recipe in recipes)
-        target = self.recipe().record.ref
-        records = (
-            recipe.record
-            for recipe in recipes
-            if recipe.record.ref != target
-            and query.matches(recipe.record)
-            and self._depends_on(recipe, target, transitive=transitive)
-        )
-        return tuple(sorted(records, key=lambda record: record.ref))
-
-    def _depends_on(self, recipe: StoredRecipe, target: Ref, *, transitive: bool) -> bool:
-        if not transitive:
-            return any(record.ref == target for record in self._read_records(recipe.requirements))
-        graph = ResolvedConanGraph(self._client.graph(recipe.directory))
-        graph.result(recipe.record, self._read_records(graph.references))
-        return graph.contains(target)
-
     def _get(self, *, with_sources: bool) -> InstalledRecord:
         recipe = self.recipe()
         fetch_source = with_sources and recipe.has_source
@@ -294,14 +274,21 @@ class LocalPackage:
     def resolved(self) -> PackageGraph:
         return PackageGraph(self.record, self.graph, packages=self._packages)
 
-    def publish(self) -> InstalledRecord:
+    def publish(self, *, resolved: ResolvedConanGraph | None = None) -> InstalledRecord:
         record = self._publication_record()
-        recipe = LocalRecipe(record, self._requirements())
+        if resolved is None and self.dependencies:
+            resolved = self.graph
+        requirements = resolved.direct_references if resolved is not None else ()
+        recipe = LocalRecipe(record, requirements)
         with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:
             directory = Path(temporary)
             recipe.write(directory)
             recipe.copy_files(directory)
-            return self._export(directory)
+            lockfile = self.lockfile
+            if resolved is not None:
+                lockfile = directory / "conan.lock"
+                self._client.save_lockfile(resolved.native, lockfile)
+            return self._export(directory, lockfile=lockfile)
 
     def _snapshot(self, record: LocalRecord) -> LocalRecord:
         if not isinstance(record, LocalRecord):
@@ -311,7 +298,7 @@ class LocalPackage:
         to_conan_reference(record.ref)
         source = record.source.expanduser().absolute() if record.source is not None else None
         return LocalRecord(
-            Ref(**record.ref.to_dict(), catalog=self._catalog),
+            Ref.from_fields(**record.ref.to_dict(), catalog=self._catalog),
             deepfreeze(json.loads(record.to_json())["payload"]),
             source,
             frozendict(record.files),
@@ -320,18 +307,15 @@ class LocalPackage:
     def _references(self, dependencies: tuple[Ref, ...]) -> tuple[Ref, ...]:
         if any(not isinstance(ref, Ref) for ref in dependencies):
             raise InvalidPackage("Dependencies must be Ref values")
-        refs = tuple(Ref(**ref.to_dict(), catalog=self._catalog) for ref in dependencies)
+        refs = tuple(
+            Ref.from_fields(**ref.to_dict(), catalog=self._catalog) for ref in dependencies
+        )
         logical = tuple(ref.without_revision() for ref in refs)
         if len(logical) != len(set(logical)):
             raise InvalidPackage("Duplicate dependency")
         if self.record.ref in logical:
             raise InvalidPackage("A package cannot depend on itself")
         return refs
-
-    def _requirements(self) -> tuple[str, ...]:
-        if not self.dependencies:
-            return ()
-        return self.graph.direct_references
 
     def _publication_record(self) -> LocalRecord:
         files: dict[str, Path] = {}
@@ -349,8 +333,8 @@ class LocalPackage:
                 raise InvalidPackage("Git source path must be a repository directory")
         return replace(self.record, source=source, files=files)
 
-    def _export(self, directory: Path) -> InstalledRecord:
-        native = self._client.export_package(directory, lockfile=self.lockfile)
+    def _export(self, directory: Path, *, lockfile: Path | None) -> InstalledRecord:
+        native = self._client.export_package(directory, lockfile=lockfile)
         reference = native.root.ref
         if reference is None:
             raise InvalidPackage("Conan did not return the exported recipe reference")

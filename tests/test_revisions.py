@@ -15,9 +15,9 @@ from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
 def test_revision_identity_and_snapshots(catalog: Catalog) -> None:
-    logical = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
-    first = Ref(**logical.to_dict(), revision="a" * 32, catalog=catalog)
-    second = Ref(**logical.to_dict(), revision="b" * 32, catalog=catalog)
+    logical = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
+    first = Ref.from_fields(**logical.to_dict(), revision="a" * 32, catalog=catalog)
+    second = Ref.from_fields(**logical.to_dict(), revision="b" * 32, catalog=catalog)
     assert len({logical, first, second}) == 3
     assert sorted((second, logical, first)) == [logical, first, second]
     assert first.without_revision() == logical
@@ -32,13 +32,15 @@ def test_revision_identity_and_snapshots(catalog: Catalog) -> None:
 
 @pytest.mark.parametrize("revision", ["", "latest", "*", "a#b", "a/b", "a%123", "a\nb"])
 def test_revision_must_be_a_concrete_token(catalog: Catalog, revision: str) -> None:
-    ref = Ref("soc", "cpu", "rtl", "default", "1.0", revision=revision, catalog=catalog)
     with pytest.raises(InvalidPackage):
+        ref = Ref.from_fields(
+            "soc", "cpu", "rtl", "default", "1.0", revision=revision, catalog=catalog
+        )
         to_conan_reference(ref)
 
 
 def test_search_selects_latest_history_and_explicit_revision(catalog: Catalog) -> None:
-    ref = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
+    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
     first = catalog.publish(LocalRecord(ref, {"generation": 1}))
     second = catalog.publish(LocalRecord(ref, {"generation": 2}))
     assert first.ref.revision and second.ref.revision
@@ -67,7 +69,7 @@ def test_query_builds_revision_patterns_directly() -> None:
 @pytest.mark.parametrize("operation", ["publish", "graph"])
 def test_local_roots_cannot_claim_a_revision(catalog: Catalog, operation: str) -> None:
     local = LocalRecord(
-        Ref("soc", "cpu", "rtl", "default", "1.0", revision="a" * 32, catalog=catalog)
+        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", revision="a" * 32, catalog=catalog)
     )
     with pytest.raises(InvalidPackage, match="local package root"):
         if operation == "publish":
@@ -80,11 +82,11 @@ def test_local_roots_cannot_claim_a_revision(catalog: Catalog, operation: str) -
 def test_lockfile_and_graph_keep_old_files_after_new_revision(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    ref = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
+    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
     file = tmp_path / "report"
     file.write_text("first")
     first = catalog.publish(LocalRecord(ref, files={"report": file}))
-    root = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
     graph = Graph(catalog, root, dependencies=(ref,))
     lock = graph.create_lockfile(tmp_path / "project.lock")
     contents = lock.read_bytes()
@@ -107,9 +109,9 @@ def test_lockfile_and_graph_keep_old_files_after_new_revision(
 
 
 def test_missing_explicit_revision_does_not_fall_back(catalog: Catalog) -> None:
-    ref = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
+    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
     catalog.publish(LocalRecord(ref))
-    missing = Ref(**ref.to_dict(), revision="a" * 32, catalog=catalog)
+    missing = Ref.from_fields(**ref.to_dict(), revision="a" * 32, catalog=catalog)
     with pytest.raises(NotFound):
         missing.get()
 
@@ -118,10 +120,12 @@ def test_external_unpinned_requirements_resolve_independently(
     catalog: Catalog, tmp_path: Path
 ) -> None:
     leaves = tuple(
-        catalog.publish(LocalRecord(Ref("soc", name, "rtl", "default", "1.0", catalog=catalog)))
+        catalog.publish(
+            LocalRecord(Ref.from_fields("soc", name, "rtl", "default", "1.0", catalog=catalog))
+        )
         for name in ("left", "right")
     )
-    root = LocalRecord(Ref("soc", "external", "rtl", "default", "1.0", catalog=catalog))
+    root = LocalRecord(Ref.from_fields("soc", "external", "rtl", "default", "1.0", catalog=catalog))
     LocalRecipe(root, tuple(str(record.ref.without_revision()) for record in leaves)).write(
         tmp_path
     )

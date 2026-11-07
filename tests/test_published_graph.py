@@ -16,17 +16,17 @@ from hwcatalog.api.records import LocalRecord, Record, Ref
 
 def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Catalog) -> None:
     leaf = catalog.publish(
-        LocalRecord(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
+        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
     )
     root = catalog.publish(
-        LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(leaf.ref,),
     )
     graph = root.ref.without_revision().graph()
     assert graph.record == root
     assert type(graph.record) is Record
     assert graph.requirements == (leaf.ref,)
-    assert graph.dependencies == (Dependency(root.ref, leaf.ref),)
+    assert graph.edges == (Dependency(root.ref, leaf.ref),)
     assert graph.ordered_refs(root.ref.without_revision()) == (leaf.ref, root.ref)
     assert graph.ordered_records(root.ref) == (leaf, root)
     assert graph.networkx is graph.networkx
@@ -38,7 +38,7 @@ def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Cata
     with pytest.raises(InvalidPackage, match="requirements come from"):
         Graph(catalog, root.ref, dependencies=(leaf.ref,))
     with pytest.raises(NotFound):
-        Ref("soc", "missing", "rtl", "default", "1.0", catalog=catalog).graph()
+        Ref.from_fields("soc", "missing", "rtl", "default", "1.0", catalog=catalog).graph()
 
 
 def test_published_tree_installs_root_and_dependencies_in_one_batch(
@@ -48,21 +48,21 @@ def test_published_tree_installs_root_and_dependencies_in_one_batch(
     artifact.write_text("data")
     leaf = catalog.publish(
         LocalRecord(
-            Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog),
             source=checkout,
             files={"report": artifact},
         )
     )
     root = catalog.publish(
         LocalRecord(
-            Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog),
             source=checkout,
             files={"report": artifact},
         ),
         dependencies=(leaf.ref,),
     )
     reader = Catalog(conan_server.configure(tmp_path / "reader", local_sources=True))
-    requested = Ref(**root.ref.to_dict(), catalog=reader)
+    requested = Ref.from_fields(**root.ref.to_dict(), catalog=reader)
     with (
         patch.object(reader._client, "download_recipe", wraps=reader._client.download_recipe) as dl,
         patch.object(reader._client, "run", wraps=reader._client.run) as run,
@@ -84,7 +84,8 @@ def test_published_graph_and_lock_keep_the_root_revision(catalog: Catalog, tmp_p
     artifact = tmp_path / "report"
     artifact.write_text("first")
     local = LocalRecord(
-        Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog), files={"report": artifact}
+        Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog),
+        files={"report": artifact},
     )
     first = catalog.publish(local)
     graph = first.ref.without_revision().graph()
@@ -107,7 +108,7 @@ def test_published_graph_and_lock_keep_the_root_revision(catalog: Catalog, tmp_p
 def test_template_changes_preserve_published_recipe_readability(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    local = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
     first = catalog.publish(local)
     render = recipe_module._recipe_text
 

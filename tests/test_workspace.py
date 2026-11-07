@@ -24,7 +24,7 @@ def rtl(catalog: Catalog, checkout: Path, git_origin: Path) -> InstalledRecord:
     assert git_origin.is_dir()
     return catalog.publish(
         LocalRecord(
-            Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
             {"filelist": "rtl.f"},
             source=checkout,
         )
@@ -64,7 +64,7 @@ def test_graph_uses_editable_source_and_preserves_working_changes(
     (editable.source / "cpu.sv").write_text("module modified_cpu; endmodule\n")
     graph = Graph(
         catalog,
-        LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(rtl.ref.without_revision(),),
         workspace=workspace,
     )
@@ -163,7 +163,7 @@ def test_unsupported_package_is_rejected_before_any_clone(
     artifact.write_text("report")
     unsupported = catalog.publish(
         LocalRecord(
-            Ref("soc", "be", "be", "lib-lef", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "be", "be", "lib-lef", "1.0", catalog=catalog),
             source=checkout if with_files else None,
             files={"report": artifact} if with_files else {},
         )
@@ -248,7 +248,7 @@ def test_mixed_graph_get_batches_only_the_noneditable_sources(
 ) -> None:
     parent = catalog.publish(
         LocalRecord(
-            Ref("soc", "parent", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "parent", "rtl", "default", "1.0", catalog=catalog),
             source=checkout,
         ),
         dependencies=(rtl.ref,),
@@ -272,7 +272,7 @@ def test_mixed_graph_get_batches_only_the_noneditable_sources(
 def test_workspace_base_and_project_lock_must_agree(
     catalog: Catalog, rtl: InstalledRecord, checkout: Path, tmp_path: Path
 ) -> None:
-    root = LocalRecord(Ref("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
     original = Graph(catalog, root, dependencies=(rtl.ref.without_revision(),))
     lock = original.create_lockfile(tmp_path / "old.lock")
     workspace = Workspace(catalog, tmp_path / "project/workspace.yaml")
@@ -305,7 +305,7 @@ def test_workspace_cannot_replace_a_different_pinned_transitive_revision(
 ) -> None:
     parent = catalog.publish(
         LocalRecord(
-            Ref("soc", "parent", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "parent", "rtl", "default", "1.0", catalog=catalog),
         ),
         dependencies=(rtl.ref,),
     )

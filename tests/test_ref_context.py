@@ -10,7 +10,6 @@ import pytest
 from examples.local_server import local_server
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
 from hwcatalog.api.records import Record, Ref
 from tests.helpers import local_record
 
@@ -23,8 +22,8 @@ def other_catalog(tmp_path: Path) -> Iterator[Catalog]:
 
 def test_same_coordinates_use_their_own_catalog(catalog: Catalog, other_catalog: Catalog) -> None:
     other = other_catalog
-    first = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
-    second = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=other)
+    first = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
+    second = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=other)
     catalog.publish(local_record(Record(first, {"origin": "first"})))
     other.publish(local_record(Record(second, {"origin": "second"})))
     assert first == second
@@ -48,10 +47,14 @@ def test_same_coordinates_use_their_own_catalog(catalog: Catalog, other_catalog:
 
 def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog) -> None:
     leaf = catalog.publish(
-        local_record(Record(Ref("soc", "leaf", "rtl", "default", "1.0", catalog=catalog)))
+        local_record(
+            Record(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
+        )
     )
     root = catalog.publish(
-        local_record(Record(Ref("soc", "root", "rtl", "default", "1.0", catalog=catalog))),
+        local_record(
+            Record(Ref.from_fields("soc", "root", "rtl", "default", "1.0", catalog=catalog))
+        ),
         dependencies=(leaf.ref,),
     )
     for record in (*catalog.search(), root.ref.get(), *root.ref.dependencies()):
@@ -59,13 +62,15 @@ def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog
         assert record.ref.get() == record
     graph = Graph(
         catalog,
-        local_record(Record(Ref("soc", "local", "rtl", "default", "1.0", catalog=catalog))),
+        local_record(
+            Record(Ref.from_fields("soc", "local", "rtl", "default", "1.0", catalog=catalog))
+        ),
         dependencies=(root.ref,),
     )
     records = {record.ref: record for record in graph.records}
     for graph_record in graph.records:
         assert graph_record.ref._catalog is catalog
-    for edge in graph.dependencies:
+    for edge in graph.edges:
         assert edge.source is records[edge.source].ref
         assert edge.target is records[edge.target].ref
         assert edge.target.get() == records[edge.target]
@@ -73,7 +78,9 @@ def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog
 
 def test_json_decoding_creates_refs_with_explicit_context(catalog: Catalog) -> None:
     published = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)))
+        local_record(
+            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+        )
     )
     restored = Record.from_json(json.dumps(published.to_dict(), allow_nan=False), catalog=catalog)
     assert restored.ref.get() == published
@@ -81,7 +88,7 @@ def test_json_decoding_creates_refs_with_explicit_context(catalog: Catalog) -> N
 
 
 def test_reference_requires_a_private_catalog(catalog: Catalog) -> None:
-    ref = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
+    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
     assert ref._catalog is catalog
     assert not hasattr(ref, "catalog")
     assert not is_dataclass(ref)
@@ -89,18 +96,6 @@ def test_reference_requires_a_private_catalog(catalog: Catalog) -> None:
     with pytest.raises(AttributeError):
         ref.component = "changed"  # type: ignore[misc]
     with pytest.raises(TypeError):
-        Ref("soc", "cpu", "rtl", "default", "1.0")  # type: ignore[call-arg]
+        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")  # type: ignore[call-arg]
     with pytest.raises(TypeError, match="requires a catalog"):
-        Ref("soc", "cpu", "rtl", "default", "1.0", catalog=None)  # type: ignore[arg-type]
-
-
-def test_dependent_lookup_filters_candidates(catalog: Catalog) -> None:
-    rtl = Ref("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)
-    catalog.publish(local_record(Record(rtl)))
-    macro = catalog.publish(
-        local_record(Record(Ref("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))),
-        dependencies=(rtl,),
-    )
-    query = SearchQuery(namespace="soc", component="cpu", type="lib-lef", view="be")
-    assert rtl.find_dependents(candidates=query, transitive=False) == (macro,)
-    assert rtl.find_dependents(candidates=SearchQuery(view="rtl"), transitive=False) == ()
+        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=None)  # type: ignore[arg-type]
