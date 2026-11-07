@@ -21,5 +21,5 @@ packages = rtl.graph().get_with_sources()
 ```
 
 - [Публичный API и связи классов](docs/interfaces.md).
-- [Два примера: RTL-проект и поиск LIB/LEF](docs/use-cases.md).
+- [Примеры: RTL, поиск LIB/LEF и несколько результатов проекта](docs/use-cases.md).
 - [Разработка и проверки](docs/development.md).

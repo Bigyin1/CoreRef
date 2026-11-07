@@ -1,4 +1,4 @@
-# Два примера
+# Примеры использования
 
 ## Принцип работы
 
@@ -20,7 +20,8 @@ Graph строится и для неопубликованного локаль
 Этот Workspace передают в Graph через `workspace=...`, чтобы использовать локальные
 правки. Пока editable поддерживаются для SCM-пакетов без упакованных файлов.
 
-Ниже два сценария: собрать RTL-исходники всего дерева и найти LIB/LEF для выбранного блока.
+Ниже три сценария: собрать RTL-исходники, найти LIB/LEF и опубликовать
+несколько результатов одного проекта.
 
 ## RTL-проект: зависимости и исходники
 
@@ -125,3 +126,65 @@ lib, lef = be.files["cpu.lib"], be.files["cpu.lef"]
 `graph.ordered_refs(graph.record.ref, stop_at=(rtl,))`, исключают сам rtl и передают
 оставшиеся опубликованные Ref в `graph.get_with_sources(refs)`. Общие зависимости
 других ветвей сохраняются. Выбор замены и использование LIB/LEF остаются логикой flow.
+
+## Несколько результатов в одном проекте
+
+Один проект обработки данных создаёт модель и отчёт по ней. Это два самостоятельных
+пакета одного компонента: namespace/component/view совпадают, type различается.
+У каждого результата свои файлы, прямые зависимости, Graph и проектный lockfile.
+
+```mermaid
+flowchart TD
+    subgraph PROJECT["Одна директория проекта"]
+        REPORT["demo.block.analysis.report/1.0<br/>summary.json"] --> MODEL["demo.block.analysis.model/1.0<br/>model.bin"]
+    end
+    MODEL --> INPUT["demo.block.data.input/1.0<br/>опубликованные входные данные"]
+```
+
+Файлы out/model.bin и out/summary.json уже созданы приложением; входной пакет опубликован.
+
+```python
+from pathlib import Path
+
+from hwcatalog.api.catalog import Catalog
+from hwcatalog.api.graph import Graph
+from hwcatalog.api.records import LocalRecord, Ref
+
+catalog = Catalog()
+root = Path.cwd()
+input_ref = Ref("demo.block.data.input/1.0", catalog=catalog)
+model_lock = root / "locks/model.lock"
+model_graph = Graph(
+    catalog,
+    LocalRecord(
+        Ref("demo.block.analysis.model/1.0", catalog=catalog),
+        files={"model.bin": root / "out/model.bin"},
+    ),
+    dependencies=(input_ref,),
+    lockfile=model_lock if model_lock.exists() else None,
+)
+model_graph.create_lockfile(model_lock)
+model = catalog.publish(model_graph)
+
+report_lock = root / "locks/report.lock"
+report_graph = Graph(
+    catalog,
+    LocalRecord(
+        Ref("demo.block.analysis.report/1.0", catalog=catalog),
+        files={"summary.json": root / "out/summary.json"},
+    ),
+    dependencies=(model.ref,),
+    lockfile=report_lock if report_lock.exists() else None,
+)
+report_graph.create_lockfile(report_lock)
+report = catalog.publish(report_graph)
+```
+
+Два вызова publish публикуют по одному пакету. Отчёт сохраняет зависимость от точной
+revision модели, а через неё — от исходных данных. Результаты можно получать и
+версионировать отдельно. Если они независимы, каждый Graph может ссылаться прямо на входные данные.
+
+Приложение также может читать отдельные model.toml и report.toml в этой же директории
+или описать оба результата в одном файле. Пути манифестов и lockfile выбирает приложение:
+одна директория проекта объединяет несколько LocalRecord/Graph с отдельными Ref.
+Каждый пакет получает файлы из соответствующего LocalRecord.files.
