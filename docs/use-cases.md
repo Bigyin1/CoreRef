@@ -7,6 +7,18 @@ SDK разрешает дерево и получает исходники, пр
 Формат TOML и поле payload.sources в этом примере — соглашение приложения.
 Все RTL-зависимости уже опубликованы с таким списком и SCM-исходниками.
 
+```mermaid
+flowchart TD
+    TOP["soc.top.rtl.default/1.0<br/>локальный проект"] --> CPU["soc.cpu.rtl.default/1.0"]
+    TOP --> GPIO["soc.gpio.rtl.default/2.0"]
+    CPU --> COMMON["soc.common.rtl.default/1.0"]
+    GPIO --> COMMON
+```
+
+Стрелка направлена от потребителя к зависимости. Здесь common — пример общей
+транзитивной зависимости CPU и GPIO: в deps.toml корня достаточно указать эти два блока,
+а common попадёт в разрешённый граф и список исходников один раз.
+
 ```toml
 # deps.toml в корне Git-проекта
 ref = "soc.top.rtl.default/1.0"
@@ -53,6 +65,16 @@ Lockfile сохраняют в репозитории для повторени�
 Продолжение примера: выбрать BE-представление CPU из реестра.
 Имя пакета находит кандидатов, зависимость от точной RTL revision подтверждает происхождение.
 У кандидатов могут быть промежуточные DFT-узлы.
+
+```mermaid
+flowchart TD
+    TOP["soc.top.rtl.default/1.0<br/>локальный проект"] --> RTL["soc.cpu.rtl.default/1.0<br/>точная RTL revision из графа проекта"]
+    BE["soc.cpu.be.lib-lef/4.0<br/>файлы cpu.lib и cpu.lef"] --> DFT["soc.cpu.dft.output/2.0"]
+    DFT --> RTL
+```
+
+BE-кандидат хранит зависимость через DFT от той же RTL revision, которую выбрал
+проект. Для BE без DFT связь может быть прямой: BE → RTL.
 
 ```python
 from hwcatalog.api.query import SearchQuery
