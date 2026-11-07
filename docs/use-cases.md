@@ -68,15 +68,13 @@ def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
     )
     dependencies = tuple(Ref(value, catalog=catalog) for value in config["dependencies"])
     lockfile = root / "conan.lock"
-    graph = Graph(
+    # Существующий lockfile ограничивает выбор; сохранение выполняется отдельно.
+    return Graph(
         catalog,
         local,
         dependencies=dependencies,
         lockfile=lockfile if lockfile.exists() else None,
     )
-    # При первом запуске фиксируем выбор, при следующих используем сохранённый.
-    graph.create_lockfile(lockfile)
-    return graph
 
 
 def collect_rtl_sources(graph: Graph) -> list[Path]:
@@ -99,8 +97,14 @@ sources = collect_rtl_sources(graph)
 
 `sources` содержит пути в порядке «зависимости перед потребителем».
 Локальный top остаётся в рабочем дереве, зависимости получаются одной пакетной операцией.
-Lockfile сохраняют в репозитории для повторения выбора. При готовности к публикации
-вызывают `catalog.publish(graph)` из чистого Git checkout с доступным получателям remote.
+Существующий lockfile используется при разрешении и остаётся без изменений.
+Чтобы явно сохранить выбор, вызывают `graph.create_lockfile(Path.cwd() / "conan.lock")`;
+этот вызов создаёт или перезаписывает файл снимком текущего Graph.
+Для намеренного обновления зависимостей создают новый Graph без старого lockfile,
+затем явно сохраняют новый выбор. Lockfile хранят в репозитории.
+
+При готовности к публикации вызывают `catalog.publish(graph)`
+из чистого Git checkout с доступным получателям remote.
 Для уже опубликованного корня достаточно `Ref(..., catalog=catalog).graph()`.
 
 ## Найти LIB/LEF для выбранного RTL
