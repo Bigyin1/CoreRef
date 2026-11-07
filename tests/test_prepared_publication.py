@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, InvalidPackage
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import LocalRecord, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError, InvalidPackage
+from coreref.api.graph import Graph
+from coreref.api.records import LocalRecord, Ref
 
 
 class Payload:

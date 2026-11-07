@@ -7,13 +7,13 @@ from unittest.mock import patch
 
 import pytest
 
+from coreref._internal.types import NativeGraph
+from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
 from examples.local_server import LocalServer
-from hwcatalog._internal.types import NativeGraph
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import InstalledRecord, LocalRecord, Record, Ref
 from tests.test_models import UserPayload
 
 

@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Record, Ref
+from coreref._internal.recipe import LocalRecipe, StoredRecipe
+from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Record, Ref
 
 
 def test_files_are_available_on_fetch_and_source_is_optional(

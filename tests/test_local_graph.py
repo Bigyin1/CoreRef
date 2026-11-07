@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import Conflict, InvalidPackage, NotFound
-from hwcatalog.api.graph import Dependency, Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.errors import Conflict, InvalidPackage, NotFound
+from coreref.api.graph import Dependency, Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import Record, Ref
 from tests.helpers import local_record
 
 

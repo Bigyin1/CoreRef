@@ -5,9 +5,9 @@ from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
 
 
 class ProjectTypeId(StrEnum):

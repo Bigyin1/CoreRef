@@ -4,10 +4,10 @@ from unittest.mock import patch
 
 import pytest
 
-from hwcatalog._internal.references import from_conan_reference
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage
-from hwcatalog.api.records import Ref
+from coreref._internal.references import from_conan_reference
+from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
+from coreref.api.records import Ref
 
 
 @pytest.mark.parametrize(

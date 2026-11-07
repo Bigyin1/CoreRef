@@ -7,17 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from examples.conan_config import configured_home
-from hwcatalog._internal.recipe import LocalRecipe
-from hwcatalog._internal.references import (
+from coreref._internal.recipe import LocalRecipe
+from coreref._internal.references import (
     from_conan_reference,
     to_conan_reference,
 )
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
-from hwcatalog.api.graph import Dependency, Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from coreref.api.graph import Dependency, Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import Record, Ref
+from examples.conan_config import configured_home
 from tests.helpers import local_record, resolve_published
 
 pytestmark = pytest.mark.conan
@@ -285,7 +285,7 @@ def test_upload_failure_is_reported_for_the_single_package(
 def test_command_os_error_is_not_not_found(
     conan_catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from hwcatalog._internal import client
+    from coreref._internal import client
 
     def fail(*_args: object, **_kwargs: object) -> object:
         raise OSError("API initialization failed")
@@ -382,7 +382,7 @@ def test_native_api_failure_is_a_catalog_error(
 ) -> None:
     from conan.errors import ConanException  # type: ignore[import-untyped]
 
-    from hwcatalog._internal import client
+    from coreref._internal import client
 
     root = record(catalog=conan_catalog)
     root = conan_catalog.publish(local_record(root))

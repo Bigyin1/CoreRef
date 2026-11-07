@@ -7,12 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Record, Ref
 from examples.conan_config import configured_home
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record
 from tests.test_models import UserPayload
 
@@ -44,8 +44,8 @@ def test_configured_profile_defaults_are_used_without_rewriting(*, catalog: Cata
     assert config.read_text() == (
         "core:default_profile=project-host\ncore:default_build_profile=project-build\n"
     )
-    assert not (home / "hwcatalog-profile").exists()
-    assert not (home / "hwcatalog-build-profile").exists()
+    assert not (home / "coreref-profile").exists()
+    assert not (home / "coreref-build-profile").exists()
 
 
 def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path, *, catalog: Catalog) -> None:

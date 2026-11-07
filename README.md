@@ -1,4 +1,4 @@
-# hwcatalog-conan
+# CoreRef
 
 Экспериментальный Python SDK для каталога аппаратных компонентов на Conan.
 Пакет хранит метаданные, зависимости и файлы; RTL-исходники получает из Git через SCM Conan.
@@ -12,8 +12,8 @@ uv sync --frozen
 ```
 
 ```python
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.records import Ref
+from coreref.api.catalog import Catalog
+from coreref.api.records import Ref
 
 catalog = Catalog()
 rtl = Ref("soc.cpu.rtl.default/1.0", catalog=catalog)

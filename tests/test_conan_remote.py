@@ -12,17 +12,17 @@ from dulwich import porcelain
 from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
-from examples.conan_config import configured_home
-from examples.local_server import local_server
-from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import (
+from coreref._internal.recipe import LocalRecipe, StoredRecipe
+from coreref.api.catalog import Catalog
+from coreref.api.errors import (
     CatalogError,
     NotFound,
 )
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Record, Ref
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Record, Ref
+from examples.conan_config import configured_home
+from examples.local_server import local_server
 from tests.helpers import local_record, resolve_published
 
 pytestmark = pytest.mark.conan_remote

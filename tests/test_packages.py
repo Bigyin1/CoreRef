@@ -8,12 +8,12 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 from dulwich.repo import Repo
 
-from hwcatalog._internal.recipe import LocalRecipe, StoredRecipe
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, InvalidPackage, NotFound
-from hwcatalog.api.graph import Dependency
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Record, Ref
+from coreref._internal.recipe import LocalRecipe, StoredRecipe
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError, InvalidPackage, NotFound
+from coreref.api.graph import Dependency
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record, resolve_published
 
 
@@ -204,7 +204,7 @@ def test_requirements_and_scm_share_one_exported_conandata(
     data = yaml.safe_load((recipe.directory / "conandata.yml").read_text())
     assert record["format"] == 7
     assert set(record) == {"format", "ref", "payload"}
-    assert not (recipe.directory / "hwcatalog.json").exists()
+    assert not (recipe.directory / "coreref.json").exists()
     assert set(data) == {"requires", "scm"}
     assert tuple(data["requires"]) == recipe.requirements
     assert data["requires"][0] == str(dependency.ref)

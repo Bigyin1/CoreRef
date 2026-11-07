@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import Record, Ref
 from examples.local_server import local_server
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import Record, Ref
 from tests.helpers import local_record
 
 

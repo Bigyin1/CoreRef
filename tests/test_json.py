@@ -7,8 +7,8 @@ from math import inf, nan
 import pytest
 from frozendict import deepfreeze
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.records import JSON, Record
+from coreref.api.catalog import Catalog
+from coreref.api.records import JSON, Record
 from tests.helpers import local_record, release, run
 
 

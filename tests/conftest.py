@@ -10,8 +10,8 @@ from dulwich.objects import Blob, Commit, ObjectID, Tree
 from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
+from coreref.api.catalog import Catalog
 from examples.local_server import LocalServer, local_server
-from hwcatalog.api.catalog import Catalog
 
 
 @pytest.fixture

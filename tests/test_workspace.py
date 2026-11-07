@@ -8,13 +8,13 @@ from unittest.mock import patch
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from hwcatalog._internal.recipe import ConsumerRecipe
-from hwcatalog._internal.types import NativeGraph
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import InstalledRecord, LocalRecord, Ref
-from hwcatalog.api.workspace import Workspace
+from coreref._internal.recipe import ConsumerRecipe
+from coreref._internal.types import NativeGraph
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from coreref.api.graph import Graph
+from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.workspace import Workspace
 
 pytestmark = pytest.mark.conan_remote
 
@@ -106,7 +106,7 @@ def test_generated_conan_workspace_really_resolves_an_editable_package(
     assert package.folders.source_folder is not None
     assert Path(package.folders.source_folder).resolve() == editable.source
     assert package.recipe_folder is not None
-    assert Path(package.recipe_folder).is_relative_to(workspace.path.parent / ".hwcatalog")
+    assert Path(package.recipe_folder).is_relative_to(workspace.path.parent / ".coreref")
     assert Path.cwd() != workspace._file.native_directory
     assert not rtl.ref.graph().editables
 
@@ -203,7 +203,7 @@ def test_failed_git_open_cleans_temporary_checkout_and_can_be_retried(
         workspace.add(rtl.ref)
     assert not workspace.path.exists()
     assert not (tmp_path / "soc.cpu.rtl.default-1.0").exists()
-    assert not tuple(tmp_path.glob("hwcatalog-editable-*"))
+    assert not tuple(tmp_path.glob("coreref-editable-*"))
     (tmp_path / "offline.git").rename(git_origin)
     assert workspace.add(rtl.ref).source is not None
 
@@ -215,14 +215,14 @@ def test_private_conan_metadata_can_be_rebuilt_without_recloning(
     first = workspace.add(rtl.ref)
     assert first.source is not None
     (first.source / "cpu.sv").write_text("uncommitted work")
-    shutil.rmtree(workspace.path.parent / ".hwcatalog")
+    shutil.rmtree(workspace.path.parent / ".coreref")
     with patch.object(
         catalog._client, "open_sources", side_effect=AssertionError("Unexpected clone")
     ):
         restored = Workspace(catalog, workspace.path).add(rtl.ref)
     assert restored.source == first.source
     assert (first.source / "cpu.sv").read_text() == "uncommitted work"
-    assert tuple((workspace.path.parent / ".hwcatalog").rglob("conanws.yml"))
+    assert tuple((workspace.path.parent / ".coreref").rglob("conanws.yml"))
 
 
 def test_multiple_workspaces_and_moved_project_use_relative_source_paths(

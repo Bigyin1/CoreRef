@@ -7,10 +7,10 @@ from enum import StrEnum
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import JSON, JSONSerializable, LocalRecord, Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
+from coreref.api.query import SearchQuery
+from coreref.api.records import JSON, JSONSerializable, LocalRecord, Record, Ref
 from tests.helpers import local_record
 
 

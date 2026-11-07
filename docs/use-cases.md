@@ -53,9 +53,9 @@ dependencies = ["soc.cpu.rtl.default/1.0", "soc.gpio.rtl.default/2.0"]
 import tomllib
 from pathlib import Path
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.records import InstalledRecord, LocalRecord, Ref
 
 
 def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
@@ -124,10 +124,10 @@ BE-кандидат хранит зависимость через DFT от то
 проект. Для BE без DFT связь может быть прямой: BE → RTL.
 
 ```python
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import InstalledRecord, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import InstalledRecord, Ref
 
 
 def find_lib_lef(catalog: Catalog, rtl: Ref) -> InstalledRecord:
@@ -180,9 +180,9 @@ flowchart TD
 ```python
 from pathlib import Path
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.records import InstalledRecord, LocalRecord, Ref
 
 
 def publish_result(

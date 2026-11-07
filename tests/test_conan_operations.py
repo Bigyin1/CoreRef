@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.records import Record, Ref
 from tests.helpers import local_record
 
 

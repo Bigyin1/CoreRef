@@ -24,7 +24,7 @@ class WorkspaceFile:
     def __init__(self, catalog: Catalog, path: Path) -> None:
         self.catalog = catalog
         self.path = path.expanduser().resolve()
-        self.native_directory = self.path.parent / ".hwcatalog" / "workspaces" / self.path.name
+        self.native_directory = self.path.parent / ".coreref" / "workspaces" / self.path.name
 
     def read(self) -> dict[Ref, Path]:
         try:
@@ -77,7 +77,7 @@ class WorkspaceFile:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(yaml.safe_dump({"packages": packages}, sort_keys=False))
         self.native_directory.mkdir(parents=True, exist_ok=True)
-        ignore = self.path.parent / ".hwcatalog" / ".gitignore"
+        ignore = self.path.parent / ".coreref" / ".gitignore"
         if not ignore.exists():
             ignore.write_text("*\n")
         native = [

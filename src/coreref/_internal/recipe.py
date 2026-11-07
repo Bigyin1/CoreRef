@@ -17,7 +17,7 @@ from .references import from_conan_reference, to_conan_reference
 from .types import NativePackage
 
 _RECIPE_ENV = Environment(
-    loader=PackageLoader("hwcatalog._internal"),
+    loader=PackageLoader("coreref._internal"),
     autoescape=False,  # noqa: S701 - Python literals use repr escaping.
     undefined=StrictUndefined,
     trim_blocks=True,

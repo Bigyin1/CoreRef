@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog._internal.types import NativeGraph
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import JSON, LocalRecord, Ref
+from coreref._internal.types import NativeGraph
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.records import JSON, LocalRecord, Ref
 from tests.test_models import UserPayload
 
 

@@ -5,12 +5,12 @@ from unittest.mock import patch
 
 import pytest
 
+from coreref._internal.recipe import LocalRecipe
+from coreref.api.catalog import Catalog
+from coreref.api.errors import NotFound
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Ref
 from examples.local_server import LocalServer
-from hwcatalog._internal.recipe import LocalRecipe
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import NotFound
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Ref
 
 
 def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(

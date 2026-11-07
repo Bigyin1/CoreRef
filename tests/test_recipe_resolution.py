@@ -5,13 +5,13 @@ from unittest.mock import patch
 
 import pytest
 
+from coreref._internal.recipe import LocalRecipe
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError, InvalidPackage
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import InstalledRecord, LocalRecord, Ref
 from examples.local_server import LocalServer
-from hwcatalog._internal.recipe import LocalRecipe
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, InvalidPackage
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import InstalledRecord, LocalRecord, Ref
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@ import subprocess
 import sys
 from textwrap import dedent
 
-from hwcatalog.api.catalog import Catalog
+from coreref.api.catalog import Catalog
 
 
 def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
@@ -12,28 +12,28 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         import sys
         from pathlib import Path
 
-        from hwcatalog import api
+        from coreref import api
 
         assert "pydantic" not in sys.modules
         assert "networkx" not in sys.modules
         assert "conan" not in sys.modules
 
-        from hwcatalog.api import errors
+        from coreref.api import errors
 
-        assert "hwcatalog.api.records" not in sys.modules
+        assert "coreref.api.records" not in sys.modules
         assert "pydantic" not in sys.modules
         assert "conan" not in sys.modules
 
-        from hwcatalog.api import records
+        from coreref.api import records
 
         assert "networkx" not in sys.modules
         assert "pydantic" not in sys.modules
 
-        from hwcatalog.api.graph import Graph
+        from coreref.api.graph import Graph
         assert "conan" not in sys.modules
 
-        from hwcatalog.api import catalog
-        from hwcatalog.api import query
+        from coreref.api import catalog
+        from coreref.api import query
 
         manifest: dict[str, records.JSON] = {"views": ["rtl", "timing"]}
         instance = catalog.Catalog(Path(sys.argv[1]))

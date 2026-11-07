@@ -3,8 +3,8 @@
 import networkx as nx
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.graph import Dependency, Graph
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Dependency, Graph
 from tests.helpers import graph_json, local_record, release
 
 

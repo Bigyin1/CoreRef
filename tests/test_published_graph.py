@@ -6,12 +6,12 @@ from unittest.mock import patch
 import networkx as nx
 import pytest
 
+from coreref._internal import recipe as recipe_module
+from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage, NotFound
+from coreref.api.graph import Dependency, Graph
+from coreref.api.records import LocalRecord, Record, Ref
 from examples.local_server import LocalServer
-from hwcatalog._internal import recipe as recipe_module
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage, NotFound
-from hwcatalog.api.graph import Dependency, Graph
-from hwcatalog.api.records import LocalRecord, Record, Ref
 
 
 def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Catalog) -> None:

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.records import InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
 
 
 def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Catalog) -> None:

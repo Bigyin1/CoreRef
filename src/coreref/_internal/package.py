@@ -49,7 +49,7 @@ class StoredPackage:
 
     def resolved_graph(self, lockfile: Path | None) -> PackageGraph:
         """Resolve the stored root itself, retaining its exact revision and metadata."""
-        with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
+        with TemporaryDirectory(prefix="coreref-resolve-") as temporary:
             directory = Path(temporary)
             ConsumerRecipe((str(self.ref),)).write(directory)
             native = self._client.graph(
@@ -91,7 +91,7 @@ class StoredPackage:
         fetch_source = with_sources and recipe.has_source
         if not recipe.record.file_names and not fetch_source:
             return InstalledRecord(recipe.record)
-        with TemporaryDirectory(prefix="hwcatalog-conan-install-") as temporary:
+        with TemporaryDirectory(prefix="coreref-install-") as temporary:
             graph = ResolvedConanGraph(
                 self._client.install(recipe.reference, Path(temporary), with_sources=fetch_source)
             )
@@ -207,7 +207,7 @@ class PackageGraph:
     ) -> tuple[InstalledRecord, ...]:
         selected = {recipe.record.ref for recipe in recipes if with_sources and recipe.has_source}
         sources = {str(ref): ref in selected for ref in self._packages}
-        with TemporaryDirectory(prefix="hwcatalog-conan-batch-") as temporary:
+        with TemporaryDirectory(prefix="coreref-batch-") as temporary:
             directory = Path(temporary)
             ConsumerRecipe(tuple(recipe.reference for recipe in recipes)).write(directory)
             self._client.save_lockfile(self.graph.native, directory / "conan.lock")
@@ -262,7 +262,7 @@ class LocalPackage:
     @cached_property
     def graph(self) -> ResolvedConanGraph:
         recipe = LocalRecipe(self.record, tuple(str(ref) for ref in self.dependencies))
-        with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
+        with TemporaryDirectory(prefix="coreref-resolve-") as temporary:
             directory = Path(temporary)
             recipe.write(directory)
             update = (
@@ -286,7 +286,7 @@ class LocalPackage:
             resolved = self.resolved.graph
         requirements = resolved.direct_references if resolved is not None else ()
         recipe = LocalRecipe(record, requirements)
-        with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:
+        with TemporaryDirectory(prefix="coreref-publish-") as temporary:
             directory = Path(temporary)
             recipe.write(directory)
             recipe.copy_files(directory)

@@ -5,11 +5,11 @@ from typing import cast
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage, NotFound
-from hwcatalog.api.graph import Dependency
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import JSON, LocalRecord, Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage, NotFound
+from coreref.api.graph import Dependency
+from coreref.api.query import SearchQuery
+from coreref.api.records import JSON, LocalRecord, Record, Ref
 from tests.helpers import graph_json, local_record, release, resolve_published
 
 

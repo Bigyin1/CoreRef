@@ -3,15 +3,15 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from coreref.api.catalog import Catalog
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Ref
 from examples.local_server import local_server
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Ref
 
 
 def main() -> None:
     with (
-        TemporaryDirectory(prefix="hwcatalog-example-") as directory,
+        TemporaryDirectory(prefix="coreref-example-") as directory,
         local_server(Path(directory) / "server") as server,
     ):
         catalog = Catalog(server.configure(Path(directory) / "cache"))

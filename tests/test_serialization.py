@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.records import JSON, Record
+from coreref.api.catalog import Catalog
+from coreref.api.records import JSON, Record
 from tests.helpers import content, release, run
 
 

@@ -4,11 +4,11 @@ from unittest.mock import patch
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import InvalidPackage
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Ref
 
 
 def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog) -> None:

@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hwcatalog-conan"
+name = "coreref"
 version = "0.1.0"
-description = "Experimental Conan-backed hardware catalog"
+description = "Hardware component representations and dependencies on Conan"
 readme = "README.md"
 requires-python = ">=3.15"
 dependencies = [
@@ -30,7 +30,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/hwcatalog"]
+packages = ["src/coreref"]
 
 [tool.ruff]
 required-version = ">=0.17.2,<0.18"
@@ -77,5 +77,5 @@ addopts = "-ra"
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = [
-    "hwcatalog.api.query.SearchQuery",
+    "coreref.api.query.SearchQuery",
 ]

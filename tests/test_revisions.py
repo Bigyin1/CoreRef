@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog._internal.recipe import LocalRecipe
-from hwcatalog._internal.references import from_conan_reference, to_conan_reference
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, InvalidPackage, NotFound
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Record, Ref
+from coreref._internal.recipe import LocalRecipe
+from coreref._internal.references import from_conan_reference, to_conan_reference
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError, InvalidPackage, NotFound
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Record, Ref
 
 
 def test_revision_identity_and_snapshots(catalog: Catalog) -> None:

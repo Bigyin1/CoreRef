@@ -2,9 +2,9 @@
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Ref
 
 
 @pytest.mark.parametrize("subcomponent", [None, "alu"])

@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from hwcatalog.api.catalog import Catalog
-from hwcatalog.api.errors import CatalogError, InvalidPackage
-from hwcatalog.api.graph import Graph
-from hwcatalog.api.query import SearchQuery
-from hwcatalog.api.records import LocalRecord, Record, Ref
+from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError, InvalidPackage
+from coreref.api.graph import Graph
+from coreref.api.query import SearchQuery
+from coreref.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record
 
 
@@ -79,7 +79,7 @@ def test_failed_lock_creation_preserves_previous_scope(catalog: Catalog, tmp_pat
 
 
 def test_legacy_coordinate_names_are_rejected(*, catalog: Catalog) -> None:
-    from hwcatalog._internal.references import from_conan_reference
+    from coreref._internal.references import from_conan_reference
 
     with pytest.raises(InvalidPackage):
         from_conan_reference("soc.cpu.rtl/1.0", catalog=catalog)

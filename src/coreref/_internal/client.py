@@ -235,7 +235,7 @@ class ConanClient:
             remotes = conan.remotes.list(self.remote) if self.remote is not None else []
             destination.parent.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(
-                prefix="hwcatalog-editable-", dir=destination.parent
+                prefix="coreref-editable-", dir=destination.parent
             ) as temporary:
                 checkout = Path(temporary) / "source"
                 conan.workspace.open(reference, remotes, cwd=temporary, folder=str(checkout))
