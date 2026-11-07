@@ -68,7 +68,7 @@ def test_published_tree_installs_root_and_dependencies_in_one_batch(
         patch.object(reader._client, "run", wraps=reader._client.run) as run,
     ):
         graph = requested.graph()
-        assert dl.call_count == 2
+        assert dl.call_count == 0
         assert sum(call.args[:2] == ("graph", "info") for call in run.call_args_list) == 1
         assert not any(call.args[0] == "install" for call in run.call_args_list)
         records = graph.get_with_sources(graph.ordered_refs(requested))
@@ -76,7 +76,7 @@ def test_published_tree_installs_root_and_dependencies_in_one_batch(
         assert all(record.files["report"].read_text() == "data" for record in records)
         assert all(record.source and (record.source / "cpu.sv").is_file() for record in records)
         assert graph.get((requested,))[0] is records[1]
-        assert dl.call_count == 2
+        assert dl.call_count == 0
         assert sum(call.args[0] == "install" for call in run.call_args_list) == 1
 
 

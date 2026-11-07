@@ -4,7 +4,7 @@ These protocols describe existing Conan objects; they do not wrap or replace the
 Conan itself currently ships without typing metadata.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Protocol
 
 
@@ -49,6 +49,9 @@ class NativeFolders(Protocol):
 
 
 class NativePackage(Protocol):
+    @property
+    def conan_data(self) -> Mapping[str, object] | None: ...
+
     @property
     def ref(self) -> NativeReference: ...
 

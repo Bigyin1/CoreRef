@@ -106,7 +106,7 @@ def test_publish_does_not_scan_unrelated_packages(conan_catalog: Catalog, tmp_pa
     assert Ref.from_fields(**published.ref.to_dict(), catalog=conan_catalog).get() == published
 
 
-def test_publish_rejects_invalid_catalog_metadata_before_resolving_it(
+def test_publish_rejects_invalid_resolved_metadata_before_exporting(
     conan_catalog: Catalog,
 ) -> None:
     dependency = conan_catalog.publish(local_record(record(catalog=conan_catalog)))

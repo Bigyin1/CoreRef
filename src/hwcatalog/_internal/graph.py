@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from functools import cached_property
+from pathlib import Path
 
 from ..api.errors import InvalidPackage
 from ..api.graph import Dependency
@@ -36,6 +37,13 @@ class ResolvedConanGraph:
         if ref.revision is not None and package.ref.revision != ref.revision:
             raise InvalidPackage(f"Conan selected a different revision for {ref}")
         return package
+
+    def recipe_directory(self, ref: Ref) -> Path:
+        """Return the recipe folder already loaded for this exact graph node."""
+        directory = self.package(ref).recipe_folder
+        if directory is None:
+            raise InvalidPackage(f"Conan did not provide the recipe directory for {ref}")
+        return Path(directory)
 
     def contains(self, ref: Ref) -> bool:
         if ref.revision is not None:

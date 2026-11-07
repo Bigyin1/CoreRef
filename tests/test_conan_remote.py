@@ -189,7 +189,7 @@ def test_local_revision_does_not_override_remote_dependency(
 
 
 @pytest.mark.parametrize("operation", ["get", "resolve", "search", "publish"])
-def test_recipes_are_downloaded_once_per_operation(
+def test_warm_operations_do_not_redownload_recipes(
     remote_catalog: Catalog, tmp_path: Path, operation: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     artifact = tmp_path / "report.txt"
@@ -220,7 +220,7 @@ def test_recipes_are_downloaded_once_per_operation(
     }
     actions[operation]()
     downloads = [args[1] for args in calls if args[0] == "download"]
-    assert downloads and len(downloads) == len(set(downloads))
+    assert not downloads
     assert sum(args[:2] == ("graph", "info") for args in calls) == (
         operation in ("resolve", "publish")
     )
@@ -369,7 +369,7 @@ def test_remote_sources_and_files_belong_to_the_requested_revision(
         assert ("wire second" in (fetched.source / "cpu.sv").read_text()) == (text == "second")
 
 
-def test_deleted_remote_revision_is_not_served_from_the_local_cache(
+def test_deleted_remote_revision_remains_available_by_exact_cached_ref(
     remote_catalog: Catalog,
 ) -> None:
     record = remote_catalog.publish(
@@ -378,7 +378,8 @@ def test_deleted_remote_revision_is_not_served_from_the_local_cache(
         )
     )
     remote_catalog._client.run("remove", str(record.ref), "--remote", "catalog", "--confirm")
-    with pytest.raises(NotFound):
-        record.ref.get()
+    assert record.ref.get() == record
+    assert record.ref.graph().record == record
+    assert remote_catalog.search() == ()
     with pytest.raises(NotFound):
         record.ref.without_revision().get()

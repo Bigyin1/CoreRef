@@ -39,9 +39,9 @@ class StoredPackage:
     def recipe(self) -> StoredRecipe:
         return self._load(str(self.ref))
 
-    def record_at(self, reference: str) -> Record:
-        """Read an exact requirement and reject a changed published revision."""
-        return self._load(reference).record
+    def record_at(self, reference: str, *, directory: Path) -> Record:
+        """Read an exact recipe already located by Conan during graph resolution."""
+        return self._load(reference, directory=directory).record
 
     def info(self) -> Record:
         return self.recipe().record
@@ -60,16 +60,29 @@ class StoredPackage:
             native = self._client.graph(
                 directory,
                 lockfile=lockfile,
-                update=lockfile is None and self._client.remote is not None,
+                update=(
+                    self.ref.revision is None
+                    and lockfile is None
+                    and self._client.remote is not None
+                ),
             )
         graph = ResolvedConanGraph(native)
-        record = self.record_at(graph.direct_references[0])
+        reference = graph.direct_references[0]
+        ref = from_conan_reference(reference, catalog=self._catalog)
+        record = self.record_at(reference, directory=graph.recipe_directory(ref))
         # Later fetches must reuse Conan's choice, including an older locked root.
         self._resolved[self.ref.without_revision()] = record.ref
         return PackageGraph(record, graph, packages={record.ref: self})
 
     def dependencies(self, query: SearchQuery) -> tuple[Record, ...]:
-        records = self._read_records(self.recipe().requirements)
+        records = []
+        logical_query = replace(query, revision=None)
+        for reference in dict.fromkeys(self.recipe().requirements):
+            ref = from_conan_reference(reference, catalog=self._catalog)
+            # Floating requirements need Conan's latest choice before filtering RREV.
+            prefilter = logical_query if ref.revision is None else query
+            if prefilter.matches_ref(ref):
+                records.append(self._load(reference).record)
         return query.select(records)
 
     def _get(self, *, with_sources: bool) -> InstalledRecord:
@@ -81,13 +94,15 @@ class StoredPackage:
             graph = ResolvedConanGraph(
                 self._client.install(recipe.reference, Path(temporary), with_sources=fetch_source)
             )
-            self._read_records(graph.references)
+            self._read_records(graph)
             return recipe.installed(graph.package(recipe.record.ref), with_sources=fetch_source)
 
-    def _read_records(self, references: tuple[str, ...]) -> tuple[Record, ...]:
-        return tuple(self._load(reference).record for reference in dict.fromkeys(references))
+    def _read_records(self, graph: ResolvedConanGraph) -> None:
+        for reference in graph.references:
+            ref = from_conan_reference(reference, catalog=self._catalog)
+            self.record_at(reference, directory=graph.recipe_directory(ref))
 
-    def _load(self, reference: str) -> StoredRecipe:
+    def _load(self, reference: str, *, directory: Path | None = None) -> StoredRecipe:
         ref = from_conan_reference(reference, catalog=self._catalog)
         if ref.revision is None:
             if ref not in self._resolved:
@@ -100,14 +115,10 @@ class StoredPackage:
                 )
             ref = self._resolved[ref]
         if ref not in self._recipes:
-            self._download(ref, str(ref))
+            if directory is None:
+                directory = self._client.download_recipe(str(ref))
+            self._recipes[ref] = StoredRecipe(directory, ref, reference=str(ref))
         return self._recipes[ref]
-
-    def _download(self, ref: Ref, reference: str) -> StoredRecipe:
-        directory = self._client.download_recipe(reference)
-        recipe = StoredRecipe(directory, ref, reference=reference)
-        self._recipes[ref] = recipe
-        return recipe
 
 
 class PackageGraph:
@@ -127,9 +138,9 @@ class PackageGraph:
         self._packages = dict(packages)
         self._fetched: dict[Ref, InstalledRecord] = {}
 
-    @cached_property
-    def result(self) -> GraphData:
-        return self.graph.result(self.record, self._read_records(self.graph.references))
+        self.result: GraphData = self.graph.result(
+            self.record, self._read_records(self.graph.references)
+        )
 
     def create_lockfile(self, path: str | Path) -> Path:
         output = Path(path).expanduser().resolve()
@@ -223,7 +234,9 @@ class PackageGraph:
             ref = from_conan_reference(reference, catalog=self._catalog)
             if ref not in self._packages:
                 self._packages[ref] = StoredPackage(ref)
-            records.append(self._packages[ref].record_at(reference))
+            records.append(
+                self._packages[ref].record_at(reference, directory=self.graph.recipe_directory(ref))
+            )
         return tuple(records)
 
 
@@ -243,11 +256,9 @@ class LocalPackage:
         self.record = self._snapshot(record)
         self.dependencies = self._references(dependencies)
         self.lockfile = lockfile
-        self._packages: dict[Ref, StoredPackage] = {}
 
     @cached_property
     def graph(self) -> ResolvedConanGraph:
-        self._validate_requirements()
         recipe = LocalRecipe(self.record, tuple(str(ref) for ref in self.dependencies))
         with TemporaryDirectory(prefix="hwcatalog-conan-resolve-") as temporary:
             directory = Path(temporary)
@@ -263,21 +274,14 @@ class LocalPackage:
                 native = self._client.graph(directory, lockfile=self.lockfile)
             return ResolvedConanGraph(native)
 
-    def _validate_requirements(self) -> None:
-        for ref in self.dependencies:
-            if ref.revision is not None or self.lockfile is None:
-                package = StoredPackage(ref)
-                recipe = package.recipe()
-                self._packages[recipe.record.ref] = package
-
     @cached_property
     def resolved(self) -> PackageGraph:
-        return PackageGraph(self.record, self.graph, packages=self._packages)
+        return PackageGraph(self.record, self.graph, packages={})
 
     def publish(self, *, resolved: ResolvedConanGraph | None = None) -> InstalledRecord:
         record = self._publication_record()
         if resolved is None and self.dependencies:
-            resolved = self.graph
+            resolved = self.resolved.graph
         requirements = resolved.direct_references if resolved is not None else ()
         recipe = LocalRecipe(record, requirements)
         with TemporaryDirectory(prefix="hwcatalog-conan-publish-") as temporary:

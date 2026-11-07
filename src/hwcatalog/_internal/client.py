@@ -4,7 +4,7 @@ Conan ships no typing metadata. Untyped imports and runtime casts are confined
 to this adapter and the protocols describing its actual return objects.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Protocol, cast
@@ -169,15 +169,20 @@ class ConanClient:
         return entries
 
     def download_recipe(self, reference: str) -> Path:
-        if self.remote:
-            result = cast(
-                Mapping[str, object],
-                self.run("download", reference, "--only-recipe", "--remote", self.remote),
-            )
-            entries = self._entries(result)
-            logical, _, revision = reference.partition("#")
-            if logical not in entries or revision not in entries[logical].revisions:
-                raise NotFound(reference)
+        """Use the cached exact revision, downloading only when it is absent."""
+        try:
+            return self.cache_path(reference)
+        except NotFound:
+            if self.remote is None:
+                raise
+        result = cast(
+            Mapping[str, object],
+            self.run("download", reference, "--only-recipe", "--remote", self.remote),
+        )
+        entries = self._entries(result)
+        logical, _, revision = reference.partition("#")
+        if logical not in entries or revision not in entries[logical].revisions:
+            raise NotFound(reference)
         return self.cache_path(reference)
 
     def cache_path(self, reference: str) -> Path:
@@ -209,7 +214,19 @@ class ConanClient:
                 **({"workspace": workspace} if workspace is not None else {}),
             ),
         )
-        return cast(NativeGraph, result["graph"])
+        graph = cast(NativeGraph, result["graph"])
+        if not update and lockfile is None and self.remote and self._floating_requirements(graph):
+            # Externally exported recipes can float below an otherwise pinned root.
+            return self.graph(directory, update=True, workspace=workspace)
+        return graph
+
+    def _floating_requirements(self, graph: NativeGraph) -> bool:
+        for node in graph.nodes:
+            data = node.conanfile.conan_data or {}
+            requirements = cast(Iterable[str], data.get("requires", ()))
+            if any("#" not in reference for reference in requirements):
+                return True
+        return False
 
     def open_sources(self, reference: str, destination: Path) -> None:
         """Use Conan's workspace SCM checkout directly, without installing cache sources."""
