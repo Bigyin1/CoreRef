@@ -55,26 +55,46 @@ from pathlib import Path
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import LocalRecord, Ref
+from hwcatalog.api.records import InstalledRecord, LocalRecord, Ref
+
+
+def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
+    """Прочитать описание приложения и разрешить зависимости локального проекта."""
+    config = tomllib.loads((root / "deps.toml").read_text())
+    local = LocalRecord(
+        Ref(config["ref"], catalog=catalog),
+        payload={"sources": config["sources"]},
+        source=root,
+    )
+    dependencies = tuple(Ref(value, catalog=catalog) for value in config["dependencies"])
+    lockfile = root / "conan.lock"
+    graph = Graph(
+        catalog,
+        local,
+        dependencies=dependencies,
+        lockfile=lockfile if lockfile.exists() else None,
+    )
+    # При первом запуске фиксируем выбор, при следующих используем сохранённый.
+    graph.create_lockfile(lockfile)
+    return graph
+
+
+def collect_rtl_sources(graph: Graph) -> list[Path]:
+    """Получить зависимости одной группой и добавить исходники локального корня."""
+    records: tuple[LocalRecord | InstalledRecord, ...] = graph.get_with_sources()
+    if isinstance(graph.record, LocalRecord):
+        records = (*records, graph.record)
+    sources = []
+    for record in records:
+        if record.source is not None:
+            # sources в payload — относительные пути по соглашению приложения.
+            sources.extend(record.source / name for name in record.payload["sources"])
+    return sources
+
 
 catalog = Catalog()
-root = Path.cwd()
-config = tomllib.loads((root / "deps.toml").read_text())
-local = LocalRecord(
-    Ref(config["ref"], catalog=catalog),
-    payload={"sources": config["sources"]},
-    source=root,
-)
-dependencies = tuple(Ref(value, catalog=catalog) for value in config["dependencies"])
-lock = root / "conan.lock"
-graph = Graph(catalog, local, dependencies=dependencies, lockfile=lock if lock.exists() else None)
-
-sources = []
-for package in graph.get_with_sources():
-    if package.source is not None:
-        sources.extend(package.source / name for name in package.payload["sources"])
-sources.extend(root / name for name in config["sources"])
-graph.create_lockfile(lock)
+graph = resolve_rtl_project(catalog, Path.cwd())
+sources = collect_rtl_sources(graph)
 ```
 
 `sources` содержит пути в порядке «зависимости перед потребителем».
@@ -100,20 +120,30 @@ BE-кандидат хранит зависимость через DFT от то
 проект. Для BE без DFT связь может быть прямой: BE → RTL.
 
 ```python
+from hwcatalog.api.catalog import Catalog
+from hwcatalog.api.graph import Graph
 from hwcatalog.api.query import SearchQuery
+from hwcatalog.api.records import InstalledRecord, Ref
 
+
+def find_lib_lef(catalog: Catalog, rtl: Ref) -> InstalledRecord:
+    """Найти единственное BE-представление точной RTL revision и получить файлы пакета."""
+    query = SearchQuery.for_component(rtl, view="be", type="lib-lef")
+    matching: list[Graph] = []
+    for candidate in catalog.search_refs(query):
+        be_graph = candidate.graph()
+        # Координаты находят кандидатов; граф подтверждает происхождение от RTL.
+        if rtl in be_graph.ordered_refs(be_graph.record.ref):
+            matching.append(be_graph)
+    if len(matching) != 1:
+        raise ValueError("Нужно выбрать одну BE-реализацию: уточните version или revision")
+    selected = matching[0]
+    return selected.get((selected.record.ref,))[0]
+
+
+# Берём revision CPU из уже разрешённого проекта первого примера.
 rtl = graph.info(Ref("soc.cpu.rtl.default/1.0", catalog=catalog)).ref
-query = SearchQuery.for_component(rtl, view="be", type="lib-lef")
-matching = []
-for candidate in catalog.search_refs(query):
-    be_graph = candidate.graph()
-    if rtl in be_graph.ordered_refs(be_graph.record.ref):
-        matching.append(be_graph)
-if len(matching) != 1:
-    raise ValueError("Нужно выбрать одну BE-реализацию: уточните version или revision")
-
-be_graph = matching[0]
-be = be_graph.get((be_graph.record.ref,))[0]
+be = find_lib_lef(catalog, rtl)
 lib, lef = be.files["cpu.lib"], be.files["cpu.lef"]
 ```
 
@@ -148,36 +178,55 @@ from pathlib import Path
 
 from hwcatalog.api.catalog import Catalog
 from hwcatalog.api.graph import Graph
-from hwcatalog.api.records import LocalRecord, Ref
+from hwcatalog.api.records import InstalledRecord, LocalRecord, Ref
+
+
+def publish_result(
+    catalog: Catalog,
+    record: LocalRecord,
+    *,
+    dependencies: tuple[Ref, ...],
+    lockfile: Path,
+) -> InstalledRecord:
+    """Разрешить и опубликовать один результат, используя отдельный lockfile."""
+    graph = Graph(
+        catalog,
+        record,
+        dependencies=dependencies,
+        lockfile=lockfile if lockfile.exists() else None,
+    )
+    graph.create_lockfile(lockfile)
+    # Публикация использует тот же выбор зависимостей, который сохранён выше.
+    return catalog.publish(graph)
+
 
 catalog = Catalog()
 root = Path.cwd()
 input_ref = Ref("demo.block.data.input/1.0", catalog=catalog)
-model_lock = root / "locks/model.lock"
-model_graph = Graph(
-    catalog,
-    LocalRecord(
-        Ref("demo.block.analysis.model/1.0", catalog=catalog),
-        files={"model.bin": root / "out/model.bin"},
-    ),
-    dependencies=(input_ref,),
-    lockfile=model_lock if model_lock.exists() else None,
-)
-model_graph.create_lockfile(model_lock)
-model = catalog.publish(model_graph)
 
-report_lock = root / "locks/report.lock"
-report_graph = Graph(
-    catalog,
-    LocalRecord(
-        Ref("demo.block.analysis.report/1.0", catalog=catalog),
-        files={"summary.json": root / "out/summary.json"},
-    ),
-    dependencies=(model.ref,),
-    lockfile=report_lock if report_lock.exists() else None,
+# Первый пакет хранит модель и зависимость от входных данных.
+model_record = LocalRecord(
+    Ref("demo.block.analysis.model/1.0", catalog=catalog),
+    files={"model.bin": root / "out/model.bin"},
 )
-report_graph.create_lockfile(report_lock)
-report = catalog.publish(report_graph)
+model = publish_result(
+    catalog,
+    model_record,
+    dependencies=(input_ref,),
+    lockfile=root / "locks/model.lock",
+)
+
+# Второй пакет хранит отчёт и точную ссылку на опубликованную модель.
+report_record = LocalRecord(
+    Ref("demo.block.analysis.report/1.0", catalog=catalog),
+    files={"summary.json": root / "out/summary.json"},
+)
+report = publish_result(
+    catalog,
+    report_record,
+    dependencies=(model.ref,),
+    lockfile=root / "locks/report.lock",
+)
 ```
 
 Два вызова publish публикуют по одному пакету. Отчёт сохраняет зависимость от точной
