@@ -1,221 +1,130 @@
 # Публичный API
 
-## Catalog
+## Связи классов
 
-`Catalog(home=None, *, remote=None, timeout=60)` работает с уже настроенным Conan.
+```mermaid
+classDiagram
+    Catalog <-- Ref : привязан к
+    Catalog ..> SearchQuery : принимает при поиске
+    Catalog ..> LocalRecord : публикует
+    Catalog ..> Record : возвращает поиск
+    Catalog ..> InstalledRecord : возвращает publish
+    Ref ..> Graph : graph()
+    Graph o-- LocalRecord : локальный корень
+    Graph o-- Record : опубликованные узлы
+    Graph o-- Dependency : рёбра
+    Dependency --> Ref : source и target
+    LocalRecord --> Ref
+    Record --> Ref
+    InstalledRecord --|> Record
+    Graph ..> InstalledRecord : get / get_with_sources
+    Graph --> Workspace : необязательные editable
+    Workspace --> Ref : участники
+```
 
-| Метод | Контракт |
+Стрелка зависимости в данных графа направлена от потребителя к требуемому пакету.
+SDK хранит один вид связи; смысл зависимости и происхождение результатов определяет приложение.
+
+## Ref и поиск
+
+`Ref(reference, *, catalog)` — координаты пакета, связанные с каталогом:
+
+```text
+namespace.component[_subcomponent].view.type/version[#revision]
+soc.cpu.rtl.default/1.0
+soc.cpu_alu.be.lib-lef/4.0
+```
+
+`namespace` — проект, `component` — компонент, `view` — представление (`rtl`, `be`, `dft`),
+`type` — его вариант. Первый `_` отделяет необязательный `subcomponent`;
+в самом `component` используются буквы, цифры и дефис. Версии разных представлений независимы.
+
+Обычно ссылку задают без `#revision`: без lockfile Conan выбирает последнюю recipe revision (RREV).
+Полученные `Record.ref` и опубликованные узлы графа содержат точную revision.
+Она входит в равенство и хеш Ref; `without_revision()` возвращает логические координаты.
+Локальный корень задаётся без revision. Повторная публикация разрешена:
+одинаковое содержимое даёт тот же RREV, изменённое — новый.
+
+| Класс | Основные операции |
 |---|---|
-| search(query, *, all_revisions=False) | tuple[Record, ...] точных AND-совпадений, отсортированных по Ref |
-| search_refs(query, *, all_revisions=False) | tuple[Ref, ...] тех же координат без чтения рецептов и payload |
-| publish(record: LocalRecord | Graph, *, dependencies=(), lockfile=None) | Публикует один пакет и возвращает InstalledRecord |
+| `Catalog(home=None, *, remote=None, timeout=60)` | Настройки клиента; обычно достаточно `Catalog()` |
+| `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
+| `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
+| `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
+| `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)` | Создание из отдельных координат |
+| `ref.info()` | Метаданные `Record` |
+| `ref.get()` / `ref.get_with_sources()` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
+| `ref.dependency_refs(filters=None)` / `ref.dependencies(filters=None)` | Прямые требования как Ref / Record |
+| `ref.graph(*, lockfile=None, workspace=None)` | Полный граф опубликованного пакета |
 
-Аргумент query обязателен для search и search_refs. Поиск без ограничений явно
-задаётся через SearchQuery(): `catalog.search(SearchQuery())`.
-
-Source и files принадлежат LocalRecord. Source — рабочий Git checkout, files —
-карта относительных имён внутри пакета и абсолютных локальных Path. Внешние ресурсы
-описываются в payload; их формат, проверка и использование принадлежат flow.
-Зависимости должны существовать. Передача опубликованного Record в publish отклоняется.
-Publish всегда публикует на сервер: при отсутствии remote возникает CatalogError
-до подготовки входов, разрешения графа или упаковки. Чтение cache и локальный Graph
-без remote поддерживаются.
-
-## Ref и Record
-
-`Ref(reference, *, catalog)` разбирает строковые координаты
-namespace.component[_subcomponent].view.type/version[#revision]. Приватный конкретный Catalog не участвует в identity,
-хеше или JSON. Ссылки результатов создаются сразу с нужным контекстом.
-
-| Метод Ref | Контракт |
-|---|---|
-| info() | Record с метаданными без получения бинарных файлов и Git |
-| get() | InstalledRecord с доступными файлами пакета; source=None |
-| get_with_sources() | InstalledRecord с файлами и Git-исходниками, если они объявлены |
-| dependencies(filters=None) | tuple[Record, ...] непосредственных зависимостей |
-| dependency_refs(filters=None) | tuple[Ref, ...] точных прямых требований без чтения записей зависимостей |
-| to_dict() | Координаты, включая revision, если она задана |
-| without_revision() | Логические координаты с тем же каталогом |
-
-`Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)`
-создаёт ту же ссылку из отдельных полей через основной строковый конструктор.
-Ref проверяет канонический формат сразу; неверные координаты вызывают InvalidPackage.
-Непосредственные зависимости читаются из опубликованных requirements.
-Представления выбираются через `Catalog.search(SearchQuery.for_component(ref, ...))`;
-принадлежность конкретному исходному пакету определяет flow.
-
-Record содержит только метаданные: ref, payload, file_names (tuple[str, ...])
-и has_source (bool). Его возвращают info(), search(), dependencies()
-и опубликованная часть Graph.records. Files и source отсутствуют: поиск не требует
-скачивания содержимого. Has_source вычисляется из SCM-данных Conan, а не дублируется
-в переносимом record.json.
-
-InstalledRecord наследует Record и добавляет files (Mapping[str, Path]) и
-source (Path | None). Его возвращают publish(), get() и get_with_sources().
-Конструктор InstalledRecord(record, *, files=None, source=None) принимает готовые
-метаданные: все объявленные file_names должны присутствовать в files; source
-допускается только для пакета с has_source=True. Без файлов files — пустой словарь.
-
-При has_source=True и source=None исходники ещё не получены. Sources_ready=True
-означает, что source получен либо исходники не объявлены. Get_with_sources() получает
-их штатными средствами Conan. URL/commit остаются внутри Conan.
-
-Record и InstalledRecord — обычные классы с приватными полями и свойствами только
-для чтения. Payload отделяется от входа в конструкторе Record; готовые неизменяемые
-метаданные используются повторно при создании InstalledRecord. PostInit и ручного
-object.__setattr__ нет. Равенство и хеш зависят от метаданных, а не от типа представления
-и физических путей: metadata и установленная запись одного пакета равны.
-
-To_dict() выдаёт метаданные; InstalledRecord.to_dict() дополнительно всегда содержит
-словарь files и при наличии — source. Record.from_json(data, *, catalog) восстанавливает
-Record или InstalledRecord по этим полям. Материализации на экземпляре и to_json нет.
-
-LocalRecord содержит ref, payload, source, files и остаётся изменяемым входом flow.
-Его source — рабочий Git checkout, files — исходные файлы пользователя. Собственная
-revision не задана. LocalRecord.to_json() готовит переносимый record.json с format=7,
-логическим ref, payload и именами файлов. LocalRecipe.copy_files() добавляет SHA-256
-в file_digests: хеши попадают в рецепт и влияют на RREV, содержимое — только в бинарный
-пакет. Полученные зависимости и SCM сохраняются в conandata.yml.
-
-## SearchQuery
-
-Семь опциональных полей задают точные AND-фильтры координат.
-
-- `criteria()` возвращает отдельный словарь заданных условий.
-- `matches_ref(ref)` проверяет координаты до скачивания рецепта.
-- `matches(record)` проверяет LocalRecord или Record по их Ref.
-- `select(records)` принимает коллекцию или итератор записей, фильтрует и возвращает
-  tuple в порядке Ref. Поддерживает `graph.records`, сохраняя исходные объекты.
-- `conan_pattern(*, all_revisions=False)` сразу формирует шаблон поиска: `#latest`
-  по умолчанию, `#*` для истории или конкретную revision из фильтра.
-  Без ограничения subcomponent поиск включает целый компонент и его части; точность
-  component проверяется до загрузки рецептов. С subcomponent="alu" сегмент равен cpu_alu.
-  Непредставимое точное условие даёт None;
-  пользовательские строки не интерпретируются как wildcard или регулярные выражения.
-
-SearchQuery не хранит каталог и не выполняет запросы к Conan. Catalog.search и
-получение прямых зависимостей используют select для одинаковой фильтрации и порядка.
-
-## Graph
-
-`Graph(catalog, record: LocalRecord, *, dependencies=(), lockfile=None)` соответствует
-одному описанию проекта и выполняет один graph info при создании.
-Переданный lockfile должен существовать; для создания нового сначала разрешают
-Graph без lockfile, затем вызывают create_lockfile(path).
-Один процесс может иметь несколько таких Graph и lockfile.
-
-| Метод | Контракт |
-|---|---|
-| record | Независимая копия LocalRecord корня |
-| requirements | Прямые зависимости с revisions, выбранными Conan |
-| records | LocalRecord корня и Record всех опубликованных зависимостей |
-| edges | Все рёбра Dependency(source, target) |
-| info(ref) | Метаданные узла снимка без I/O |
-| dependencies(ref=None, *, transitive=False, filters=None) | Прямые или все транзитивные Record-зависимости узла без I/O, исключая сам узел |
-| get(refs=None) | Получает файлы выбранных или всех опубликованных узлов одной установкой |
-| get_with_sources(refs=None) | Получает файлы и SCM-исходники выбранных или всех опубликованных узлов одной установкой |
-| create_lockfile(path=None) | Сохраняет уже разрешённый граф через Conan, запоминает путь и возвращает Path |
-
-catalog, record, records, edges, requirements, networkx и lockfile доступны
-только для чтения. Изменение структуры требует нового Graph. Выданные LocalRecord
-из record, records и ordered_records() отделены от внутреннего корня: их можно
-редактировать для новых операций. Опубликованные Record остаются неизменяемыми.
-
-LocalRecord можно редактировать между операциями; новый Graph создаёт новый снимок. Publish и создание Graph получают
-независимые снимки входов; опубликованный Record и Ref неизменяемы.
-Create_lockfile обновляет настроенный путь только после успешного выполнения Conan.
-
-Корень не требуется публиковать; его локальные данные имеют приоритет над реестром.
-Conan проверяет циклы и конфликты requirements. Разрешение использует временный рецепт
-и один graph info без export/upload для рецептов с закреплёнными требованиями.
-Если внешний рецепт содержит незакреплённые транзитивные требования, без lockfile
-может потребоваться дополнительное разрешение с --update.
-Формат deps.toml принадлежит flow, включая зависимости,
-добавленные на основе поиска. Формат lockfile обрабатывает только Conan.
-
-get(refs=None) и get_with_sources(refs=None) без аргумента выбирают все опубликованные
-узлы Graph, зависимости первыми, включая опубликованный корень. Локальный корень
-уже доступен и исключается. Явный набор Ref сохраняет выборочное получение;
-дубликаты Ref убираются с сохранением порядка;
-пустой список и повторные запросы полученных записей не запускают Conan.
-Graph.records сохраняет Record с метаданными, полученные InstalledRecord возвращаются отдельно.
-Если сначала получены только файлы, get_with_sources() добавляет исходники одной
-следующей установкой. После этого get() возвращает уже готовую запись с source;
-полученные данные не отбрасываются.
-
-SDK повторно использует проверенные рецепты и делает один install для ещё не полученных
-файлов/исходников. SCM включается только для выбранных пакетов, остальные зависимости
-остаются частью штатного разрешения/установки Conan. Для установки Conan создаёт
-непрозрачный временный lockfile из уже разрешённого графа: проектный lockfile не читается
-повторно и его путь не передаётся в методы получения записей. Выбор revisions сохраняется.
-Ошибка установки не добавляет частичные результаты в кэш Graph; запрос можно повторить.
-Если выбранные записи содержат только payload, install не требуется.
-
-## Обход и представление графа
-
-- `networkx` — ленивое кэшируемое представление с замороженной структурой. Для
-  редактирования: `graph.networkx.copy()`. Узлы и рёбра не содержат копий Record
-  и Dependency в атрибутах; эти данные предоставляет сам Graph. Пользовательские
-  аннотации следует добавлять на рабочую копию.
-- `ordered_refs(root, *, stop_at=())` — достижимые узлы, зависимости перед потребителями.
-  У stop_at не обходятся исходящие зависимости; сами выбранные узлы входят в результат.
-  Порядок для одинакового корня и stop_at вычисляется один раз.
-- `ordered_records(root, *, stop_at=())` — записи в том же порядке.
-
-Неизвестный корень и недопустимые или скрытые точки остановки вызывают ValueError.
-Циклы зависимостей отклоняет Conan при создании Graph.
-Изменения исходного LocalRecord, реестра или lockfile не пересчитывают существующий Graph.
-Для повторного разрешения создают новый Graph. create_lockfile сохраняет его снимок
-и обновляет настроенный путь только после успешного сохранения.
-
-## Ошибки
-
-- CatalogError — сбой Conan, конфигурации или получения файлов.
-- NotFound — отсутствующий пакет.
-- Conflict — несовместимые revisions/версии в графе.
-- InvalidPackage — неверные локальные входы, координаты, рецепт или граф.
-
-Ref без revision выбирает последнюю средствами Conan; Ref с revision задаёт точную запись.
-Точная запись читается из cache, даже если её revision уже удалена с remote.
-При отсутствии рецепта Conan получает его с настроенного сервера. Search продолжает
-отражать содержимое remote. Метаданные разрешённого Graph читаются из уже загруженных
-Conan рецептов, без отдельной загрузки каждого узла. Фильтры Ref.dependencies
-применяются к координатам до чтения метаданных подходящих зависимостей.
-Полученные Record содержат точный Ref. Publish разрешает повторную публикацию имени/версии;
-локальный корень не должен задавать revision. Собственная revision не входит в record.json,
-но сохраняется в inspection-снимках Record.to_dict()/from_json().
-Search возвращает последние revisions; all_revisions=True включает историю.
-Явный SearchQuery.revision действует в обоих режимах.
-
-Graph сначала передаёт исходные требования и lockfile Conan. Его опубликованные узлы
-и рёбра содержат revisions. Незакреплённые ссылки в get/get_with_sources и обходах
-сопоставляются с выбранными узлами снимка, без нового поиска последней revision.
-Явная несовпадающая revision отклоняется. Случайный conan.lock из cwd явно отключён.
-Автоматических retry, rollback и управления конкурентными издателями нет.
-
-
-`Catalog.publish(graph)` публикует локальный снимок без дополнительного graph info.
-Graph должен принадлежать тому же экземпляру Catalog; его зависимости и lockfile
-нельзя переопределить аргументами publish. Обновлённый или удалённый после разрешения
-проектный lockfile не меняет выбор: временный lock создаётся из нативного графа Conan.
-Для изменения метаданных, состава пакета или зависимостей создаётся новый Graph.
-
+`SearchQuery` задаёт точные AND-фильтры: `namespace`, `component`, `subcomponent`,
+`view`, `type`, `version`, `revision`. Значение `None` пропускает фильтр, кроме
+`subcomponent`: здесь `None` выбирает целый компонент, `"*"` (по умолчанию) включает его части.
+Остальные поля не принимают glob-шаблоны.
 `SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
-сохраняет namespace/component/subcomponent. Версию и revision исходного Ref не наследует.
+сохраняет namespace/component/subcomponent, а версию и revision выбирает независимо.
+`matches_ref`, `matches` и `select` позволяют фильтровать уже полученные данные.
 
-## Обычный сценарий без выбора revision
+`query` обязателен; поиск без ограничений — `catalog.search(SearchQuery())`.
+По умолчанию возвращаются последние revisions; `all_revisions=True` включает историю.
+Явный фильтр `revision` работает в обоих режимах.
 
-Для одной revision на имя/версию достаточно строкового Ref без `#revision`.
-Search и search_refs по умолчанию возвращают одну последнюю revision каждого имени/версии,
-а результаты можно использовать напрямую: revisions сохраняются в Ref автоматически.
-Параметры `revision` и `all_revisions` нужны только для явного выбора и просмотра истории.
+## Записи
 
-Dependency_refs возвращает точные прямые Ref в стабильном порядке без повторений.
-Читается рецепт исходного пакета; наличие и формат метаданных дочерних пакетов этим
-методом не проверяются. Незакреплённое требование разрешается в latest перед проверкой
-фильтра revision. Для поиска старой revision служит search_refs с явным фильтром.
+| Класс | Поля и назначение |
+|---|---|
+| `LocalRecord(ref, payload=None, source=None, files=...)` | Изменяемое описание проекта: Git-каталог и локальные файлы для упаковки |
+| `Record(ref, payload=None, *, file_names=(), has_source=False)` | Метаданные: Ref, JSON payload, имена файлов и наличие SCM |
+| `InstalledRecord(record, *, files=None, source=None)` | Метаданные и готовые пути к файлам/исходникам; обычно возвращается SDK |
 
-При transitive=True зависимости Graph возвращаются в порядке «зависимости раньше
-потребителей», без самого выбранного узла и без повторений общих зависимостей.
-Фильтр применяется после обхода, не отсекая ветви. Незакреплённый аргумент ref
-сопоставляется с узлом снимка; новая revision на сервере не меняет выбор Graph.
+`files` сопоставляет имя файла внутри пакета с локальным `Path`; по умолчанию карта пуста.
+`LocalRecord.source` — рабочий Git-репозиторий; при публикации Conan фиксирует SCM-координаты.
+`InstalledRecord.source` — полученный checkout, либо `None`.
+`sources_ready` показывает, получены ли исходники или пакет их не объявляет.
+`Record` и `InstalledRecord` доступны только для чтения, включая payload и карту файлов.
+Пути Conan cache используются для чтения; рабочие изменения выполняют в отдельной копии.
+
+Payload принимает JSON или объект с `to_json() -> str` (`JSONSerializable`).
+Его схему, списки RTL-файлов, NFS-пути и их проверку определяет приложение.
+`LocalRecord.to_json()` подготавливает метаданные пакета;
+`Record.to_dict()` и `Record.from_json(data, *, catalog)` предназначены для снимков.
+
+## Graph и Workspace
+
+`Graph(catalog, record, *, dependencies=(), lockfile=None, workspace=None)` сразу
+разрешает локальный `LocalRecord` или опубликованный `Ref`. Публиковать локальный корень не требуется.
+Формат deps.toml и дополнительные зависимости определяет приложение.
+
+| API Graph | Результат |
+|---|---|
+| `record`, `records`, `edges`, `requirements` | Корень, все метаданные, связи `Dependency(source, target)`, прямые Ref корня |
+| `info(ref)` | Метаданные выбранного узла без I/O |
+| `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
+| `ordered_refs(root, *, stop_at=())`, `ordered_records(...)` | Обход с корнем; у stop_at не обходятся зависимости, сами узлы включены |
+| `get(refs=None)`, `get_with_sources(refs=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
+| `create_lockfile(path=None)`, `lockfile` | Сохранение выбора Conan и путь проектного lockfile |
+| `networkx` | Кэшируемая топология только для чтения; `.copy()` для изменений |
+| `editables` | Выбранные рабочие копии Workspace |
+
+Без refs получение охватывает все опубликованные узлы, зависимости первыми;
+локальный корень исключён. Явный `()` означает пустую выборку.
+Полученные записи повторно используются в пределах Graph. Для всего дерева удобнее
+один вызов Graph, чем отдельный get для каждого Ref.
+
+Graph сохраняет независимый снимок метаданных и revisions; изменения проекта или сервера
+его не пересчитывают. Для нового выбора создают новый Graph.
+Незакреплённый Ref сопоставляется с узлом снимка; несовпадающая явная revision отклоняется.
+Lockfile принадлежит проекту и используется при разрешении. SDK сохраняет его средствами
+Conan, не разбирая JSON. Получение файлов использует уже разрешённый выбор.
+`catalog.publish(graph)` сохраняет зависимости снимка; переопределять их и lockfile нельзя.
+
+`Workspace(catalog, path="workspace.yaml")` хранит выбранные editable в проектном YAML.
+`add(ref, *, directory=None)` получает Git-копию (по умолчанию рядом с проектом) и возвращает
+InstalledRecord; `remove(ref)` снимает регистрацию, сохраняя копию и правки.
+`members` возвращает карту Ref → Path. Workspace передаётся в Graph явно;
+пока поддерживаются только SCM-пакеты без упакованных файлов.
+
+Ошибки: `CatalogError` — общий сбой, `NotFound` — отсутствие пакета,
+`Conflict` — конфликт зависимостей, `InvalidPackage` — неверное описание/содержимое.
+Conan-профили, remote и доступ к Git настраиваются заранее. Publish требует сервер;
+чтение точных revisions из cache и локальные графы доступны без него.

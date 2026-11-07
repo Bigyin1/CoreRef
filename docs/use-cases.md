@@ -1,40 +1,83 @@
-# Сценарии
+# Два примера
 
-Каталог хранит неизменяемые Record с точными версиями и зависимостями. Он позволяет
-публиковать компоненты, получать состав проекта и искать представления по координатам.
+## RTL-проект: зависимости и исходники
 
-## RTL → LIB/LEF
+Вариант использования вместо Bender: приложение читает свой deps.toml,
+SDK разрешает дерево и получает исходники, приложение собирает список RTL-файлов.
+Формат TOML и поле payload.sources в этом примере — соглашение приложения.
+Все RTL-зависимости уже опубликованы с таким списком и SCM-исходниками.
 
-1. Передать LocalRecord и прямые зависимости в `Graph(catalog, record, dependencies=...)`
-   и выбрать RTL-компоненты из полученного графа. Если исходное описание берётся
-   из опубликованного пакета, его читают через `top_ref.get()` и `top_ref.dependencies()`.
-2. Для выбранного RTL вызвать `catalog.search(SearchQuery.for_component(
-   rtl_ref, view="be", type="lib-lef"))`.
-3. Из найденных кандидатов приложение выбирает нужную реализацию и читает payload
-   с метаданными. Файлы из Conan получают через `ref.get().files`,
-   внешние ресурсы flow читает из собственной схемы `record.payload`.
-4. Вызвать result.ordered_records(top_ref, stop_at=(rtl_ref,)) и исключить сам
-   заменённый RTL из списка исходников. SDK сохраняет общие зависимости остальных
-   блоков; flow подготавливает ресурсы BE и запускает инструмент.
-
-```mermaid
-flowchart TB
-    TOP["soc1.top.rtl.default/1.0"] --> CPU["soc1.cpu.rtl.default/2.3"]
-    TOP --> GPIO["soc1.gpio.rtl.default/1.0"]
-    CPU --> COMMON["soc1.common.rtl.default/1.0"]
-    GPIO --> COMMON
-    BE["soc1.cpu.be.lib-lef/4.0"] --> DFT["tools.dft-run.dft.default/3.0"]
-    DFT --> CPU
+```toml
+# deps.toml в корне Git-проекта
+ref = "soc.top.rtl.default/1.0"
+sources = ["rtl/top.sv"]
+dependencies = ["soc.cpu.rtl.default/1.0", "soc.gpio.rtl.default/2.0"]
 ```
 
-Направление стрелки — от пакета к его зависимости. Имя BE определяет представление;
-наличие точного CPU в его графе подтверждает связь с выбранным RTL. Версии CPU и BE
-могут различаться. Промежуточный DFT-узел не обязан иметь те же namespace/component/view/type.
+```python
+import tomllib
+from pathlib import Path
 
-`ref.dependencies()` читает прямые требования опубликованного пакета. Уже разрешённый
-снимок читают без I/O через `graph.info(ref)` и `graph.dependencies(ref)`; все связи
-доступны в `graph.edges`. Проверку точного происхождения выполняет flow.
-Для собственного анализа Graph.networkx предоставляет DiGraph.
-Подготовленное локальное описание публикуют через `catalog.publish(graph)` без повторного graph info.
+from hwcatalog.api.catalog import Catalog
+from hwcatalog.api.graph import Graph
+from hwcatalog.api.records import LocalRecord, Ref
 
-Полный исполняемый пример находится в examples/conan_macro.py.
+catalog = Catalog()
+root = Path.cwd()
+config = tomllib.loads((root / "deps.toml").read_text())
+local = LocalRecord(
+    Ref(config["ref"], catalog=catalog),
+    payload={"sources": config["sources"]},
+    source=root,
+)
+dependencies = tuple(Ref(value, catalog=catalog) for value in config["dependencies"])
+lock = root / "conan.lock"
+graph = Graph(catalog, local, dependencies=dependencies, lockfile=lock if lock.exists() else None)
+
+sources = []
+for package in graph.get_with_sources():
+    if package.source is not None:
+        sources.extend(package.source / name for name in package.payload["sources"])
+sources.extend(root / name for name in config["sources"])
+graph.create_lockfile(lock)
+```
+
+`sources` содержит пути в порядке «зависимости перед потребителем».
+Локальный top остаётся в рабочем дереве, зависимости получаются одной пакетной операцией.
+Lockfile сохраняют в репозитории для повторения выбора. При готовности к публикации
+вызывают `catalog.publish(graph)` из чистого Git checkout с доступным получателям remote.
+Для уже опубликованного корня достаточно `Ref(..., catalog=catalog).graph()`.
+
+## Найти LIB/LEF для выбранного RTL
+
+Продолжение примера: выбрать BE-представление CPU из реестра.
+Имя пакета находит кандидатов, зависимость от точной RTL revision подтверждает происхождение.
+У кандидатов могут быть промежуточные DFT-узлы.
+
+```python
+from hwcatalog.api.query import SearchQuery
+
+rtl = graph.info(Ref("soc.cpu.rtl.default/1.0", catalog=catalog)).ref
+query = SearchQuery.for_component(rtl, view="be", type="lib-lef")
+matching = []
+for candidate in catalog.search_refs(query):
+    be_graph = candidate.graph()
+    if rtl in be_graph.ordered_refs(be_graph.record.ref):
+        matching.append(be_graph)
+if len(matching) != 1:
+    raise ValueError("Нужно выбрать одну BE-реализацию: уточните version или revision")
+
+be_graph = matching[0]
+be = be_graph.get((be_graph.record.ref,))[0]
+lib, lef = be.files["cpu.lib"], be.files["cpu.lef"]
+```
+
+Пример предполагает LIB/LEF внутри пакета. Если flow хранит их на NFS,
+он читает пути из собственной схемы `be.payload` и проверяет их доступность.
+Версия BE может отличаться от версии RTL. Поиск берёт последние BE revisions;
+историческую выбирают явно, а не подставляют автоматически при несовпадении RTL.
+
+Для исключения заменённой RTL-ветви из списка исходников используют
+`graph.ordered_refs(graph.record.ref, stop_at=(rtl,))`, исключают сам rtl и передают
+оставшиеся опубликованные Ref в `graph.get_with_sources(refs)`. Общие зависимости
+других ветвей сохраняются. Выбор замены и использование LIB/LEF остаются логикой flow.
