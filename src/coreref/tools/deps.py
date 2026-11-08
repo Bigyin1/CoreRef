@@ -1,9 +1,7 @@
 """Optional standard YAML input for a local package and its direct dependencies."""
 
-import stat
 from copy import deepcopy
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import cast
 
 import yaml  # type: ignore[import-untyped]
@@ -69,8 +67,12 @@ class DepsFile(BaseModel):
             reference=str(ref), source=str(source) if source is not None else None
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        content = yaml.safe_dump(
+            document.model_dump(exclude_none=True, by_alias=True), sort_keys=False
+        )
         try:
-            document._write(destination, create=True)
+            with destination.open("x", encoding="utf-8") as stream:
+                stream.write(content)
         except FileExistsError as error:
             raise Conflict(f"Dependency file already exists: {destination}") from error
         return cls(catalog, destination)
@@ -143,24 +145,8 @@ class DepsFile(BaseModel):
 
     def save(self) -> None:
         """Write canonical YAML; comments and presentation are not preserved."""
-        self._write(self.path)
-
-    def _write(self, destination: Path, *, create: bool = False) -> None:
-        """Stage bytes on the same filesystem, then publish the complete file."""
         content = yaml.safe_dump(self.model_dump(exclude_none=True, by_alias=True), sort_keys=False)
-        with NamedTemporaryFile(
-            prefix=".coreref-write-", dir=destination.parent, delete=False
-        ) as temporary:
-            staged = Path(temporary.name)
-        try:
-            staged.write_text(content, encoding="utf-8")
-            if create:
-                destination.hardlink_to(staged)
-            else:
-                staged.chmod(stat.S_IMODE(destination.stat().st_mode))
-                staged.replace(destination)
-        finally:
-            staged.unlink(missing_ok=True)
+        self.path.write_text(content, encoding="utf-8")
 
     def _path(self, value: str) -> Path:
         return (self.path.parent / Path(value).expanduser()).resolve()

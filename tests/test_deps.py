@@ -1,6 +1,5 @@
 """The standard YAML format is an optional adapter over LocalRecord and Graph."""
 
-from contextlib import AbstractContextManager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -221,47 +220,6 @@ def test_lockfile_alias_to_manifest_is_rejected_before_conan(
     assert document.path.read_bytes() == original
     with pytest.raises(InvalidPackage, match="different files"):
         DepsFile(file_catalog, document.path)
-
-
-@pytest.mark.parametrize("create", [False, True])
-@pytest.mark.parametrize("phase", ["write", "commit"])
-def test_failed_yaml_write_preserves_original_and_allows_retry(
-    file_catalog: Catalog, tmp_path: Path, create: bool, phase: str
-) -> None:
-    document = DepsFile.create(
-        file_catalog, Ref("soc.top.rtl.default/1.0", catalog=file_catalog), tmp_path / "deps.yaml"
-    )
-    document.path.chmod(0o600)
-    original = document.path.read_bytes()
-    target = tmp_path / "new.yaml" if create else document.path
-    original_write = Path.write_text
-
-    def write_partial(path: Path, content: str, *, encoding: str | None = None) -> int:
-        original_write(path, content[:8], encoding=encoding)
-        raise OSError("injected storage failure")
-
-    failure: AbstractContextManager[object]
-    if phase == "write":
-        failure = patch.object(Path, "write_text", write_partial)
-    else:
-        failure = patch.object(
-            Path, "hardlink_to" if create else "replace", side_effect=OSError("injected failure")
-        )
-    with failure, pytest.raises(OSError):
-        if create:
-            DepsFile.create(file_catalog, document.record.ref, target)
-        else:
-            document.save()
-    assert document.path.read_bytes() == original
-    assert document.path.stat().st_mode & 0o777 == 0o600
-    assert not tuple(tmp_path.glob(".coreref-write-*"))
-    if create:
-        assert not target.exists()
-        DepsFile.create(file_catalog, document.record.ref, target)
-    else:
-        document.save()
-        assert document.path.stat().st_mode & 0o777 == 0o600
-    assert DepsFile(file_catalog, target).record.ref == document.record.ref
 
 
 def test_yaml_duplicate_keys_use_standard_loader_behavior(
