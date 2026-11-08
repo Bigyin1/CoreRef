@@ -27,7 +27,7 @@ CI проверяет обе группы тестов с общим порог�
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
 | `_internal/recipe.py`, `templates/` | Чтение метаданных и Jinja-шаблоны временных рецептов |
 | `_internal/graph.py`, `client.py` | Нативный граф и команды Conan API |
-| `_internal/references.py`, `workspace.py` | Кодирование координат и хранение workspace |
+| `_internal/references.py` | Кодирование координат |
 
 Conan закреплён на 2.34.x: доступ к его внутренним объектам держать в `_internal`.
 `record.json` содержит payload, координаты без собственной RREV и описание файлов;
@@ -50,3 +50,9 @@ Ruff ограничивает сложность: 6, аргументы: 5 (по
 
 Смежный проект `../hwcatalog_conan_exp` использует SDK в flow RTL/BE/DFT.
 При изменении публичного контракта обновлять его вызовы и примеры одновременно.
+
+Workspace использует Conan init/add/remove и нативное обнаружение conanws.yml/conanws.py.
+EditableRecipe записывает служебные файлы прямо в Git checkout; отдельного реестра и
+шаблона workspace нет. В локальном conandata.yml поле coreref_revision хранит базовый RREV
+для снимка Graph. Conan определяет editable-узлы, SDK читает их локальные метаданные и пути.
+Локальные artifacts могут отсутствовать; проверка полноты скачанных пакетов сохраняется.

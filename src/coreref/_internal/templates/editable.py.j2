@@ -11,5 +11,6 @@ class EditableRecord(ConanFile):
             self.requires(reference)
 
     def layout(self):
-        self.folders.source = {{ source | pyrepr }}
+        self.folders.source = "."
+        self.folders.build = "artifacts"
         self.cpp.source.srcdirs = ["."]

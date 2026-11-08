@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import os
 import shutil
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -11,7 +10,7 @@ from typing import cast
 import yaml  # type: ignore[import-untyped]
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
-from ..api.errors import CatalogError, InvalidPackage
+from ..api.errors import CatalogError, Conflict, InvalidPackage
 from ..api.records import InstalledRecord, LocalRecord, Record, Ref
 from .references import from_conan_reference, to_conan_reference
 from .types import NativePackage
@@ -90,6 +89,7 @@ class StoredRecipe:
         self.directory = directory
         try:
             data = self._read_data()
+            self.data = data
             self.requirements = tuple(cast(Iterable[str], data.get("requires", ())))
             self.record = self._read_record(expected, has_source=bool(data.get("scm")))
         except (
@@ -134,25 +134,33 @@ class StoredRecipe:
         return tuple(files)
 
     def installed(self, package: NativePackage, *, with_sources: bool) -> InstalledRecord:
-        """Attach Conan cache paths to this recipe's already validated record."""
-        files: dict[str, Path] = {}
-        if self.record.file_names:
+        """Attach Conan cache or editable paths to the validated record."""
+        if "coreref_revision" in (package.conan_data or {}):
             if package.package_folder is None:
-                raise CatalogError("Conan did not install the data package")
-            folder = Path(package.package_folder) / "artifacts"
-            files = {name: folder / name for name in self.record.file_names}
+                raise CatalogError("Conan did not provide the editable package directory")
+            return EditableRecipe(self, Path(package.package_folder)).record
+        files = self._installed_files(package)
         source = None
         if with_sources:
             if package.folders.source_folder is None:
                 raise CatalogError("Conan did not provide the SCM source folder")
             source = Path(package.folders.source_folder) / "source"
-        if any(not path.is_file() for path in files.values()):
-            raise InvalidPackage("Installed package is missing a declared file")
         return InstalledRecord(
             self.record,
             source=source,
             files=files,
         )
+
+    def _installed_files(self, package: NativePackage) -> dict[str, Path]:
+        if not self.record.file_names:
+            return {}
+        if package.package_folder is None:
+            raise CatalogError("Conan did not install the data package")
+        folder = Path(package.package_folder) / "artifacts"
+        files = {name: folder / name for name in self.record.file_names}
+        if any(not path.is_file() for path in files.values()):
+            raise InvalidPackage("Installed package is missing a declared file")
+        return files
 
     def _read_data(self) -> Mapping[str, object]:
         data = yaml.safe_load((self.directory / "conandata.yml").read_text())
@@ -162,11 +170,11 @@ class StoredRecipe:
 
 
 class EditableRecipe:
-    """A stored recipe adapted to an existing, user-editable Git working tree."""
+    """A stored recipe adapted to a source checkout, including future local artifacts."""
 
     def __init__(self, recipe: StoredRecipe, source: Path) -> None:
-        if not recipe.has_source or recipe.record.file_names:
-            raise InvalidPackage("Editable packages require SCM sources and no packaged files")
+        if not recipe.has_source:
+            raise InvalidPackage("Editable packages require SCM sources")
         self.recipe = recipe
         self.source = source
 
@@ -174,20 +182,24 @@ class EditableRecipe:
     def record(self) -> InstalledRecord:
         if not self.source.is_dir():
             raise InvalidPackage(f"Editable source directory is missing: {self.source}")
-        return InstalledRecord(self.recipe.record, source=self.source)
+        return InstalledRecord(
+            self.recipe.record,
+            source=self.source,
+            files={
+                name: self.source / "artifacts" / name for name in self.recipe.record.file_names
+            },
+        )
 
-    def write(self, directory: Path) -> None:
-        directory.mkdir(parents=True, exist_ok=True)
-        if directory != self.recipe.directory:
-            for name in ("record.json", "conandata.yml"):
-                shutil.copyfile(self.recipe.directory / name, directory / name)
-        (directory / "source-path.txt").write_text(os.path.relpath(self.source, directory))
+    def write(self) -> None:
+        names = ("conanfile.py", "record.json", "conandata.yml")
+        if any((self.source / name).exists() for name in names):
+            raise Conflict(f"Editable recipe files already exist in {self.source}")
+        shutil.copyfile(self.recipe.directory / "record.json", self.source / "record.json")
+        data = dict(self.recipe.data)
+        data["coreref_revision"] = self.recipe.record.ref.revision
+        (self.source / "conandata.yml").write_text(yaml.safe_dump(data))
         ref = self.recipe.record.ref
         template = _RECIPE_ENV.get_template("editable.py.j2")
-        (directory / "conanfile.py").write_text(
-            template.render(
-                name=ref.package_name,
-                version=ref.version,
-                source=os.path.relpath(self.source, directory),
-            )
+        (self.source / "conanfile.py").write_text(
+            template.render(name=ref.package_name, version=ref.version)
         )
