@@ -69,8 +69,6 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
         "ref: soc.top.rtl.default/1.0\nfiles: [file.bin]",
         "ref: soc.top.rtl.default/1.0\npayload: {when: 2020-01-01}",
         "!!python/object/apply:builtins.print [unsafe]",
-        "ref: soc.top.rtl.default/1.0\ndependencies: []\ndependencies: []",
-        "ref: soc.top.rtl.default/1.0\npayload: {value: 1, value: 2}",
         "ref: soc.top.rtl.default/1.0\n"
         "dependencies: [soc.cpu.rtl.default/1.0, soc.cpu.rtl.default/1.0]",
         "ref: soc.top.rtl.default/1.0\n"
@@ -264,3 +262,18 @@ def test_failed_yaml_write_preserves_original_and_allows_retry(
         document.save()
         assert document.path.stat().st_mode & 0o777 == 0o600
     assert DepsFile(file_catalog, target).record.ref == document.record.ref
+
+
+def test_yaml_duplicate_keys_use_standard_loader_behavior(
+    file_catalog: Catalog, tmp_path: Path
+) -> None:
+    path = tmp_path / "deps.yaml"
+    path.write_text(
+        "ref: soc.top.rtl.default/1.0\n"
+        "dependencies: [soc.first.rtl.default/1.0]\n"
+        "dependencies: [soc.second.rtl.default/1.0]\n"
+        "payload: {value: 1, value: 2}\n"
+    )
+    document = DepsFile(file_catalog, path)
+    assert document.dependencies == (Ref("soc.second.rtl.default/1.0", catalog=file_catalog),)
+    assert document.record.payload == {"value": 2}

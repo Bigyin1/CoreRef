@@ -7,7 +7,7 @@ from tempfile import NamedTemporaryFile
 from typing import cast
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, ValidationError
 
 from ..api.catalog import Catalog
 from ..api.errors import Conflict, InvalidPackage, NotFound
@@ -16,58 +16,31 @@ from ..api.records import JSON, LocalRecord, Ref
 from ..api.workspace import Workspace
 
 
-# PyYAML has no typing metadata; isolate its loader subclass at this boundary.
-class _UniqueKeysLoader(yaml.SafeLoader):  # type: ignore[misc]
-    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[object, object]:
-        result = cast(dict[object, object], super().construct_mapping(node, deep=deep))
-        if len(result) != len(node.value):
-            raise InvalidPackage("Duplicate YAML keys are not allowed")
-        return result
+class DepsFile(BaseModel):
+    """Read and edit deps.yaml; custom flow formats can still use LocalRecord and Graph."""
 
-
-class _Document(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    ref: str
-    dependencies: list[str] = Field(default_factory=list)
+    reference: str = Field(alias="ref")
+    requirements: list[str] = Field(default_factory=list, alias="dependencies")
     source: str | None = None
     files: dict[str, str] = Field(default_factory=dict)
     payload: JsonValue = None
-
-    def write(self, destination: Path, *, create: bool = False) -> None:
-        """Stage bytes on the same filesystem, then publish the complete file."""
-        content = yaml.safe_dump(self.model_dump(exclude_none=True), sort_keys=False)
-        with NamedTemporaryFile(
-            prefix=".coreref-write-", dir=destination.parent, delete=False
-        ) as temporary:
-            staged = Path(temporary.name)
-        try:
-            staged.write_text(content, encoding="utf-8")
-            if create:
-                destination.hardlink_to(staged)
-            else:
-                staged.chmod(stat.S_IMODE(destination.stat().st_mode))
-                staged.replace(destination)
-        finally:
-            staged.unlink(missing_ok=True)
-
-
-class DepsFile:
-    """Read and edit deps.yaml; custom flow formats can still use LocalRecord and Graph."""
+    _catalog: Catalog = PrivateAttr()
+    _file: Path = PrivateAttr()
 
     def __init__(self, catalog: Catalog, path: str | Path = "deps.yaml") -> None:
-        self._catalog = catalog
-        self.path = Path(path).expanduser().resolve()
-        if self.path.suffix.lower() not in {".yaml", ".yml"}:
+        filename = Path(path).expanduser().resolve()
+        if filename.suffix.lower() not in {".yaml", ".yml"}:
             raise InvalidPackage("Dependency file must use a .yaml or .yml extension")
-        _ = self.lockfile
         try:
-            self._data = _Document.model_validate(
-                yaml.load(self.path.read_text(), Loader=_UniqueKeysLoader)  # noqa: S506 - SafeLoader subclass.
-            )
-        except (yaml.YAMLError, ValidationError) as error:
-            raise InvalidPackage(f"Invalid dependency file {self.path}: {error}") from error
-        root = Ref(self._data.ref, catalog=catalog)
+            super().__init__(**yaml.safe_load(filename.read_text()))
+        except (yaml.YAMLError, ValidationError, TypeError) as error:
+            raise InvalidPackage(f"Invalid dependency file {filename}: {error}") from error
+        self._catalog = catalog
+        self._file = filename
+        _ = self.lockfile
+        root = Ref(self.reference, catalog=catalog)
         if root.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
         names = [ref.package_name for ref in self.dependencies]
@@ -91,27 +64,34 @@ class DepsFile:
         destination = Path(path).expanduser().resolve()
         if destination.suffix.lower() not in {".yaml", ".yml"}:
             raise InvalidPackage("Dependency file must use a .yaml or .yml extension")
-        document = _Document(ref=str(ref), source=str(source) if source is not None else None)
+        # Coordinates are already validated by Ref; the remaining fields use model defaults.
+        document = cls.model_construct(
+            reference=str(ref), source=str(source) if source is not None else None
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            document.write(destination, create=True)
+            document._write(destination, create=True)
         except FileExistsError as error:
             raise Conflict(f"Dependency file already exists: {destination}") from error
         return cls(catalog, destination)
 
     @property
+    def path(self) -> Path:
+        return self._file
+
+    @property
     def record(self) -> LocalRecord:
         """Build a detached local input; all paths are relative to the YAML directory."""
         return LocalRecord(
-            Ref(self._data.ref, catalog=self._catalog),
-            cast(JSON, deepcopy(self._data.payload)),
-            source=self._path(self._data.source) if self._data.source is not None else None,
-            files={name: self._path(path) for name, path in self._data.files.items()},
+            Ref(self.reference, catalog=self._catalog),
+            cast(JSON, deepcopy(self.payload)),
+            source=self._path(self.source) if self.source is not None else None,
+            files={name: self._path(path) for name, path in self.files.items()},
         )
 
     @property
     def dependencies(self) -> tuple[Ref, ...]:
-        return tuple(Ref(value, catalog=self._catalog) for value in self._data.dependencies)
+        return tuple(Ref(value, catalog=self._catalog) for value in self.requirements)
 
     @property
     def lockfile(self) -> Path:
@@ -140,7 +120,7 @@ class DepsFile:
 
     def add(self, ref: Ref) -> None:
         """Add or replace one package's requirement; changes are saved explicitly."""
-        if ref.package_name == Ref(self._data.ref, catalog=self._catalog).package_name:
+        if ref.package_name == Ref(self.reference, catalog=self._catalog).package_name:
             raise InvalidPackage("A package cannot depend on itself")
         values = [
             str(ref) if current.package_name == ref.package_name else str(current)
@@ -148,7 +128,7 @@ class DepsFile:
         ]
         if str(ref) not in values:
             values.append(str(ref))
-        self._data.dependencies = values
+        self.requirements = values
 
     def remove(self, ref: Ref) -> None:
         """Remove logical coordinates; an explicit revision must match the declaration."""
@@ -159,11 +139,28 @@ class DepsFile:
             raise NotFound(f"Dependency is not declared: {ref}")
         if ref.revision is not None and ref != selected:
             raise Conflict(f"Declared dependency is {selected}; requested {ref}")
-        self._data.dependencies.remove(str(selected))
+        self.requirements.remove(str(selected))
 
     def save(self) -> None:
         """Write canonical YAML; comments and presentation are not preserved."""
-        self._data.write(self.path)
+        self._write(self.path)
+
+    def _write(self, destination: Path, *, create: bool = False) -> None:
+        """Stage bytes on the same filesystem, then publish the complete file."""
+        content = yaml.safe_dump(self.model_dump(exclude_none=True, by_alias=True), sort_keys=False)
+        with NamedTemporaryFile(
+            prefix=".coreref-write-", dir=destination.parent, delete=False
+        ) as temporary:
+            staged = Path(temporary.name)
+        try:
+            staged.write_text(content, encoding="utf-8")
+            if create:
+                destination.hardlink_to(staged)
+            else:
+                staged.chmod(stat.S_IMODE(destination.stat().st_mode))
+                staged.replace(destination)
+        finally:
+            staged.unlink(missing_ok=True)
 
     def _path(self, value: str) -> Path:
         return (self.path.parent / Path(value).expanduser()).resolve()
