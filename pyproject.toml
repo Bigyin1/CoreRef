@@ -31,6 +31,7 @@ dev = [
     "dulwich>=1.2.18,<2",
     "types-networkx",
     "conan-server>=2.34,<2.35",
+    "pytest-benchmark>=5.3,<6",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -68,16 +69,19 @@ max-statements = 40
 
 [tool.mypy]
 python_version = "3.15"
+# pytest-benchmark exposes a typed fixture with an untyped pedantic method.
+untyped_calls_exclude = ["pytest_benchmark"]
 strict = true
 files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+    "performance: opt-in public API timing and operation budgets",
     "conan: uses the real Conan command API in isolated caches",
     "conan_remote: uses an owned temporary Conan server",
 ]
-addopts = "-ra"
+addopts = "-ra -m 'not performance'"
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = [

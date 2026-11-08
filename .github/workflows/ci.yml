@@ -23,5 +23,22 @@ jobs:
         with:
           version: "0.13.4"
       - run: uv sync --frozen
-      - run: uv run --frozen pytest -m 'not conan_remote' --cov=coreref
-      - run: uv run --frozen pytest -m conan_remote --cov=coreref --cov-append --cov-fail-under=95
+      - run: uv run --frozen pytest -m 'not conan_remote and not performance' --cov=coreref
+      - run: uv run --frozen pytest -m 'conan_remote and not performance' --cov=coreref --cov-append --cov-fail-under=95
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.4"
+      - run: uv sync --frozen
+      - run: make performance
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-performance
+          path: .benchmarks/results.json
+          include-hidden-files: true
+          if-no-files-found: warn
