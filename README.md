@@ -20,6 +20,9 @@ rtl = Ref("soc.cpu.rtl.default/1.0", catalog=catalog)
 packages = rtl.graph().get_with_sources()
 ```
 
+Готовый формат проекта — необязательный `deps.yaml`. С дополнением `coreref[cli]`
+доступны группы Typer `deps` и `workspace` для включения в CLI своего flow. Собственные форматы также поддерживаются.
+
 - [Публичный API и связи классов](docs/interfaces.md).
 - [Примеры: RTL, поиск LIB/LEF и несколько результатов проекта](docs/use-cases.md).
 - [Разработка и проверки](docs/development.md).
