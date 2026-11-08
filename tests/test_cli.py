@@ -1,5 +1,7 @@
 """Embeddable workspace commands use the SDK and native Conan registration."""
 
+import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -10,7 +12,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError
 from coreref.api.records import LocalRecord, Ref
 from coreref.api.workspace import Workspace
-from coreref.cli import create_workspace_app
+from coreref.tools.cli import create_deps_app, create_workspace_app
 
 runner = CliRunner()
 
@@ -90,3 +92,48 @@ def test_cli_reports_invalid_ref_and_workspace_without_tracebacks(
     assert malformed.exit_code == 1
     assert "workspace" in malformed.stderr
     assert "Traceback" not in malformed.output
+
+
+@pytest.mark.parametrize("factory", [create_deps_app, create_workspace_app])
+def test_command_groups_are_lazy(factory: Callable[..., typer.Typer]) -> None:
+    group = factory(catalog_factory=unavailable_catalog)
+    result = runner.invoke(group, ["--help"])
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.conan_remote
+def test_yaml_commands_initialize_edit_lock_and_install(
+    catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path
+) -> None:
+    assert git_origin.is_dir()
+    package = catalog.publish(
+        LocalRecord(Ref("soc.cpu.rtl.default/1.0", catalog=catalog), source=checkout)
+    )
+    app = create_deps_app(catalog_factory=lambda: catalog)
+    path = tmp_path / "project/deps.yaml"
+    options = ["--file", str(path)]
+    result = runner.invoke(app, ["init", "soc.top.rtl.default/1.0", "--source", ".", *options])
+    assert result.exit_code == 0, result.output
+    original = path.read_bytes()
+    result = runner.invoke(app, ["init", "soc.other.rtl.default/1.0", *options])
+    assert result.exit_code == 1 and path.read_bytes() == original
+    result = runner.invoke(app, ["add", str(package.ref.without_revision()), *options])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(app, ["list", *options])
+    assert result.stdout == f"{package.ref.without_revision()}\n"
+    result = runner.invoke(app, ["lock", *options])
+    assert result.exit_code == 0, result.output
+    locked = path.with_suffix(".lock").read_bytes()
+    for flag in (["--no-sources"], []):
+        result = runner.invoke(app, ["install", *options, *flag])
+        assert result.exit_code == 0, result.output
+        installed = json.loads(result.stdout)
+        assert installed[0]["ref"]["revision"] == package.ref.revision
+        assert ("source" in installed[0]) == (not flag)
+        assert path.with_suffix(".lock").read_bytes() == locked
+    result = runner.invoke(app, ["remove", str(package.ref.without_revision()), *options])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(app, ["list", *options])
+    assert result.exit_code == 0 and result.stdout == ""
+    result = runner.invoke(app, ["add", "broken", *options])
+    assert result.exit_code == 1 and "Error:" in result.stderr

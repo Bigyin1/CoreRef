@@ -8,9 +8,9 @@ Ref описывает **какой компонент и в каком пред
 `soc.cpu`, выбирая `view="be"` и `type="lib-lef"`. Их версия независима от версии RTL;
 происхождение проверяется по точным зависимостям. Смысл всех полей описан в [API](interfaces.md).
 
-Приложение определяет формат перечисления зависимостей: в примере ниже это TOML,
-но SDK принимает уже созданные LocalRecord и Ref. Часть зависимостей может приходить
-из файла, часть — из поиска других представлений или правил flow. SDK скрывает
+В примере используется рекомендуемый deps.yaml через DepsFile. Это необязательный
+адаптер: приложение может читать свой формат и передавать LocalRecord и Ref напрямую.
+Часть зависимостей может приходить из файла, часть — из поиска других представлений или правил flow. SDK скрывает
 рецепты Conan и предоставляет публикацию, поиск, граф и получение файлов/SCM в Python.
 
 Graph строится и для неопубликованного локального проекта. Его lockfile сохраняют
@@ -26,9 +26,9 @@ Graph строится и для неопубликованного локаль
 
 ## RTL-проект: зависимости и исходники
 
-Вариант использования вместо Bender: приложение читает свой deps.toml,
+Вариант использования вместо Bender: приложение читает deps.yaml,
 SDK разрешает дерево и получает исходники, приложение собирает список RTL-файлов.
-Формат TOML и поле payload.sources в этом примере — соглашение приложения.
+Поле payload.sources в этом примере — соглашение приложения.
 Все RTL-зависимости уже опубликованы с таким списком и SCM-исходниками.
 
 ```mermaid
@@ -40,42 +40,32 @@ flowchart TD
 ```
 
 Стрелка направлена от потребителя к зависимости. Здесь common — пример общей
-транзитивной зависимости CPU и GPIO: в deps.toml корня достаточно указать эти два блока,
+транзитивной зависимости CPU и GPIO: в deps.yaml корня достаточно указать эти два блока,
 а common попадёт в разрешённый граф и список исходников один раз.
 
-```toml
-# deps.toml в корне Git-проекта
-ref = "soc.top.rtl.default/1.0"
-sources = ["rtl/top.sv"]
-dependencies = ["soc.cpu.rtl.default/1.0", "soc.gpio.rtl.default/2.0"]
+```yaml
+# deps.yaml в корне Git-проекта
+ref: soc.top.rtl.default/1.0
+source: .
+payload:
+  sources: [rtl/top.sv]
+dependencies:
+  - soc.cpu.rtl.default/1.0
+  - soc.gpio.rtl.default/2.0
 ```
 
 ```python
-import tomllib
 from pathlib import Path
 
 from coreref.api.catalog import Catalog
+from coreref.tools.deps import DepsFile
 from coreref.api.graph import Graph
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.records import InstalledRecord, LocalRecord
 
 
 def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
-    """Прочитать описание приложения и разрешить зависимости локального проекта."""
-    config = tomllib.loads((root / "deps.toml").read_text())
-    local = LocalRecord(
-        Ref(config["ref"], catalog=catalog),
-        payload={"sources": config["sources"]},
-        source=root,
-    )
-    dependencies = tuple(Ref(value, catalog=catalog) for value in config["dependencies"])
-    lockfile = root / "conan.lock"
-    # Существующий lockfile ограничивает выбор; сохранение выполняется отдельно.
-    return Graph(
-        catalog,
-        local,
-        dependencies=dependencies,
-        lockfile=lockfile if lockfile.exists() else None,
-    )
+    """Прочитать YAML и учесть существующий deps.lock, не изменяя его."""
+    return DepsFile(catalog, root / "deps.yaml").resolve()
 
 
 def collect_rtl_sources(graph: Graph) -> list[Path]:
@@ -99,7 +89,7 @@ sources = collect_rtl_sources(graph)
 `sources` содержит пути в порядке «зависимости перед потребителем».
 Локальный top остаётся в рабочем дереве, зависимости получаются одной пакетной операцией.
 Существующий lockfile используется при разрешении и остаётся без изменений.
-Чтобы явно сохранить выбор, вызывают `graph.create_lockfile(Path.cwd() / "conan.lock")`;
+Чтобы явно сохранить выбор, вызывают `graph.create_lockfile(Path.cwd() / "deps.lock")`;
 этот вызов создаёт или перезаписывает файл снимком текущего Graph.
 Для намеренного обновления зависимостей создают новый Graph без старого lockfile,
 затем явно сохраняют новый выбор. Lockfile хранят в репозитории.
@@ -237,16 +227,21 @@ report = publish_result(
 revision модели, а через неё — от исходных данных. Результаты можно получать и
 версионировать отдельно. Если они независимы, каждый Graph может ссылаться прямо на входные данные.
 
-Приложение также может читать отдельные model.toml и report.toml в этой же директории
+Приложение также может читать отдельные model.yaml и report.yaml через DepsFile
 или описать оба результата в одном файле. Пути манифестов и lockfile выбирает приложение:
 одна директория проекта объединяет несколько LocalRecord/Graph с отдельными Ref.
 Каждый пакет получает файлы из соответствующего LocalRecord.files.
 
 В dependencies передаётся итоговый набор зависимостей, сформированный flow.
-TOML может описывать только его часть: например, пакет модели для отчёта flow
+Файл может описывать только его часть: например, пакет модели для отчёта flow
 может найти в каталоге и добавить программно. Поэтому зависимости опубликованного
-пакета могут быть шире списка в TOML.
+пакета могут быть шире списка в файле.
 
 Сохранение lockfile — отдельное действие: `graph.create_lockfile(path)` вызывают
 после формирования полного набора зависимостей и разрешения Graph. Момент сохранения
 и политику обновления определяет flow или его CLI; публикация в примере файл не записывает.
+
+Для обычного deps.yaml все зависимости можно также получить готовой командой
+`coreref deps install`. Отдельная `coreref deps lock` фиксирует или обновляет их выбор.
+Эти команды работают с явными объявлениями файла; дополнительные найденные зависимости
+и их lockfile остаются ответственностью конкретного flow.

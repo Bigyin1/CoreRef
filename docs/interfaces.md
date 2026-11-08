@@ -28,8 +28,8 @@ namespace.component[_subcomponent].view.type/version[#revision]
 
 ## Основные возможности
 
-- **Свой формат проекта.** Приложение читает TOML, JSON или другой формат и создаёт
-  `LocalRecord` и набор Ref. Файл может содержать часть зависимостей; остальные
+- **Формат проекта.** Готовый `DepsFile` читает рекомендуемый deps.yaml; приложение
+  может выбрать свой формат и создать `LocalRecord` и набор Ref. Файл может содержать часть зависимостей; остальные
   приложение добавляет по результатам поиска или других правил. Рецепты Conan SDK создаёт сам.
 - **Публикация и поиск.** Один пакет объединяет JSON payload, упакованные файлы и
   необязательные Git-исходники через SCM. Поиск работает по полям Ref; внешние пути,
@@ -135,7 +135,8 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 
 `Graph(catalog, record, *, dependencies=(), lockfile=None, workspace=None)` сразу
 разрешает локальный `LocalRecord` или опубликованный `Ref`. Публиковать локальный корень не требуется.
-Формат deps.toml и дополнительные зависимости определяет приложение.
+Стандартный deps.yaml читает DepsFile; собственные форматы и дополнительные зависимости
+по-прежнему может определять приложение.
 
 | API Graph | Результат |
 |---|---|
@@ -194,7 +195,7 @@ Conan-профили, remote и доступ к Git настраиваются �
 
 ```python
 import typer
-from coreref.cli import create_workspace_app
+from coreref.tools.cli import create_workspace_app
 
 app = typer.Typer()
 app.add_typer(create_workspace_app(), name="workspace")
@@ -217,5 +218,73 @@ flow workspace remove soc.cpu.rtl.default/1.0 --project-dir ./project
 `create_workspace_app(catalog_factory=lambda: catalog)`, где `catalog` создан самим flow.
 Разные подключения не разделяют состояние CLI.
 
-Создание lockfile, публикация и выбор зависимостей остаются командами flow: им нужен
-его формат манифеста и правила формирования проекта.
+Для собственного формата flow формирует Graph и его lockfile сам. Для стандартного
+deps.yaml ниже описана отдельная готовая группа команд.
+
+## Стандартный deps.yaml
+
+`DepsFile(catalog, path="deps.yaml")` — необязательный адаптер файла к LocalRecord и Graph.
+Формат общий для разных представлений; конкретные flow могут полностью заменить его.
+
+```yaml
+ref: soc.top.rtl.default/1.0
+source: .
+dependencies:
+  - soc.cpu.rtl.default/1.0
+  - soc.gpio.rtl.default/2.0#exact-revision
+files:
+  constraints/top.sdc: build/top.sdc
+payload:
+  sources: [rtl/top.sv]
+```
+
+Обязателен только `ref` без собственной revision. `dependencies` — список полных Ref;
+revision зависимости необязательна. `source`, `files`, `payload` необязательны.
+Пути source/files считаются от директории YAML; files сопоставляет имя внутри пакета
+локальному файлу. Payload содержит произвольные JSON-данные по правилам flow.
+Неизвестные поля и неверные типы отклоняются; зависимости разрешает Conan.
+
+| API DepsFile | Результат |
+|---|---|
+| `create(catalog, ref, path="deps.yaml", *, source=None)` | Создать файл, отказавшись от перезаписи существующего |
+| `record`, `dependencies` | LocalRecord и прямые Ref для обычного SDK API |
+| `resolve(update=False)` | Новый Graph с существующим lockfile и workspace рядом с YAML |
+| `create_lockfile()` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
+| `add(ref)`, `remove(ref)`, `save()` | Изменить прямые зависимости и явно сохранить YAML |
+| `path`, `lockfile` | Пути YAML и одноимённого `.lock`, например model.yaml → model.lock |
+
+`add` заменяет объявление того же имени пакета, включая его версию/revision.
+`remove` без revision удаляет объявление логических координат; явная revision должна совпасть.
+Редактирование через `save` записывает канонический YAML: комментарии и оформление не сохраняются.
+Чтение, resolve и install исходный YAML не меняют.
+
+Для CLI установите `coreref[cli]`. Команда `coreref` содержит группы `deps` и `workspace`:
+
+```sh
+coreref deps init soc.top.rtl.default/1.0 --source .
+coreref deps add soc.cpu.rtl.default/1.0
+coreref deps list
+coreref deps lock
+coreref deps install
+```
+
+`install` получает файлы и Git-исходники всего дерева одной пакетной установкой,
+показывает точные Ref и локальные пути в JSON. `--no-sources` оставляет получение файлов.
+Локальный корень не устанавливается: он уже доступен в проекте.
+`install` учитывает существующий lockfile, не создаёт и не обновляет его.
+После изменения объявлений или для выбора новых revisions вызывают `lock` отдельно.
+Любая команда `deps` принимает `--file`/`-f`; несколько YAML в одном проекте имеют
+отдельные lockfile. Для удаления объявления используется `deps remove REF`.
+
+Встроить эти команды можно независимо от workspace:
+
+```python
+from coreref.tools.cli import create_deps_app
+
+app.add_typer(create_deps_app(), name="deps")
+```
+
+Фабрика `catalog_factory` работает так же, как у `create_workspace_app`.
+Готовые команды используют только зависимости из YAML. Если flow добавляет найденные
+пакеты программно, он формирует итоговый Graph и его lockfile своим кодом.
+`DepsFile.record` и `dependencies` для этого можно использовать независимо от `resolve`.
