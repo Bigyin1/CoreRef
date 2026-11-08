@@ -258,14 +258,15 @@ revision зависимости необязательна. `source`, `files`, `
 Редактирование через `save` записывает канонический YAML: комментарии и оформление не сохраняются.
 Чтение, resolve и install исходный YAML не меняют.
 
-Для CLI установите `coreref[cli]`. Команда `coreref` содержит группы `deps` и `workspace`:
+Для подключения команд установите `coreref[cli]` и включите нужные группы
+в CLI своего flow. Ниже `flow` — имя приложения, подключившего группу `deps`:
 
 ```sh
-coreref deps init soc.top.rtl.default/1.0 --source .
-coreref deps add soc.cpu.rtl.default/1.0
-coreref deps list
-coreref deps lock
-coreref deps install
+flow deps init soc.top.rtl.default/1.0 --source .
+flow deps add soc.cpu.rtl.default/1.0
+flow deps list
+flow deps lock
+flow deps install
 ```
 
 `install` получает файлы и Git-исходники всего дерева одной пакетной установкой,
@@ -276,11 +277,13 @@ coreref deps install
 Любая команда `deps` принимает `--file`/`-f`; несколько YAML в одном проекте имеют
 отдельные lockfile. Для удаления объявления используется `deps remove REF`.
 
-Встроить эти команды можно независимо от workspace:
+Группы подключаются независимо; CoreRef не устанавливает отдельную точку входа CLI:
 
 ```python
+import typer
 from coreref.tools.cli import create_deps_app
 
+app = typer.Typer()
 app.add_typer(create_deps_app(), name="deps")
 ```
 

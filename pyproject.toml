@@ -18,9 +18,6 @@ dependencies = [
  "edify>=1.1.2,<2",
 ]
 
-[project.scripts]
-coreref = "coreref.tools.cli:app"
-
 [project.optional-dependencies]
 cli = ["typer>=0.24,<1"]
 

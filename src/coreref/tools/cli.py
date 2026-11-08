@@ -150,8 +150,4 @@ def create_deps_app(*, catalog_factory: Callable[[], Catalog] = Catalog) -> type
     return app
 
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help="CoreRef package tools.")
-app.add_typer(create_workspace_app(), name="workspace")
-app.add_typer(create_deps_app(), name="deps")
-
-__all__ = ["app", "create_deps_app", "create_workspace_app"]
+__all__ = ["create_deps_app", "create_workspace_app"]
