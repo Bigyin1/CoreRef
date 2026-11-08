@@ -184,3 +184,38 @@ package_folder указывает на рабочую копию; `files` сод
 `Conflict` — конфликт зависимостей, `InvalidPackage` — неверное описание/содержимое.
 Conan-профили, remote и доступ к Git настраиваются заранее. Publish требует сервер;
 чтение точных revisions из cache и локальные графы доступны без него.
+
+## Готовые команды для CLI flow
+
+Дополнение `coreref[cli]` предоставляет группу Typer для workspace: `add`, `remove`,
+`list`. Её можно подключить к CLI любого flow без собственного разбора Ref и обработки
+ошибок workspace. Каталог создаётся только при выполнении команды; справка не обращается
+к Conan.
+
+```python
+import typer
+from coreref.cli import create_workspace_app
+
+app = typer.Typer()
+app.add_typer(create_workspace_app(), name="workspace")
+```
+
+```sh
+flow workspace add soc.cpu.rtl.default/1.0 --project-dir ./project
+flow workspace list --project-dir ./project
+flow workspace remove soc.cpu.rtl.default/1.0 --project-dir ./project
+```
+
+`add` принимает также `--directory` — родительскую директорию Git-копии. По умолчанию
+она располагается рядом с проектом. Допускается точный Ref с `#revision`.
+`list` выводит базовые revisions и пути, `remove` сохраняет рабочую копию.
+Инициализация workspace происходит автоматически при первом успешном `add`.
+Пустой `list` ничего не создаёт.
+
+По умолчанию используются стандартные настройки Conan, включая `CONAN_HOME`.
+Для настроек из приложения передайте фабрику: например,
+`create_workspace_app(catalog_factory=lambda: catalog)`, где `catalog` создан самим flow.
+Разные подключения не разделяют состояние CLI.
+
+Создание lockfile, публикация и выбор зависимостей остаются командами flow: им нужен
+его формат манифеста и правила формирования проекта.

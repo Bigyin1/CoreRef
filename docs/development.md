@@ -22,6 +22,7 @@ CI проверяет обе группы тестов с общим порог�
 
 | Модуль | Ответственность |
 |---|---|
+| `cli.py` | Подключаемая группа Typer workspace; необязательная зависимость `[cli]` |
 | `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
 | `api/graph.py`, `workspace.py` | Разрешённый снимок и рабочие Git-копии |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
