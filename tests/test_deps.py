@@ -1,5 +1,6 @@
 """The standard YAML format is an optional adapter over LocalRecord and Graph."""
 
+from contextlib import AbstractContextManager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,6 +36,7 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
     record.payload["sources"] = []
     assert document.record.payload == {"sources": ["top.sv"]}
     document.add(Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog))
+    document.add(Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog))
     assert document.dependencies == (Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog),)
     assert "1.0#old" in path.read_text()
     document.save()
@@ -67,6 +69,13 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
         "ref: soc.top.rtl.default/1.0\nfiles: [file.bin]",
         "ref: soc.top.rtl.default/1.0\npayload: {when: 2020-01-01}",
         "!!python/object/apply:builtins.print [unsafe]",
+        "ref: soc.top.rtl.default/1.0\ndependencies: []\ndependencies: []",
+        "ref: soc.top.rtl.default/1.0\npayload: {value: 1, value: 2}",
+        "ref: soc.top.rtl.default/1.0\n"
+        "dependencies: [soc.cpu.rtl.default/1.0, soc.cpu.rtl.default/1.0]",
+        "ref: soc.top.rtl.default/1.0\n"
+        "dependencies: [soc.cpu.rtl.default/1.0, soc.cpu.rtl.default/2.0]",
+        "ref: soc.top.rtl.default/1.0\ndependencies: [soc.top.rtl.default/1.0]",
     ],
 )
 def test_invalid_yaml_is_rejected_without_remote_access(
@@ -176,3 +185,82 @@ def test_yaml_graph_uses_its_native_workspace_from_another_directory(
     assert graph.editables == (editable,)
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected install")):
         assert graph.get_with_sources() == (editable,)
+
+
+@pytest.mark.parametrize("name", ["input.lock", "input.json", "input"])
+def test_invalid_extension_never_creates_or_overwrites_a_manifest(
+    file_catalog: Catalog, tmp_path: Path, name: str
+) -> None:
+    path = tmp_path / name
+    ref = Ref("soc.top.rtl.default/1.0", catalog=file_catalog)
+    with pytest.raises(InvalidPackage, match="extension"):
+        DepsFile.create(file_catalog, ref, path)
+    assert not path.exists()
+    path.write_text(f"ref: {ref}\n")
+    with pytest.raises(InvalidPackage, match="extension"):
+        DepsFile(file_catalog, path)
+    assert path.read_text() == f"ref: {ref}\n"
+
+
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_lockfile_alias_to_manifest_is_rejected_before_conan(
+    file_catalog: Catalog, tmp_path: Path, link: str
+) -> None:
+    document = DepsFile.create(
+        file_catalog, Ref("soc.top.rtl.default/1.0", catalog=file_catalog), tmp_path / "deps.yaml"
+    )
+    original = document.path.read_bytes()
+    path = document.lockfile
+    if link == "symlink":
+        path.symlink_to(document.path)
+    else:
+        path.hardlink_to(document.path)
+    with (
+        patch.object(file_catalog._client, "run", side_effect=AssertionError("Unexpected Conan")),
+        pytest.raises(InvalidPackage, match="different files"),
+    ):
+        document.create_lockfile()
+    assert document.path.read_bytes() == original
+    with pytest.raises(InvalidPackage, match="different files"):
+        DepsFile(file_catalog, document.path)
+
+
+@pytest.mark.parametrize("create", [False, True])
+@pytest.mark.parametrize("phase", ["write", "commit"])
+def test_failed_yaml_write_preserves_original_and_allows_retry(
+    file_catalog: Catalog, tmp_path: Path, create: bool, phase: str
+) -> None:
+    document = DepsFile.create(
+        file_catalog, Ref("soc.top.rtl.default/1.0", catalog=file_catalog), tmp_path / "deps.yaml"
+    )
+    document.path.chmod(0o600)
+    original = document.path.read_bytes()
+    target = tmp_path / "new.yaml" if create else document.path
+    original_write = Path.write_text
+
+    def write_partial(path: Path, content: str, *, encoding: str | None = None) -> int:
+        original_write(path, content[:8], encoding=encoding)
+        raise OSError("injected storage failure")
+
+    failure: AbstractContextManager[object]
+    if phase == "write":
+        failure = patch.object(Path, "write_text", write_partial)
+    else:
+        failure = patch.object(
+            Path, "hardlink_to" if create else "replace", side_effect=OSError("injected failure")
+        )
+    with failure, pytest.raises(OSError):
+        if create:
+            DepsFile.create(file_catalog, document.record.ref, target)
+        else:
+            document.save()
+    assert document.path.read_bytes() == original
+    assert document.path.stat().st_mode & 0o777 == 0o600
+    assert not tuple(tmp_path.glob(".coreref-write-*"))
+    if create:
+        assert not target.exists()
+        DepsFile.create(file_catalog, document.record.ref, target)
+    else:
+        document.save()
+        assert document.path.stat().st_mode & 0o777 == 0o600
+    assert DepsFile(file_catalog, target).record.ref == document.record.ref

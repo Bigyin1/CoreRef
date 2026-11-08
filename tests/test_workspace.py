@@ -9,7 +9,7 @@ import yaml  # type: ignore[import-untyped]
 from dulwich import porcelain
 from dulwich.repo import Repo
 
-from coreref._internal.recipe import ConsumerRecipe
+from coreref._internal.recipe import ConsumerRecipe, EditableRecipe
 from coreref._internal.types import NativeGraph
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
@@ -296,3 +296,25 @@ def test_editable_install_uses_native_package_root_for_missing_artifacts(
     assert installed.source == editable.source
     assert installed.files == editable.files
     assert not installed.files["cpu.lib"].exists()
+
+
+@pytest.mark.parametrize("error", [OSError, Conflict])
+def test_failed_recipe_preparation_cleans_only_new_checkout_and_can_retry(
+    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, error: type[OSError] | type[Conflict]
+) -> None:
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    source = tmp_path / "soc.cpu.rtl.default-1.0"
+
+    def fail_recipe(recipe: EditableRecipe) -> None:
+        (recipe.source / "record.json").write_text("partial metadata")
+        raise error("injected recipe preparation failure")
+
+    with patch.object(EditableRecipe, "write", fail_recipe), pytest.raises(error):
+        workspace.add(rtl.ref)
+    assert not source.exists()
+    assert not workspace.path.exists()
+    assert workspace.members == {}
+    editable = workspace.add(rtl.ref)
+    assert editable.source == source
+    assert (source / "cpu.sv").is_file()
+    assert workspace.members == {rtl.ref: source}

@@ -1,7 +1,9 @@
 """Optional standard YAML input for a local package and its direct dependencies."""
 
+import stat
 from copy import deepcopy
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import cast
 
 import yaml  # type: ignore[import-untyped]
@@ -14,6 +16,15 @@ from ..api.records import JSON, LocalRecord, Ref
 from ..api.workspace import Workspace
 
 
+# PyYAML has no typing metadata; isolate its loader subclass at this boundary.
+class _UniqueKeysLoader(yaml.SafeLoader):  # type: ignore[misc]
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[object, object]:
+        result = cast(dict[object, object], super().construct_mapping(node, deep=deep))
+        if len(result) != len(node.value):
+            raise InvalidPackage("Duplicate YAML keys are not allowed")
+        return result
+
+
 class _Document(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -23,6 +34,23 @@ class _Document(BaseModel):
     files: dict[str, str] = Field(default_factory=dict)
     payload: JsonValue = None
 
+    def write(self, destination: Path, *, create: bool = False) -> None:
+        """Stage bytes on the same filesystem, then publish the complete file."""
+        content = yaml.safe_dump(self.model_dump(exclude_none=True), sort_keys=False)
+        with NamedTemporaryFile(
+            prefix=".coreref-write-", dir=destination.parent, delete=False
+        ) as temporary:
+            staged = Path(temporary.name)
+        try:
+            staged.write_text(content, encoding="utf-8")
+            if create:
+                destination.hardlink_to(staged)
+            else:
+                staged.chmod(stat.S_IMODE(destination.stat().st_mode))
+                staged.replace(destination)
+        finally:
+            staged.unlink(missing_ok=True)
+
 
 class DepsFile:
     """Read and edit deps.yaml; custom flow formats can still use LocalRecord and Graph."""
@@ -30,15 +58,23 @@ class DepsFile:
     def __init__(self, catalog: Catalog, path: str | Path = "deps.yaml") -> None:
         self._catalog = catalog
         self.path = Path(path).expanduser().resolve()
+        if self.path.suffix.lower() not in {".yaml", ".yml"}:
+            raise InvalidPackage("Dependency file must use a .yaml or .yml extension")
+        _ = self.lockfile
         try:
-            self._data = _Document.model_validate(yaml.safe_load(self.path.read_text()))
+            self._data = _Document.model_validate(
+                yaml.load(self.path.read_text(), Loader=_UniqueKeysLoader)  # noqa: S506 - SafeLoader subclass.
+            )
         except (yaml.YAMLError, ValidationError) as error:
             raise InvalidPackage(f"Invalid dependency file {self.path}: {error}") from error
         root = Ref(self._data.ref, catalog=catalog)
         if root.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
-        # Validate coordinate spelling without resolving or downloading anything.
-        _ = self.dependencies
+        names = [ref.package_name for ref in self.dependencies]
+        if len(names) != len(set(names)):
+            raise InvalidPackage("Duplicate package in dependencies")
+        if root.package_name in names:
+            raise InvalidPackage("A package cannot depend on itself")
 
     @classmethod
     def create(
@@ -53,11 +89,12 @@ class DepsFile:
         if ref.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
         destination = Path(path).expanduser().resolve()
+        if destination.suffix.lower() not in {".yaml", ".yml"}:
+            raise InvalidPackage("Dependency file must use a .yaml or .yml extension")
         document = _Document(ref=str(ref), source=str(source) if source is not None else None)
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with destination.open("x") as stream:
-                yaml.safe_dump(document.model_dump(exclude_none=True), stream, sort_keys=False)
+            document.write(destination, create=True)
         except FileExistsError as error:
             raise Conflict(f"Dependency file already exists: {destination}") from error
         return cls(catalog, destination)
@@ -79,7 +116,12 @@ class DepsFile:
     @property
     def lockfile(self) -> Path:
         """Each manifest has its own lockfile: deps.yaml -> deps.lock."""
-        return self.path.with_suffix(".lock")
+        lockfile = self.path.with_suffix(".lock")
+        if lockfile.resolve() == self.path or (
+            lockfile.exists() and self.path.exists() and lockfile.samefile(self.path)
+        ):
+            raise InvalidPackage("Manifest and lockfile must be different files")
+        return lockfile
 
     def resolve(self, *, update: bool = False) -> Graph:
         """Resolve a snapshot; update ignores the old lock but never writes it."""
@@ -121,9 +163,7 @@ class DepsFile:
 
     def save(self) -> None:
         """Write canonical YAML; comments and presentation are not preserved."""
-        self.path.write_text(
-            yaml.safe_dump(self._data.model_dump(exclude_none=True), sort_keys=False)
-        )
+        self._data.write(self.path)
 
     def _path(self, value: str) -> Path:
         return (self.path.parent / Path(value).expanduser()).resolve()
