@@ -35,6 +35,7 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
     record.payload["sources"] = []
     assert document.record.payload == {"sources": ["top.sv"]}
     document.add(Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog))
+    document.add(Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog))
     assert document.dependencies == (Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog),)
     assert "1.0#old" in path.read_text()
     document.save()
@@ -67,6 +68,11 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
         "ref: soc.top.rtl.default/1.0\nfiles: [file.bin]",
         "ref: soc.top.rtl.default/1.0\npayload: {when: 2020-01-01}",
         "!!python/object/apply:builtins.print [unsafe]",
+        "ref: soc.top.rtl.default/1.0\n"
+        "dependencies: [soc.cpu.rtl.default/1.0, soc.cpu.rtl.default/1.0]",
+        "ref: soc.top.rtl.default/1.0\n"
+        "dependencies: [soc.cpu.rtl.default/1.0, soc.cpu.rtl.default/2.0]",
+        "ref: soc.top.rtl.default/1.0\ndependencies: [soc.top.rtl.default/1.0]",
     ],
 )
 def test_invalid_yaml_is_rejected_without_remote_access(
@@ -176,3 +182,56 @@ def test_yaml_graph_uses_its_native_workspace_from_another_directory(
     assert graph.editables == (editable,)
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected install")):
         assert graph.get_with_sources() == (editable,)
+
+
+@pytest.mark.parametrize("name", ["input.lock", "input.json", "input"])
+def test_invalid_extension_never_creates_or_overwrites_a_manifest(
+    file_catalog: Catalog, tmp_path: Path, name: str
+) -> None:
+    path = tmp_path / name
+    ref = Ref("soc.top.rtl.default/1.0", catalog=file_catalog)
+    with pytest.raises(InvalidPackage, match="extension"):
+        DepsFile.create(file_catalog, ref, path)
+    assert not path.exists()
+    path.write_text(f"ref: {ref}\n")
+    with pytest.raises(InvalidPackage, match="extension"):
+        DepsFile(file_catalog, path)
+    assert path.read_text() == f"ref: {ref}\n"
+
+
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_lockfile_alias_to_manifest_is_rejected_before_conan(
+    file_catalog: Catalog, tmp_path: Path, link: str
+) -> None:
+    document = DepsFile.create(
+        file_catalog, Ref("soc.top.rtl.default/1.0", catalog=file_catalog), tmp_path / "deps.yaml"
+    )
+    original = document.path.read_bytes()
+    path = document.lockfile
+    if link == "symlink":
+        path.symlink_to(document.path)
+    else:
+        path.hardlink_to(document.path)
+    with (
+        patch.object(file_catalog._client, "run", side_effect=AssertionError("Unexpected Conan")),
+        pytest.raises(InvalidPackage, match="different files"),
+    ):
+        document.create_lockfile()
+    assert document.path.read_bytes() == original
+    with pytest.raises(InvalidPackage, match="different files"):
+        DepsFile(file_catalog, document.path)
+
+
+def test_yaml_duplicate_keys_use_standard_loader_behavior(
+    file_catalog: Catalog, tmp_path: Path
+) -> None:
+    path = tmp_path / "deps.yaml"
+    path.write_text(
+        "ref: soc.top.rtl.default/1.0\n"
+        "dependencies: [soc.first.rtl.default/1.0]\n"
+        "dependencies: [soc.second.rtl.default/1.0]\n"
+        "payload: {value: 1, value: 2}\n"
+    )
+    document = DepsFile(file_catalog, path)
+    assert document.dependencies == (Ref("soc.second.rtl.default/1.0", catalog=file_catalog),)
+    assert document.record.payload == {"value": 2}

@@ -137,3 +137,15 @@ def test_yaml_commands_initialize_edit_lock_and_install(
     assert result.exit_code == 0 and result.stdout == ""
     result = runner.invoke(app, ["add", "broken", *options])
     assert result.exit_code == 1 and "Error:" in result.stderr
+
+
+def test_yaml_lock_command_rejects_an_input_named_like_a_lockfile(tmp_path: Path) -> None:
+    catalog = Catalog(tmp_path / "home")
+    app = create_deps_app(catalog_factory=lambda: catalog)
+    path = tmp_path / "input.lock"
+    content = "ref: soc.top.rtl.default/1.0\n"
+    path.write_text(content)
+    result = runner.invoke(app, ["lock", "--file", str(path)])
+    assert result.exit_code == 1
+    assert "extension" in result.stderr
+    assert path.read_text() == content

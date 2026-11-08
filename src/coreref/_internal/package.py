@@ -1,6 +1,7 @@
 """Operations on one local package or one published package reference."""
 
 import json
+import shutil
 from dataclasses import replace
 from functools import cached_property
 from pathlib import Path
@@ -50,7 +51,10 @@ class StoredPackage:
     def open(self, source: Path) -> InstalledRecord:
         """Prepare the editable recipe once, preserving an existing working copy."""
         if source.exists():
-            if not (source / "conandata.yml").is_file() or not (source / "record.json").is_file():
+            if any(
+                not (source / name).is_file()
+                for name in ("conanfile.py", "conandata.yml", "record.json")
+            ):
                 raise Conflict(f"Editable destination already exists: {source}")
             ref = self._resolve_ref(self.ref)
             recipe = StoredRecipe(source, ref, reference=str(ref))
@@ -60,7 +64,12 @@ class StoredPackage:
         recipe = self.recipe()
         editable = EditableRecipe(recipe, source)
         self._client.open_sources(recipe.reference, source)
-        editable.write()
+        try:
+            editable.write()
+        except OSError, Conflict:
+            # Only this call's fresh checkout is owned here; existing copies return above.
+            shutil.rmtree(source)
+            raise
         return editable.record
 
     def resolved_graph(self, lockfile: Path | None, workspace: Path | None = None) -> PackageGraph:
