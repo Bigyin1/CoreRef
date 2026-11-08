@@ -80,11 +80,13 @@ def test_construction_resolves_once_and_snapshots_before_conan(
     resolve = catalog._client.graph
     calls = 0
 
-    def change_inputs(directory: Path, *, lockfile: Path | None = None) -> NativeGraph:
+    def change_inputs(
+        directory: Path, *, lockfile: Path | None = None, update: bool = False
+    ) -> NativeGraph:
         nonlocal calls
         calls += 1
         local.payload = {"edited": True}
-        return resolve(directory, lockfile=lockfile)
+        return resolve(directory, lockfile=lockfile, update=update)
 
     monkeypatch.setattr(catalog._client, "graph", change_inputs)
     project = Graph(catalog, local, dependencies=(dependency.ref,))

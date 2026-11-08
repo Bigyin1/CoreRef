@@ -7,12 +7,12 @@ to this adapter and the protocols describing its actual return objects.
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Protocol, cast
+from typing import Protocol, TypedDict, cast
 
-from conan import Workspace as NativeWorkspace  # type: ignore[import-untyped]
 from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
 from conan.api.output import ConanOutput  # type: ignore[import-untyped]
 from conan.api.subapi.lockfile import LockfileAPI  # type: ignore[import-untyped]
+from conan.api.subapi.workspace import _load_workspace  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 from conan.errors import ConanException  # type: ignore[import-untyped]
 from conan.internal.errors import (  # type: ignore[import-untyped]
@@ -27,7 +27,7 @@ from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
 from ..api.errors import CatalogError, Conflict, InvalidPackage, NotFound
-from .types import NativeGraph, NativeReference
+from .types import NativeGraph, NativePackage, NativeReference
 
 
 class _Commands(Protocol):
@@ -42,11 +42,16 @@ class _Remotes(Protocol):
     def list(self, pattern: str | None = None) -> list[_Remote]: ...
 
 
+class _WorkspaceEntry(TypedDict):
+    path: str
+    conanfile: NativePackage
+
+
 class _Workspace(Protocol):
     _folder: str | None
     _ws: object
 
-    def enable(self, value: bool) -> None: ...
+    def packages(self) -> dict[NativeReference, _WorkspaceEntry] | None: ...
 
     def open(self, ref: str, remotes: list[_Remote], *, cwd: str, folder: str) -> str: ...
 
@@ -108,12 +113,10 @@ class ConanClient:
     def _api(self, workspace: Path | None = None) -> _API:
         conan = ConanAPI(cache_folder=str(self.home))
         Cli(conan).add_commands()
-        conan.workspace.enable(False)
         if workspace is not None:
             # Conan 2.34 discovers workspaces only from cwd; bind an explicit path here.
             conan.workspace._folder = str(workspace)
-            conan.workspace._ws = NativeWorkspace(str(workspace), conan)
-            conan.workspace.enable(True)
+            conan.workspace._ws = _load_workspace(str(workspace), conan)
         return cast(_API, conan)
 
     def _execute(self, arguments: tuple[str, ...], *, workspace: Path | None = None) -> object:
@@ -243,6 +246,19 @@ class ConanClient:
         except (ConanException, OSError) as error:
             raise CatalogError(f"Conan could not open {reference}: {error}") from error
 
+    def workspace_members(self, directory: Path) -> dict[str, Path]:
+        try:
+            packages = self._api(directory).workspace.packages() or {}
+        except (ConanException, OSError) as error:
+            raise CatalogError(f"Conan could not read workspace {directory}: {error}") from error
+        members = {}
+        for ref, entry in packages.items():
+            data = entry["conanfile"].conan_data or {}
+            revision = data.get("coreref_revision")
+            reference = ref.repr_notime() if revision is None else f"{ref}#{revision}"
+            members[reference] = Path(entry["path"]).parent
+        return members
+
     def create_lockfile(self, directory: Path, *, seed: Path | None = None) -> None:
         self.run(
             "lock",
@@ -308,7 +324,9 @@ class ConanClient:
         )
         return cast(NativeGraph, result["graph"])
 
-    def install_project(self, directory: Path, sources: Mapping[str, bool]) -> NativeGraph:
+    def install_project(
+        self, directory: Path, sources: Mapping[str, bool], *, workspace: Path | None = None
+    ) -> NativeGraph:
         """Install one pinned consumer graph, enabling SCM only for selected packages."""
         source_args = tuple(
             argument
@@ -329,6 +347,7 @@ class ConanClient:
                 "--output-folder",
                 str(directory / "out"),
                 *self.source_args,
+                **({"workspace": workspace} if workspace is not None else {}),
             ),
         )
         return cast(NativeGraph, result["graph"])

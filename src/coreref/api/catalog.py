@@ -62,9 +62,15 @@ class Catalog:
         return StoredPackage(Ref.from_fields(**ref.to_dict(), catalog=self))
 
     def _local_package(
-        self, record: LocalRecord, dependencies: tuple[Ref, ...], lockfile: Path | None
+        self,
+        record: LocalRecord,
+        dependencies: tuple[Ref, ...],
+        lockfile: Path | None,
+        workspace: Path | None = None,
     ) -> LocalPackage:
-        return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)
+        return LocalPackage(
+            self, record, dependencies=dependencies, lockfile=lockfile, workspace=workspace
+        )
 
 
 __all__ = ["Catalog"]

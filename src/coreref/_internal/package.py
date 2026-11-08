@@ -13,7 +13,7 @@ from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.query import SearchQuery
 from ..api.records import InstalledRecord, LocalRecord, Record, Ref
 from .graph import GraphData, ResolvedConanGraph
-from .recipe import ConsumerRecipe, LocalRecipe, StoredRecipe
+from .recipe import ConsumerRecipe, EditableRecipe, LocalRecipe, StoredRecipe
 from .references import from_conan_reference, to_conan_reference
 
 if TYPE_CHECKING:
@@ -47,7 +47,23 @@ class StoredPackage:
     def get_with_sources(self) -> InstalledRecord:
         return self._get(with_sources=True)
 
-    def resolved_graph(self, lockfile: Path | None) -> PackageGraph:
+    def open(self, source: Path) -> InstalledRecord:
+        """Prepare the editable recipe once, preserving an existing working copy."""
+        if source.exists():
+            if not (source / "conandata.yml").is_file() or not (source / "record.json").is_file():
+                raise Conflict(f"Editable destination already exists: {source}")
+            ref = self._resolve_ref(self.ref)
+            recipe = StoredRecipe(source, ref, reference=str(ref))
+            if recipe.data.get("coreref_revision") != ref.revision:
+                raise Conflict(f"Editable base revision differs from {ref}")
+            return EditableRecipe(recipe, source).record
+        recipe = self.recipe()
+        editable = EditableRecipe(recipe, source)
+        self._client.open_sources(recipe.reference, source)
+        editable.write()
+        return editable.record
+
+    def resolved_graph(self, lockfile: Path | None, workspace: Path | None = None) -> PackageGraph:
         """Resolve the stored root itself, retaining its exact revision and metadata."""
         with TemporaryDirectory(prefix="coreref-resolve-") as temporary:
             directory = Path(temporary)
@@ -55,6 +71,7 @@ class StoredPackage:
             native = self._client.graph(
                 directory,
                 lockfile=lockfile,
+                **({"workspace": workspace} if workspace is not None else {}),
                 update=(
                     self.ref.revision is None
                     and lockfile is None
@@ -67,7 +84,7 @@ class StoredPackage:
         record = self.record_at(reference, directory=graph.recipe_directory(ref))
         # Later fetches must reuse Conan's choice, including an older locked root.
         self._resolved[self.ref.without_revision()] = record.ref
-        return PackageGraph(record, graph, packages={record.ref: self})
+        return PackageGraph(record, graph, packages={record.ref: self}, workspace=workspace)
 
     def dependencies(self, query: SearchQuery) -> tuple[Record, ...]:
         return tuple(self._load(str(ref)).record for ref in self.dependency_refs(query))
@@ -132,17 +149,25 @@ class PackageGraph:
         graph: ResolvedConanGraph,
         *,
         packages: dict[Ref, StoredPackage],
+        workspace: Path | None = None,
     ) -> None:
         self.record = record
         self.graph = graph
         self._catalog = record.ref._catalog
         self._client = self._catalog._client
         self._packages = dict(packages)
+        self.workspace = workspace
         self._fetched: dict[Ref, InstalledRecord] = {}
 
         self.result: GraphData = self.graph.result(
             self.record, self._read_records(self.graph.references)
         )
+        self.editables = tuple(
+            EditableRecipe(self._packages[ref].recipe(), self.graph.recipe_directory(ref)).record
+            for ref in self._packages
+            if str(ref) in self.graph.editable_references
+        )
+        self._fetched.update((record.ref, record) for record in self.editables)
 
     def create_lockfile(self, path: str | Path) -> Path:
         output = Path(path).expanduser().resolve()
@@ -211,7 +236,13 @@ class PackageGraph:
             directory = Path(temporary)
             ConsumerRecipe(tuple(recipe.reference for recipe in recipes)).write(directory)
             self._client.save_lockfile(self.graph.native, directory / "conan.lock")
-            installed = ResolvedConanGraph(self._client.install_project(directory, sources))
+            installed = ResolvedConanGraph(
+                self._client.install_project(
+                    directory,
+                    sources,
+                    **({"workspace": self.workspace} if self.workspace is not None else {}),
+                )
+            )
             self._check_install(installed, recipes)
             return tuple(
                 recipe.installed(
@@ -252,12 +283,14 @@ class LocalPackage:
         *,
         dependencies: tuple[Ref, ...],
         lockfile: Path | None,
+        workspace: Path | None = None,
     ) -> None:
         self._catalog = catalog
         self._client = catalog._client
         self.record = self._snapshot(record)
         self.dependencies = self._references(dependencies)
         self.lockfile = lockfile
+        self.workspace = workspace
 
     @cached_property
     def graph(self) -> ResolvedConanGraph:
@@ -271,14 +304,24 @@ class LocalPackage:
                 and any(ref.revision is None for ref in self.dependencies)
             )
             if update:
-                native = self._client.graph(directory, lockfile=self.lockfile, update=True)
+                native = self._client.graph(
+                    directory,
+                    lockfile=self.lockfile,
+                    update=True,
+                    **({"workspace": self.workspace} if self.workspace is not None else {}),
+                )
             else:
-                native = self._client.graph(directory, lockfile=self.lockfile)
+                native = self._client.graph(
+                    directory,
+                    lockfile=self.lockfile,
+                    update=False,
+                    **({"workspace": self.workspace} if self.workspace is not None else {}),
+                )
             return ResolvedConanGraph(native)
 
     @cached_property
     def resolved(self) -> PackageGraph:
-        return PackageGraph(self.record, self.graph, packages={})
+        return PackageGraph(self.record, self.graph, packages={}, workspace=self.workspace)
 
     def publish(self, *, resolved: ResolvedConanGraph | None = None) -> InstalledRecord:
         record = self._publication_record()

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from functools import cached_property
 from pathlib import Path
 
-from ..api.errors import InvalidPackage
+from ..api.errors import Conflict, InvalidPackage
 from ..api.graph import Dependency
 from ..api.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
@@ -23,20 +23,36 @@ class ResolvedConanGraph:
 
     @cached_property
     def references(self) -> tuple[str, ...]:
-        return tuple(package.ref.repr_notime() for package in self._packages)
+        return tuple(self._reference(package) for package in self._packages)
 
     @property
     def direct_references(self) -> tuple[str, ...]:
         return tuple(
-            package.ref.repr_notime()
+            self._reference(package)
             for package in self.native.root.conanfile.dependencies.direct_host.values()
         )
 
     def package(self, ref: Ref) -> NativePackage:
         package = self.native.root.conanfile.dependencies.host[str(ref.without_revision())]
-        if ref.revision is not None and package.ref.revision != ref.revision:
+        if ref.revision is not None and self._reference(package) != str(ref):
             raise InvalidPackage(f"Conan selected a different revision for {ref}")
         return package
+
+    @cached_property
+    def editable_references(self) -> frozenset[str]:
+        return frozenset(
+            self._reference(node.conanfile)
+            for node in self.native.nodes
+            if node.recipe == "Editable"
+        )
+
+    def _reference(self, package: NativePackage) -> str:
+        revision = (package.conan_data or {}).get("coreref_revision")
+        if revision is None:
+            return package.ref.repr_notime()
+        if package.ref.revision is not None and package.ref.revision != revision:
+            raise Conflict(f"Editable base revision differs from {package.ref.repr_notime()}")
+        return f"{package.ref}#{revision}"
 
     def recipe_directory(self, ref: Ref) -> Path:
         """Return the recipe folder already loaded for this exact graph node."""
