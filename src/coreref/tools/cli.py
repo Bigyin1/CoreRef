@@ -44,8 +44,14 @@ class _WorkspaceCommands:
     def add(self, directory: Path, project_dir: ProjectDir = Path(".")) -> None:
         """Register an existing package directory with Conan."""
         with _command_errors():
-            Workspace(self._catalog_factory(), project_dir / "conanws.yml").add(directory)
-            typer.echo(directory.expanduser().resolve())
+            catalog = self._catalog_factory()
+            source = directory.expanduser().resolve()
+            workspace = Workspace(catalog, project_dir / "conanws.yml")
+            if (source / "conanfile.py").exists():
+                workspace.add(source)
+            else:
+                DepsFile(catalog, source / "deps.yml").add_to_workspace(workspace)
+            typer.echo(source)
 
     def open(
         self,

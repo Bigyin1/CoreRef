@@ -15,7 +15,9 @@ Ref описывает **какой компонент и в каком пред
 
 Graph строится и для неопубликованного локального проекта. Его lockfile сохраняют
 в репозитории или workspace проекта для повторения выбора версий и revisions.
-Для работы над зависимостью используют `workspace.open(ref)` или `workspace.add(directory)`.
+Для работы над зависимостью используют `workspace.open(ref)` или
+`workspace.add(directory, record=local_record, dependencies=refs)`. Формат проекта читает flow;
+для стандартного YAML есть `DepsFile.add_to_workspace(workspace)`.
 Conan сам выбирает рабочие копии из workspace текущего проекта; Graph не требует
 особых параметров. SDK добавляет в рабочую копию только conanfile.py, если его ещё нет.
 `InstalledRecord.is_editable` отличает такую запись от кэшовой. Локальные files могут

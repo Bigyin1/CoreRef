@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from coreref.api.catalog import Catalog
-from coreref.api.errors import InvalidPackage
+from coreref.api.errors import CatalogError, InvalidPackage
 from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Ref
 from coreref.api.workspace import Workspace
@@ -32,7 +32,7 @@ def test_add_directory_needs_no_git_cache_or_remote(
     directory = document.path.parent
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     with patch("requests.sessions.Session.send", side_effect=AssertionError("Network")):
-        workspace.add(directory)
+        document.add_to_workspace(workspace)
         stamp = (directory / "conanfile.py").stat().st_mtime_ns
         workspace.add(directory)
         assert (directory / "conanfile.py").stat().st_mtime_ns == stamp
@@ -55,8 +55,8 @@ def test_native_recipe_reads_manifest_edits_without_sync(
     util = local_package(catalog, tmp_path / "util", "util")
     cpu = local_package(catalog, tmp_path / "cpu")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    workspace.add(cpu.path.parent)
-    workspace.add(util.path.parent)
+    cpu.add_to_workspace(workspace)
+    util.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
     old = cpu.record.ref.graph()
     stamp = (cpu.path.parent / "conanfile.py").stat().st_mtime_ns
@@ -82,7 +82,7 @@ def test_local_source_and_missing_artifact_paths_come_from_recipe(
     document.files = {"cpu.lib": "build/timing/result.lib"}
     document.save()
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    workspace.add(document.path.parent)
+    document.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
     graph = document.record.ref.graph()
     editable = graph.get_with_sources()[0]
@@ -116,7 +116,7 @@ def test_editable_cannot_silently_return_cache_sources(
     document.source = str(catalog.cache_directory / "accidental-cache-source")
     document.save()
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    workspace.add(document.path.parent)
+    document.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
     with pytest.raises(InvalidPackage, match="package storage"):
         document.record.ref.graph()
@@ -137,7 +137,7 @@ def test_workspace_and_its_packages_can_move(
     root = tmp_path / "environment"
     document = local_package(catalog, root / "cpu")
     workspace = Workspace(catalog, root / "project/conanws.yml")
-    workspace.add(document.path.parent)
+    document.add_to_workspace(workspace)
     moved = tmp_path / "moved"
     root.rename(moved)
     workspace = Workspace(catalog, moved / "project/conanws.yml")
@@ -151,8 +151,89 @@ def test_local_consumer_gets_editable_dependencies_automatically(
 ) -> None:
     document = local_package(catalog, tmp_path / "cpu")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    workspace.add(document.path.parent)
+    document.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
     root = LocalRecord(Ref("soc.top.rtl.default/1.0", catalog=catalog))
     graph = Graph(root, dependencies=(document.record.ref,))
     assert graph.get_with_sources()[0].source == document.path.parent
+
+
+def test_core_add_uses_flow_data_without_reading_manifest_files(
+    catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "custom project"
+    source = directory / "rtl"
+    source.mkdir(parents=True)
+    (directory / "deps.yml").write_text("this is deliberately not valid: [")
+    util = tmp_path / "util"
+    util.mkdir()
+    dependency = LocalRecord(Ref("soc.util.rtl.default/1.0", catalog=catalog), source=util)
+    record = LocalRecord(
+        Ref("soc.cpu.rtl.default/1.0", catalog=catalog),
+        payload={"format": "owned by the flow"},
+        source=source,
+        files={"result": directory / "build/result"},
+    )
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    with patch("requests.sessions.Session.send", side_effect=AssertionError("Network")):
+        workspace.add(util, record=dependency)
+        workspace.add(directory, record=record, dependencies=(dependency.ref,))
+        monkeypatch.chdir(workspace.path.parent)
+        graph = record.ref.graph()
+        assert graph.requirements == (dependency.ref,)
+        installed = graph.get_with_sources((record.ref,))[0]
+    assert installed.source == source and installed.is_editable
+    assert installed.payload == record.payload
+    assert installed.files == record.files
+    assert not installed.files["result"].exists()
+    assert (directory / "deps.yml").read_text() == "this is deliberately not valid: ["
+    assert not (directory / "record.json").exists()
+    assert not (directory / "conandata.yml").exists()
+
+
+def test_core_add_requires_a_recipe_or_explicit_description(
+    catalog: Catalog, tmp_path: Path
+) -> None:
+    document = local_package(catalog, tmp_path / "cpu")
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    original = document.path.read_bytes()
+    with pytest.raises(CatalogError):
+        workspace.add(document.path.parent)
+    assert document.path.read_bytes() == original
+    assert not (document.path.parent / "conanfile.py").exists()
+    assert workspace.members == {}
+
+
+def test_dependencies_without_record_do_not_initialize_workspace(
+    catalog: Catalog, tmp_path: Path
+) -> None:
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    dependency = Ref("soc.util.rtl.default/1.0", catalog=catalog)
+    with pytest.raises(InvalidPackage, match="require a local record"):
+        workspace.add(tmp_path, dependencies=(dependency,))
+    assert not workspace.path.exists()
+
+
+def test_yaml_adapter_uses_the_selected_manifest_name(
+    catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "cpu"
+    source = directory / "rtl"
+    source.mkdir(parents=True)
+    document = DepsFile.create(
+        catalog,
+        Ref("soc.cpu.rtl.default/1.0", catalog=catalog),
+        directory / "custom inputs.yaml",
+        source="rtl",
+    )
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    document.add_to_workspace(workspace)
+    stamp = (directory / "conanfile.py").stat().st_mtime_ns
+    document.add_to_workspace(workspace)
+    assert (directory / "conanfile.py").stat().st_mtime_ns == stamp
+    document.payload = {"edited": True}
+    document.save()
+    monkeypatch.chdir(workspace.path.parent)
+    installed = document.record.ref.get_with_sources()
+    assert installed.source == source and installed.payload == {"edited": True}
+    assert not (directory / "deps.yml").exists()

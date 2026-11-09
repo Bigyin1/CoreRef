@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, ValidationError
 
+from .._internal.recipe import LocalRecipe
 from ..api.catalog import Catalog
 from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.graph import Graph
 from ..api.records import JSON, LocalRecord, Ref
+
+if TYPE_CHECKING:
+    from ..api.workspace import Workspace
 
 
 class DepsFile(BaseModel):
@@ -113,6 +117,15 @@ class DepsFile(BaseModel):
             dependencies=self.dependencies,
             lockfile=self.lockfile if self.lockfile.exists() and not update else None,
         )
+
+    def add_to_workspace(self, workspace: Workspace) -> None:
+        """Prepare a YAML-aware editable recipe, then delegate registration to Conan."""
+        directory = self.path.parent
+        if not (directory / "conanfile.py").exists():
+            LocalRecipe(self.record, tuple(self.requirements)).write_editable(
+                directory, manifest=self.path.name
+            )
+        workspace.add(directory)
 
     def create_lockfile(self) -> Path:
         """Resolve current declarations afresh, then save their exact revision selection."""

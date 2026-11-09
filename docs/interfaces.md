@@ -177,13 +177,14 @@ Conan создаёт conanws.yml/conanws.py и управляет составо
 | Операция | Назначение |
 |---|---|
 | `init()` | Создать нативный workspace |
-| `add(directory)` | Подключить директорию с conanfile.py либо deps.yml |
+| `add(directory, *, record=None, dependencies=())` | Подключить готовый рецепт либо подготовить его из данных flow |
 | `open(ref, *, directory=None)` | Получить Git-копию через SCM Conan и подключить её; по умолчанию рядом с проектом |
 | `remove(directory)` | Убрать регистрацию, сохранив директорию и изменения |
 | `members` | Прочитать Ref и пути из Conan |
 
-Если в рабочей копии нет рецепта, SDK добавляет только **conanfile.py**. Для deps.yml
-рецепт читает текущие зависимости и пути из манифеста; для скачанной копии содержит
+Workspace не читает манифесты проекта. `add(directory)` регистрирует имеющийся рецепт;
+`add(directory, record=local_record, dependencies=refs)` создаёт отсутствующий
+**conanfile.py** из готовых данных flow. Для скачанной через `open` копии используются
 метаданные опубликованного пакета. Существующий рецепт сохраняется. Дополнительные
 record.json/conandata.yml и собственные маркеры в рабочей директории не создаются.
 Сгенерированные файлы остаются untracked; SDK не меняет Git index или ignore.
@@ -198,7 +199,8 @@ record.json/conandata.yml и собственные маркеры в рабоч
 from coreref.api.workspace import Workspace
 
 workspace = Workspace(catalog)  # запускаем из корня проекта
-workspace.add("../cpu")  # существующая директория
+workspace.add("../cpu", record=cpu_record, dependencies=cpu_dependencies)
+# cpu_record и cpu_dependencies сформированы парсером конкретного flow.
 # workspace.open(rtl_ref)       # либо Git-копия опубликованной зависимости
 graph = rtl_ref.graph()  # Conan уже видит зарегистрированную директорию
 ready = graph.get_with_sources()
@@ -234,9 +236,12 @@ flow workspace list --project-dir ./project
 flow workspace remove ../existing-cpu --project-dir ./project
 ```
 
-`add DIRECTORY` читает `DIRECTORY/deps.yml`: достаточно валидного YAML с `ref`.
+Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/deps.yml`, если рецепта ещё нет:
+достаточно валидного YAML с `ref`. Класс Workspace от этого формата не зависит.
 `dependencies`, `source`, `files` и `payload` необязательны; пути считаются от директории YAML.
-Рецепт создаётся в существующем проекте, без клонирования. Например:
+Для Python-надстройки это `DepsFile(catalog, path).add_to_workspace(workspace)`.
+Рецепт читает выбранный YAML при следующих вызовах Conan, поэтому его изменения
+подхватываются без повторной регистрации. Файл может называться произвольно. Например:
 
 ```yaml
 ref: soc.cpu.rtl.default/1.0
@@ -285,6 +290,7 @@ SafeLoader: при повторении ключа сохраняется пос
 |---|---|
 | `create(catalog, ref, path="deps.yaml", *, source=None)` | Создать файл, отказавшись от перезаписи существующего |
 | `record`, `dependencies` | LocalRecord и прямые Ref для обычного SDK API |
+| `add_to_workspace(workspace)` | Подготовить YAML-рецепт и зарегистрировать директорию |
 | `resolve(update=False)` | Новый Graph с существующим lockfile; Conan обнаруживает workspace по cwd |
 | `create_lockfile()` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
 | `add(ref)`, `remove(ref)`, `save()` | Изменить прямые зависимости и явно сохранить YAML |

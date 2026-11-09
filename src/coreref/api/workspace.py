@@ -35,19 +35,19 @@ class Workspace:
     def init(self) -> None:
         self._catalog._client.run("workspace", "init", str(self.path.parent))
 
-    def add(self, directory: str | Path) -> None:
-        """Register a directory; prepare only conanfile.py for a standard deps.yml project."""
-        from ..tools.deps import DepsFile
-
+    def add(
+        self,
+        directory: str | Path,
+        *,
+        record: LocalRecord | None = None,
+        dependencies: tuple[Ref, ...] = (),
+    ) -> None:
+        """Prepare a missing recipe from an optional record, then register the directory."""
         source = Path(directory).expanduser().resolve()
-        if not (source / "conanfile.py").exists():
-            document = DepsFile(self._catalog, source / "deps.yml")
-            LocalRecipe(
-                document.record, tuple(str(ref) for ref in document.dependencies)
-            ).write_editable(
-                source,
-                manifest="deps.yml",
-            )
+        if record is not None:
+            LocalRecipe(record, tuple(str(ref) for ref in dependencies)).write_editable(source)
+        elif dependencies:
+            raise InvalidPackage("Dependencies require a local record")
         self.init()
         self._catalog._client.run("workspace", "add", str(source), workspace=self.path.parent)
 
