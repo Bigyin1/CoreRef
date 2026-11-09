@@ -31,6 +31,10 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         assert "networkx" not in sys.modules
         assert "pydantic" not in sys.modules
 
+        offline = records.Ref("public.offline.rtl.default/v1")
+        assert str(offline) == "public.offline.rtl.default/v1"
+        assert "conan" not in sys.modules
+
         from coreref.api.graph import Graph
         assert "conan" not in sys.modules
 
@@ -40,20 +44,20 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         manifest: dict[str, records.JSON] = {"views": ["rtl", "timing"]}
         instance = catalog.Catalog(Path(sys.argv[1]))
         local = records.LocalRecord(
-            ref=records.Ref("public.rtl.rtl.default/v1", catalog=instance),
+            ref=records.Ref("public.rtl.rtl.default/v1"),
             payload=manifest,
         )
         record = instance.publish(record=local)
-        stored = record.ref.get()
+        stored = instance.get(record.ref)
         assert stored.ref == record.ref
         assert stored.payload["views"] == ("rtl", "timing")
         assert instance.search(query.SearchQuery()) == (stored,)
-        assert record.ref.dependencies() == ()
+        assert Graph(instance, record.ref).dependencies() == ()
         resolved = Graph(instance, local)
         assert isinstance(resolved.records[0], records.LocalRecord)
         assert resolved.records[0].payload == stored.payload
         try:
-            records.Ref("public.absent.rtl.default/v1", catalog=instance).get()
+            instance.get(records.Ref("public.absent.rtl.default/v1"))
         except errors.NotFound:
             pass
         else:

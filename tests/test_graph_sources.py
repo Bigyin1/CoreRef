@@ -26,7 +26,7 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
 ) -> None:
     leaf = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"),
             source=checkout,
         )
     )
@@ -34,7 +34,7 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
     artifact.write_text("report")
     parent = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "parent", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "parent", "rtl", "default", "1.0"),
             source=checkout,
             files={"report": artifact},
         ),
@@ -42,7 +42,7 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
     )
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(parent.ref,),
     )
     graph.create_lockfile(tmp_path / "project.lock").unlink()
@@ -74,12 +74,10 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
 def test_metadata_only_selection_does_not_run_conan(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    record = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "meta", "be", "default", "1.0", catalog=catalog))
-    )
+    record = catalog.publish(LocalRecord(Ref.from_fields("soc", "meta", "be", "default", "1.0")))
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(record.ref,),
     )
 
@@ -91,7 +89,7 @@ def test_metadata_only_selection_does_not_run_conan(
     assert graph.get_with_sources(()) == ()
     for ref in (
         graph.record.ref,
-        Ref.from_fields("soc", "absent", "rtl", "default", "1.0", catalog=catalog),
+        Ref.from_fields("soc", "absent", "rtl", "default", "1.0"),
     ):
         with pytest.raises(InvalidPackage, match=r"published dependencies|Unknown reference"):
             graph.get_with_sources((ref,))
@@ -101,13 +99,11 @@ def test_failed_batch_can_be_retried(
     catalog: Catalog, checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dependency = catalog.publish(
-        LocalRecord(
-            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=checkout
-        )
+        LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"), source=checkout)
     )
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(dependency.ref,),
     )
 
@@ -125,14 +121,12 @@ def test_install_must_match_the_resolved_references(
     catalog: Catalog, checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     requested = catalog.publish(
-        LocalRecord(
-            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=checkout
-        )
+        LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"), source=checkout)
     )
     unexpected = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "other", "rtl", "default", "1.0", catalog=catalog))
+        LocalRecord(Ref.from_fields("soc", "other", "rtl", "default", "1.0"))
     )
-    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
     graph = Graph(catalog, root, dependencies=(requested.ref,))
     wrong = Graph(catalog, root, dependencies=(unexpected.ref,))
 
@@ -147,24 +141,22 @@ def test_install_must_match_the_resolved_references(
 def test_unpinned_external_requirement_stays_at_resolved_revision(
     catalog: Catalog, checkout: Path, tmp_path: Path
 ) -> None:
-    leaf = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
-    )
-    parent = Ref.from_fields("soc", "parent", "rtl", "default", "1.0", catalog=catalog)
+    leaf = catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0")))
+    parent = Ref.from_fields("soc", "parent", "rtl", "default", "1.0")
     LocalRecipe(LocalRecord(parent, source=checkout), (str(leaf.ref),)).write(tmp_path / "external")
     native = catalog._client.export_package(tmp_path / "external")
     assert native.root.ref is not None
     catalog._client.upload(native.root.ref.repr_notime())
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(parent,),
     )
     LocalRecipe(LocalRecord(leaf.ref, {"new": "revision"})).write(tmp_path / "new-leaf")
     catalog._client.upload(catalog._client.export(tmp_path / "new-leaf"))
     assert graph.get_with_sources((parent,))[0].source is not None
-    assert leaf.ref.get().ref == leaf.ref
-    assert leaf.ref.without_revision().get().ref != leaf.ref
+    assert catalog.get(leaf.ref).ref == leaf.ref
+    assert catalog.get(leaf.ref.without_revision()).ref != leaf.ref
 
 
 def test_required_parent_does_not_fetch_unselected_transitive_source(
@@ -174,20 +166,20 @@ def test_required_parent_does_not_fetch_unselected_transitive_source(
     shutil.copytree(checkout, hidden_checkout)
     hidden = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "hidden", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "hidden", "rtl", "default", "1.0"),
             source=hidden_checkout,
         )
     )
     parent = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "parent", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "parent", "rtl", "default", "1.0"),
             source=checkout,
         ),
         dependencies=(hidden.ref,),
     )
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(parent.ref,),
     )
     hidden_checkout.rename(tmp_path / "offline-hidden")
@@ -205,17 +197,15 @@ def test_required_parent_does_not_fetch_unselected_transitive_source(
 def test_metadata_only_record_is_not_installed_with_source_packages(
     catalog: Catalog, checkout: Path, tmp_path: Path
 ) -> None:
-    metadata = Ref.from_fields("soc", "meta", "run", "default", "1.0", catalog=catalog)
+    metadata = Ref.from_fields("soc", "meta", "run", "default", "1.0")
     LocalRecipe(LocalRecord(metadata, {"meta": True})).write(tmp_path / "recipe-only")
     catalog._client.upload(catalog._client.export(tmp_path / "recipe-only"))
     dependency = catalog.publish(
-        LocalRecord(
-            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog), source=checkout
-        )
+        LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"), source=checkout)
     )
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(metadata, dependency.ref),
     )
     fetched = graph.get_with_sources((dependency.ref, metadata))
@@ -232,7 +222,7 @@ def test_batch_files_do_not_require_scm_and_can_be_upgraded_to_sources(
     records = tuple(
         catalog.publish(
             LocalRecord(
-                Ref.from_fields("soc", component, "rtl", "default", "1.0", catalog=catalog),
+                Ref.from_fields("soc", component, "rtl", "default", "1.0"),
                 source=checkout,
                 files={"result.lib": artifact},
             )
@@ -241,7 +231,7 @@ def test_batch_files_do_not_require_scm_and_can_be_upgraded_to_sources(
     )
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=tuple(record.ref for record in records),
     )
     calls: list[str] = []
@@ -275,13 +265,13 @@ def test_source_only_metadata_get_does_not_install(
 ) -> None:
     dependency = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
             source=checkout,
         )
     )
     graph = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(dependency.ref,),
     )
 
@@ -298,17 +288,17 @@ def test_published_graph_does_not_fetch_scm_enabled_by_profile(
 ) -> None:
     leaf = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"),
             source=checkout,
         )
     )
     parent = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
         dependencies=(leaf.ref,),
     )
     checkout.rename(tmp_path / "offline-checkout")
     profile = catalog._client.home / "profiles/default"
     profile.write_text(profile.read_text() + "\n[conf]\nsoc.*:tools.build:download_source=True\n")
-    graph = parent.ref.graph()
+    graph = Graph(catalog, parent.ref)
     assert graph.requirements == (leaf.ref,)
     assert graph.get((leaf.ref,))[0].source is None

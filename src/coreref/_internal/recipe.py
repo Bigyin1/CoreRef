@@ -116,13 +116,12 @@ class StoredRecipe:
     def __init__(
         self,
         directory: Path,
-        expected: Ref,
         *,
         reference: str,
         native: NativePackage | None = None,
     ) -> None:
         self.reference = reference
-        expected = from_conan_reference(reference, catalog=expected._catalog)
+        expected = from_conan_reference(reference)
         self.directory = directory
         try:
             self.is_editable = native is not None
@@ -159,11 +158,7 @@ class StoredRecipe:
         if any(name in value for name in ("source", "source_path", "scm")):
             raise ValueError("Git source must be stored in Conan SCM metadata")
         coordinates = value["ref"]
-        ref = (
-            Ref(coordinates, catalog=expected._catalog)
-            if isinstance(coordinates, str)
-            else Ref.from_fields(**coordinates, catalog=expected._catalog)
-        )
+        ref = Ref(coordinates) if isinstance(coordinates, str) else Ref.from_fields(**coordinates)
         if ref != expected.without_revision():
             raise ValueError("Record coordinates disagree with the recipe")
         return Record(
@@ -193,8 +188,6 @@ class StoredRecipe:
                 if package.folders.source_folder
                 else directory / (package.folders.source or ".")
             ).resolve()
-            if working_source.is_relative_to(self.record.ref._catalog.cache_directory):
-                raise InvalidPackage("Working package sources point into package storage")
             paths = cast(Mapping[str, str], self.data.get("files", {}))
             return InstalledRecord(
                 self.record,

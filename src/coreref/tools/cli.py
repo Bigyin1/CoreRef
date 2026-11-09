@@ -44,8 +44,14 @@ class _WorkspaceCommands:
     def add(self, directory: Path, project_dir: ProjectDir = Path(".")) -> None:
         """Register an existing package directory with Conan."""
         with _command_errors():
-            Workspace(self._catalog_factory(), project_dir / "conanws.yml").add(directory)
-            typer.echo(directory.expanduser().resolve())
+            catalog = self._catalog_factory()
+            source = directory.expanduser().resolve()
+            workspace = Workspace(catalog, project_dir / "conanws.yml")
+            if (source / "conanfile.py").exists():
+                workspace.add(source)
+            else:
+                DepsFile(catalog, source / "deps.yml").add_to_workspace(workspace)
+            typer.echo(source)
 
     def open(
         self,
@@ -57,7 +63,7 @@ class _WorkspaceCommands:
         with _command_errors():
             catalog = self._catalog_factory()
             path = Workspace(catalog, project_dir / "conanws.yml").open(
-                Ref(ref, catalog=catalog),
+                Ref(ref),
                 directory=directory,
             )
             typer.echo(path)
@@ -109,7 +115,7 @@ class _DepsCommands:
         """Create deps.yaml without overwriting an existing file."""
         with _command_errors():
             catalog = self._catalog_factory()
-            document = DepsFile.create(catalog, Ref(ref, catalog=catalog), file, source=source)
+            document = DepsFile.create(catalog, Ref(ref), file, source=source)
             typer.echo(document.path)
 
     def add(self, ref: str, file: Manifest = Path("deps.yaml")) -> None:
@@ -117,7 +123,7 @@ class _DepsCommands:
         with _command_errors():
             catalog = self._catalog_factory()
             document = DepsFile(catalog, file)
-            document.add(Ref(ref, catalog=catalog))
+            document.add(Ref(ref))
             document.save()
             typer.echo(document.path)
 
@@ -126,7 +132,7 @@ class _DepsCommands:
         with _command_errors():
             catalog = self._catalog_factory()
             document = DepsFile(catalog, file)
-            document.remove(Ref(ref, catalog=catalog))
+            document.remove(Ref(ref))
             document.save()
             typer.echo(document.path)
 

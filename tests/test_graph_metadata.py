@@ -14,16 +14,12 @@ from coreref.api.records import LocalRecord, Ref
 
 
 def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog) -> None:
-    leaf = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
-    )
+    leaf = catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0")))
     parent = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "parent", "rtl", "default", "1.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "parent", "rtl", "default", "1.0")),
         dependencies=(leaf.ref,),
     )
-    local = LocalRecord(
-        Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog), {"root": True}
-    )
+    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"), {"root": True})
     graph = Graph(catalog, local, dependencies=(parent.ref, leaf.ref))
     newer = catalog.publish(LocalRecord(leaf.ref.without_revision(), {"generation": 2}))
     with patch.object(
@@ -40,9 +36,7 @@ def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog)
             with pytest.raises(InvalidPackage, match="Revision"):
                 operation(newer.ref)
             with pytest.raises(InvalidPackage, match="Unknown reference"):
-                operation(
-                    Ref.from_fields("soc", "absent", "rtl", "default", "1.0", catalog=catalog)
-                )
+                operation(Ref.from_fields("soc", "absent", "rtl", "default", "1.0"))
         snapshot = graph.info(local.ref)
         assert isinstance(snapshot, LocalRecord)
         snapshot.payload = {"edited": True}

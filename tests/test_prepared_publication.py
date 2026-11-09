@@ -26,13 +26,13 @@ class Payload:
 def test_publish_graph_keeps_its_metadata_files_and_revision_choice(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    dependency = Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog)
+    dependency = Ref.from_fields("soc", "leaf", "rtl", "default", "1.0")
     first = catalog.publish(LocalRecord(dependency, {"generation": 1}))
     artifact = tmp_path / "result.lib"
     artifact.write_text("first file")
     payload = Payload()
     local = LocalRecord(
-        Ref.from_fields("soc", "macro", "be", "lib-lef", "2.0", catalog=catalog),
+        Ref.from_fields("soc", "macro", "be", "lib-lef", "2.0"),
         payload,
         files={"lib": artifact},
     )
@@ -44,7 +44,7 @@ def test_publish_graph_keeps_its_metadata_files_and_revision_choice(
         published = catalog.publish(graph)
     assert published.payload == {"value": "captured"} and payload.calls == 1
     assert published.files["lib"].read_text() == "first file"
-    assert published.ref.dependencies() == (first,)
+    assert Graph(catalog, published.ref).dependencies() == (first,)
     assert not any(call.args[:2] == ("graph", "info") for call in commands.call_args_list)
     assert sum(call.args[0] == "export-pkg" for call in commands.call_args_list) == 1
     assert catalog.publish(graph).ref == published.ref
@@ -53,20 +53,20 @@ def test_publish_graph_keeps_its_metadata_files_and_revision_choice(
 def test_publish_resolved_graph_uses_captured_lock_after_original_is_deleted(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    ref = Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog)
+    ref = Ref.from_fields("soc", "leaf", "rtl", "default", "1.0")
     first = catalog.publish(LocalRecord(ref, {"generation": 1}))
-    root = LocalRecord(Ref.from_fields("soc", "parent", "rtl", "default", "1.0", catalog=catalog))
+    root = LocalRecord(Ref.from_fields("soc", "parent", "rtl", "default", "1.0"))
     lock = Graph(catalog, root, dependencies=(ref,)).create_lockfile(tmp_path / "project.lock")
     catalog.publish(LocalRecord(ref, {"generation": 2}))
     prepared = Graph(catalog, root, dependencies=(ref,), lockfile=lock)
     lock.unlink()
     published = catalog.publish(prepared)
-    assert published.ref.dependencies() == (first,)
+    assert Graph(catalog, published.ref).dependencies() == (first,)
     assert not lock.exists()
 
 
 def test_prepared_upload_failure_can_be_retried_without_resolving_again(catalog: Catalog) -> None:
-    ref = Ref.from_fields("soc", "local", "be", "report", "1.0", catalog=catalog)
+    ref = Ref.from_fields("soc", "local", "be", "report", "1.0")
     graph = Graph(catalog, LocalRecord(ref, {"report": True}))
     with (
         patch.object(catalog._client, "upload", side_effect=CatalogError("offline")),
@@ -84,7 +84,7 @@ def test_prepared_upload_failure_can_be_retried_without_resolving_again(catalog:
 def test_prepared_publication_rejects_ambiguous_inputs(
     catalog: Catalog, tmp_path: Path, override: str
 ) -> None:
-    ref = Ref.from_fields("soc", "local", "be", "report", "1.0", catalog=catalog)
+    ref = Ref.from_fields("soc", "local", "be", "report", "1.0")
     graph = Graph(catalog, LocalRecord(ref))
     with pytest.raises(InvalidPackage):
         match override:
@@ -95,4 +95,4 @@ def test_prepared_publication_rejects_ambiguous_inputs(
             case "catalog":
                 Catalog(catalog._client.home).publish(graph)
             case "published":
-                catalog.publish(catalog.publish(graph).ref.graph())
+                catalog.publish(Graph(catalog, catalog.publish(graph).ref))

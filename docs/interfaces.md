@@ -48,8 +48,8 @@ namespace.component[_subcomponent].view.type/version[#revision]
 
 ```mermaid
 classDiagram
-    Ref --> Catalog : использует
-    Ref ..> Graph : graph()
+    Catalog ..> Record : info / get
+    Graph --> Catalog : операции Conan
     Graph o-- LocalRecord : локальный корень
     Graph o-- Record : опубликованные узлы
     LocalRecord --> Ref : координаты
@@ -61,7 +61,8 @@ classDiagram
 
 ## Ref и поиск
 
-`Ref(reference, *, catalog)` связывает координаты с конкретным каталогом.
+`Ref(reference)` — самостоятельные координаты без каталога и операций Conan.
+Один Ref можно передать любому Catalog; создание и сравнение Ref не выполняют I/O.
 Первый `_` отделяет subcomponent: `soc.cpu_alu.be.lib-lef/4.0`.
 В самом component используются буквы, цифры и дефис.
 
@@ -71,11 +72,10 @@ classDiagram
 | `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
 | `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
 | `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
-| `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)` | Создание из отдельных координат |
-| `ref.info()` | Метаданные `Record` |
-| `ref.get()` / `ref.get_with_sources()` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
-| `ref.dependency_refs(filters=None)` / `ref.dependencies(filters=None)` | Прямые требования как Ref / Record |
-| `ref.graph(*, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
+| `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None)` | Создание из отдельных координат |
+| `catalog.info(ref)` | Метаданные `Record` |
+| `catalog.get(ref)` / `catalog.get_with_sources(ref)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
+| `Graph(catalog, ref, *, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
 
 `SearchQuery` задаёт точные AND-фильтры: `namespace`, `component`, `subcomponent`,
 `view`, `type`, `version`, `revision`. Значение `None` пропускает фильтр, кроме
@@ -83,7 +83,8 @@ classDiagram
 Остальные поля не принимают glob-шаблоны.
 `SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
 сохраняет namespace/component/subcomponent, а версию и revision выбирает независимо.
-`matches_ref`, `matches` и `select` позволяют фильтровать уже полученные данные.
+`matches_ref` и `matches` проверяют уже полученные ссылки и записи.
+Фильтры зависимостей задаются в Graph.
 
 `query` обязателен; поиск без ограничений — `catalog.search(SearchQuery())`.
 
@@ -131,18 +132,22 @@ Graph фиксирует выбранные revisions при разрешени�
 Payload принимает JSON или объект с `to_json() -> str` (`JSONSerializable`).
 Его схему, списки RTL-файлов, NFS-пути и их проверку определяет приложение.
 `LocalRecord.to_json()` подготавливает метаданные пакета;
-`Record.to_dict()` и `Record.from_json(data, *, catalog)` предназначены для снимков.
+`Record.to_dict()` предоставляет данные для вывода в CLI и пользовательской сериализации.
+Метаданные скачанных пакетов читает внутренняя реализация SDK.
 
 ## Graph и Workspace
 
 `Graph(catalog, record, *, dependencies=(), lockfile=None)` сразу
-разрешает локальный `LocalRecord` или опубликованный `Ref`. Публиковать локальный корень не требуется.
+разрешает локальный `LocalRecord` или опубликованный `Ref` через явно переданный каталог.
+Публиковать локальный корень не требуется. Прямые зависимости опубликованного пакета
+доступны через `Graph(catalog, ref).dependencies()`.
+Связи снимка можно читать через `graph.networkx.edges`.
 Стандартный deps.yaml читает DepsFile; собственные форматы и дополнительные зависимости
 по-прежнему может определять приложение.
 
 | API Graph | Результат |
 |---|---|
-| `record`, `records`, `edges`, `requirements` | Корень, все метаданные, связи `Dependency(source, target)`, прямые Ref корня |
+| `record`, `records`, `requirements` | Корень, все метаданные и прямые Ref корня |
 | `info(ref)` | Метаданные выбранного узла без I/O |
 | `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
 | `ordered_refs(root, *, stop_at=())`, `ordered_records(...)` | Обход с корнем; у stop_at не обходятся зависимости, сами узлы включены |
@@ -173,13 +178,14 @@ Conan создаёт conanws.yml/conanws.py и управляет составо
 | Операция | Назначение |
 |---|---|
 | `init()` | Создать нативный workspace |
-| `add(directory)` | Подключить директорию с conanfile.py либо deps.yml |
+| `add(directory, *, record=None, dependencies=())` | Подключить готовый рецепт либо подготовить его из данных flow |
 | `open(ref, *, directory=None)` | Получить Git-копию через SCM Conan и подключить её; по умолчанию рядом с проектом |
 | `remove(directory)` | Убрать регистрацию, сохранив директорию и изменения |
 | `members` | Прочитать Ref и пути из Conan |
 
-Если в рабочей копии нет рецепта, SDK добавляет только **conanfile.py**. Для deps.yml
-рецепт читает текущие зависимости и пути из манифеста; для скачанной копии содержит
+Workspace не читает манифесты проекта. `add(directory)` регистрирует имеющийся рецепт;
+`add(directory, record=local_record, dependencies=refs)` создаёт отсутствующий
+**conanfile.py** из готовых данных flow. Для скачанной через `open` копии используются
 метаданные опубликованного пакета. Существующий рецепт сохраняется. Дополнительные
 record.json/conandata.yml и собственные маркеры в рабочей директории не создаются.
 Сгенерированные файлы остаются untracked; SDK не меняет Git index или ignore.
@@ -191,12 +197,14 @@ record.json/conandata.yml и собственные маркеры в рабоч
 это не гарантированная revision опубликованной версии рабочей копии.
 
 ```python
+from coreref.api.graph import Graph
 from coreref.api.workspace import Workspace
 
 workspace = Workspace(catalog)  # запускаем из корня проекта
-workspace.add("../cpu")  # существующая директория
+workspace.add("../cpu", record=cpu_record, dependencies=cpu_dependencies)
+# cpu_record и cpu_dependencies сформированы парсером конкретного flow.
 # workspace.open(rtl_ref)       # либо Git-копия опубликованной зависимости
-graph = rtl_ref.graph()  # Conan уже видит зарегистрированную директорию
+graph = Graph(catalog, rtl_ref)  # Conan уже видит зарегистрированную директорию
 ready = graph.get_with_sources()
 local = [record for record in ready if record.is_editable]
 ```
@@ -230,9 +238,12 @@ flow workspace list --project-dir ./project
 flow workspace remove ../existing-cpu --project-dir ./project
 ```
 
-`add DIRECTORY` читает `DIRECTORY/deps.yml`: достаточно валидного YAML с `ref`.
+Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/deps.yml`, если рецепта ещё нет:
+достаточно валидного YAML с `ref`. Класс Workspace от этого формата не зависит.
 `dependencies`, `source`, `files` и `payload` необязательны; пути считаются от директории YAML.
-Рецепт создаётся в существующем проекте, без клонирования. Например:
+Для Python-надстройки это `DepsFile(catalog, path).add_to_workspace(workspace)`.
+Рецепт читает выбранный YAML при следующих вызовах Conan, поэтому его изменения
+подхватываются без повторной регистрации. Файл может называться произвольно. Например:
 
 ```yaml
 ref: soc.cpu.rtl.default/1.0
@@ -281,6 +292,7 @@ SafeLoader: при повторении ключа сохраняется пос
 |---|---|
 | `create(catalog, ref, path="deps.yaml", *, source=None)` | Создать файл, отказавшись от перезаписи существующего |
 | `record`, `dependencies` | LocalRecord и прямые Ref для обычного SDK API |
+| `add_to_workspace(workspace)` | Подготовить YAML-рецепт и зарегистрировать директорию |
 | `resolve(update=False)` | Новый Graph с существующим lockfile; Conan обнаруживает workspace по cwd |
 | `create_lockfile()` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
 | `add(ref)`, `remove(ref)`, `save()` | Изменить прямые зависимости и явно сохранить YAML |

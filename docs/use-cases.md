@@ -15,7 +15,9 @@ Ref описывает **какой компонент и в каком пред
 
 Graph строится и для неопубликованного локального проекта. Его lockfile сохраняют
 в репозитории или workspace проекта для повторения выбора версий и revisions.
-Для работы над зависимостью используют `workspace.open(ref)` или `workspace.add(directory)`.
+Для работы над зависимостью используют `workspace.open(ref)` или
+`workspace.add(directory, record=local_record, dependencies=refs)`. Формат проекта читает flow;
+для стандартного YAML есть `DepsFile.add_to_workspace(workspace)`.
 Conan сам выбирает рабочие копии из workspace текущего проекта; Graph не требует
 особых параметров. SDK добавляет в рабочую копию только conanfile.py, если его ещё нет.
 `InstalledRecord.is_editable` отличает такую запись от кэшовой. Локальные files могут
@@ -96,7 +98,7 @@ sources = collect_rtl_sources(graph)
 
 При готовности к публикации вызывают `catalog.publish(graph)`
 из чистого Git checkout с доступным получателям remote.
-Для уже опубликованного корня достаточно `Ref(..., catalog=catalog).graph()`.
+Для уже опубликованного корня достаточно `Graph(catalog, Ref(...))`.
 
 ## Найти LIB/LEF для выбранного RTL
 
@@ -126,7 +128,7 @@ def find_lib_lef(catalog: Catalog, rtl: Ref) -> InstalledRecord:
     query = SearchQuery.for_component(rtl, view="be", type="lib-lef")
     matching: list[Graph] = []
     for candidate in catalog.search_refs(query):
-        be_graph = candidate.graph()
+        be_graph = Graph(catalog, candidate)
         # Координаты находят кандидатов; граф подтверждает происхождение от RTL.
         if rtl in be_graph.ordered_refs(be_graph.record.ref):
             matching.append(be_graph)
@@ -137,7 +139,7 @@ def find_lib_lef(catalog: Catalog, rtl: Ref) -> InstalledRecord:
 
 
 # Берём revision CPU из уже разрешённого проекта первого примера.
-rtl = graph.info(Ref("soc.cpu.rtl.default/1.0", catalog=catalog)).ref
+rtl = graph.info(Ref("soc.cpu.rtl.default/1.0")).ref
 be = find_lib_lef(catalog, rtl)
 lib, lef = be.files["cpu.lib"], be.files["cpu.lef"]
 ```
@@ -196,11 +198,11 @@ def publish_result(
 
 catalog = Catalog()
 root = Path.cwd()
-input_ref = Ref("demo.block.data.input/1.0", catalog=catalog)
+input_ref = Ref("demo.block.data.input/1.0")
 
 # Первый пакет хранит модель и зависимость от входных данных.
 model_record = LocalRecord(
-    Ref("demo.block.analysis.model/1.0", catalog=catalog),
+    Ref("demo.block.analysis.model/1.0"),
     files={"model.bin": root / "out/model.bin"},
 )
 model = publish_result(
@@ -212,7 +214,7 @@ model = publish_result(
 
 # Второй пакет хранит отчёт и точную ссылку на опубликованную модель.
 report_record = LocalRecord(
-    Ref("demo.block.analysis.report/1.0", catalog=catalog),
+    Ref("demo.block.analysis.report/1.0"),
     files={"summary.json": root / "out/summary.json"},
 )
 report = publish_result(

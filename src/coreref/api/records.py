@@ -6,15 +6,9 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Protocol, TypeAlias, runtime_checkable
+from typing import ClassVar, Protocol, TypeAlias, runtime_checkable
 
 from frozendict import deepfreeze, frozendict
-
-if TYPE_CHECKING:
-    from .catalog import Catalog
-    from .graph import Graph
-    from .query import SearchQuery
-
 
 JSON: TypeAlias = (
     bool | int | float | str | Mapping[str, "JSON"] | list["JSON"] | tuple["JSON", ...] | None
@@ -29,15 +23,12 @@ class JSONSerializable(Protocol):
 
 
 class Ref:
-    """Package coordinates with a required private catalog excluded from identity and JSON."""
+    """Package coordinates independent of any client, cache or registry."""
 
-    def __init__(self, reference: str, *, catalog: Catalog) -> None:
+    def __init__(self, reference: str) -> None:
         from .._internal.references import to_conan_reference
         from .errors import InvalidPackage
 
-        if catalog is None:
-            raise TypeError("Ref requires a catalog")
-        self._catalog = catalog
         try:
             name, self._version = reference.split("#", 1)[0].split("/")
             self._namespace, component, self._view, self._type = name.split(".")
@@ -53,7 +44,7 @@ class Ref:
             ) from error
 
     @classmethod
-    def from_fields(  # noqa: PLR0913, PLR0917 - One argument per coordinate and context.
+    def from_fields(  # noqa: PLR0913, PLR0917 - One argument per coordinate.
         cls,
         namespace: str,
         component: str,
@@ -63,7 +54,6 @@ class Ref:
         *,
         subcomponent: str | None = None,
         revision: str | None = None,
-        catalog: Catalog,
     ) -> Ref:
         """Construct from separate coordinates using the same canonical text parser."""
         from .errors import InvalidPackage
@@ -76,7 +66,7 @@ class Ref:
         reference = f"{namespace}.{part}.{view}.{type}/{version}"
         if revision is not None:
             reference = f"{reference}#{revision}"
-        return cls(reference, catalog=catalog)
+        return cls(reference)
 
     @property
     def namespace(self) -> str:
@@ -127,8 +117,7 @@ class Ref:
         return hash(self._identity)
 
     def __repr__(self) -> str:
-        coordinates = ", ".join(f"{name}={value!r}" for name, value in self.to_dict().items())
-        return f"Ref({coordinates})"
+        return f"Ref({str(self)!r})"
 
     @property
     def package_name(self) -> str:
@@ -164,7 +153,7 @@ class Ref:
         )
 
     def to_dict(self) -> dict[str, str]:
-        """Serialize package coordinates without the runtime catalog context."""
+        """Serialize package coordinates."""
         coordinates = {
             "namespace": self.namespace,
             "component": self.component,
@@ -179,42 +168,8 @@ class Ref:
         return coordinates
 
     def without_revision(self) -> Ref:
-        """Return logical coordinates bound to the same catalog."""
-        coordinates = self.to_dict()
-        coordinates.pop("revision", None)
-        return Ref.from_fields(**coordinates, catalog=self._catalog)
-
-    def info(self) -> Record:
-        """Read metadata without installing package files or Git sources."""
-        return self._catalog._package(self).info()
-
-    def get(self) -> InstalledRecord:
-        """Get exact metadata and files; an unpinned Ref selects the latest revision."""
-        return self._catalog._package(self).get()
-
-    def get_with_sources(self) -> InstalledRecord:
-        """Get package files and its Git checkout when the recipe declares one."""
-        return self._catalog._package(self).get_with_sources()
-
-    def graph(self, *, lockfile: Path | None = None) -> Graph:
-        """Resolve a registry or workspace root and its full tree without installing files."""
-        from .graph import Graph
-
-        return Graph(self._catalog, self, lockfile=lockfile)
-
-    def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
-        """Read immediate dependencies, optionally filtered by their coordinates."""
-        from .query import SearchQuery
-
-        query = SearchQuery() if filters is None else filters
-        return self._catalog._package(self).dependencies(query)
-
-    def dependency_refs(self, filters: SearchQuery | None = None) -> tuple[Ref, ...]:
-        """Read exact direct requirements without fetching their records or package contents."""
-        from .query import SearchQuery
-
-        query = SearchQuery() if filters is None else filters
-        return self._catalog._package(self).dependency_refs(query)
+        """Return logical coordinates without a recipe revision."""
+        return Ref(str(self).partition("#")[0])
 
 
 @dataclass
@@ -300,34 +255,6 @@ class Record:
             "file_names": self.file_names,
             "has_source": self.has_source,
         }
-
-    @staticmethod
-    def from_json(payload: str, *, catalog: Catalog) -> Record:
-        """Restore a metadata or installed snapshot, according to its fields."""
-        value = json.loads(payload)
-        if not isinstance(value, dict):
-            raise ValueError("Record must be a JSON object")
-        if "scm" in value:
-            raise ValueError("Git source must be stored in Conan SCM metadata")
-        record = Record(
-            Ref.from_fields(**value["ref"], catalog=catalog),
-            value["payload"],
-            file_names=tuple(value.get("file_names", ())),
-            has_source=value.get("has_source", False),
-        )
-        if "files" not in value:
-            if "source" in value:
-                raise ValueError("An installed snapshot must include its files mapping")
-            return record
-        files = value["files"]
-        if not isinstance(files, dict):
-            raise ValueError("Snapshot files must be a path dictionary")
-        return InstalledRecord(
-            record,
-            source=Path(value["source"]) if value.get("source") else None,
-            files={name: Path(path) for name, path in files.items()},
-            is_editable=value.get("is_editable", False),
-        )
 
 
 class InstalledRecord(Record):

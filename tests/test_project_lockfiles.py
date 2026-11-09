@@ -9,7 +9,7 @@ import pytest
 
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage
-from coreref.api.graph import Dependency, Graph
+from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record
 
@@ -19,15 +19,13 @@ def test_project_lock_pins_publication_and_installation(
 ) -> None:
     catalog = Catalog(catalog._client.home)
     dependency = catalog.publish(
-        local_record(
-            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
-        )
+        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
     )
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     project = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog)),
+        LocalRecord(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0")),
         dependencies=(dependency.ref,),
     )
     lockfile = project.create_lockfile(tmp_path / "project/conan.lock")
@@ -42,14 +40,14 @@ def test_project_lock_pins_publication_and_installation(
     assert tuple(record.files) == ("cpu.lib",)
     recipe = catalog._package(project.record.ref).recipe().directory
     assert not (recipe / "conan.lock").exists()
-    assert project.edges == (Dependency(project.record.ref, dependency.ref),)
-    installed = record.ref.get()
+    assert tuple(sorted(project.networkx.edges)) == ((project.record.ref, dependency.ref),)
+    installed = catalog.get(record.ref)
     assert installed.files["cpu.lib"].read_text() == artifact.read_text()
     assert "conan.lock" not in installed.files
     assert lockfile.read_bytes() == original_lock
     assert project.create_lockfile() == lockfile
-    record.ref.graph().create_lockfile(tmp_path / "stored.lock")
-    assert record.ref.graph(lockfile=tmp_path / "stored.lock").records
+    Graph(catalog, record.ref).create_lockfile(tmp_path / "stored.lock")
+    assert Graph(catalog, record.ref, lockfile=tmp_path / "stored.lock").records
 
 
 @pytest.mark.parametrize(
@@ -61,14 +59,10 @@ def test_conan_validates_the_supplied_project_lockfile(
 ) -> None:
     catalog = Catalog(catalog._client.home)
     rtl = catalog.publish(
-        local_record(
-            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
-        )
+        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
     )
     macro = catalog.publish(
-        local_record(
-            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))
-        ),
+        local_record(Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"))),
         dependencies=(rtl.ref,),
     )
     project = Graph(catalog, local_record(macro), dependencies=(rtl.ref,))
@@ -91,18 +85,18 @@ def test_conan_validates_the_supplied_project_lockfile(
     assert isinstance(local, LocalRecord)
     with pytest.raises(exception):
         Graph(catalog, local, dependencies=project.requirements, lockfile=lockfile)
-    assert macro.ref.get() == macro
+    assert catalog.get(macro.ref) == macro
 
 
 def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
     catalog = Catalog(catalog._client.home)
-    root = Record(Ref.from_fields("soc", "root", "rtl", "default", "1.0", catalog=catalog))
+    root = Record(Ref.from_fields("soc", "root", "rtl", "default", "1.0"))
     project = Graph(catalog, local_record(root))
     lockfile = project.create_lockfile(tmp_path / "empty/conan.lock")
     empty_lock = lockfile.read_bytes()
     root = catalog.publish(local_record(root), lockfile=lockfile)
     assert project.records == (local_record(root),)
-    consumer = Record(Ref.from_fields("soc", "consumer", "rtl", "default", "1.0", catalog=catalog))
+    consumer = Record(Ref.from_fields("soc", "consumer", "rtl", "default", "1.0"))
     Graph(catalog, local_record(consumer), dependencies=(root.ref,)).create_lockfile(lockfile)
     project.create_lockfile()
     assert lockfile.read_bytes() == empty_lock

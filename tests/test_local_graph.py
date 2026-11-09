@@ -8,7 +8,7 @@ import pytest
 
 from coreref.api.catalog import Catalog
 from coreref.api.errors import Conflict, InvalidPackage, NotFound
-from coreref.api.graph import Dependency, Graph
+from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
 from coreref.api.records import Record, Ref
 from tests.helpers import local_record
@@ -19,73 +19,73 @@ def local_catalog(catalog: Catalog) -> Catalog:
     return catalog
 
 
-def record(name: str, version: str = "1.0", *, catalog: Catalog) -> Record:
-    return Record(Ref.from_fields("soc", name, "rtl", "default", version, catalog=catalog))
+def record(name: str, version: str = "1.0") -> Record:
+    return Record(Ref.from_fields("soc", name, "rtl", "default", version))
 
 
 def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalog) -> None:
     catalog = local_catalog
-    leaf, left, right = (record(name, catalog=local_catalog) for name in ("leaf", "left", "right"))
+    leaf, left, right = (record(name) for name in ("leaf", "left", "right"))
     leaf = catalog.publish(local_record(leaf))
     left, right = (
         catalog.publish(local_record(branch), dependencies=(leaf.ref,)) for branch in (left, right)
     )
-    root = Record(record("top", catalog=local_catalog).ref, {"local": ["working-tree"]})
-    graph = Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
+    root = Record(record("top").ref, {"local": ["working-tree"]})
+    graph = Graph(local_catalog, local_record(root), dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
-    assert set(graph.edges) == {
-        Dependency(root.ref, left.ref),
-        Dependency(root.ref, right.ref),
-        Dependency(left.ref, leaf.ref),
-        Dependency(right.ref, leaf.ref),
+    assert set(graph.networkx.edges) == {
+        (root.ref, left.ref),
+        (root.ref, right.ref),
+        (left.ref, leaf.ref),
+        (right.ref, leaf.ref),
     }
     stored_root = next(item for item in graph.records if item.ref == root.ref)
     assert stored_root.payload == {"local": ("working-tree",)}
     with pytest.raises(NotFound):
-        Ref.from_fields(**root.ref.to_dict(), catalog=catalog).get()
+        catalog.get(Ref.from_fields(**root.ref.to_dict()))
     assert len(catalog.search(SearchQuery())) == 3
 
 
 def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
-    root = record("top", catalog=local_catalog)
+    root = record("top")
     graph = Graph(local_catalog, local_record(root))
     assert graph.records == (local_record(root),)
-    assert graph.edges == ()
+    assert tuple(sorted(graph.networkx.edges)) == ()
     assert local_catalog.search(SearchQuery()) == ()
 
 
 def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     catalog = local_catalog
-    old, current, root = (record(name, catalog=local_catalog) for name in ("old", "current", "top"))
+    old, current, root = (record(name) for name in ("old", "current", "top"))
     old = catalog.publish(local_record(old))
     current = catalog.publish(local_record(current))
     root = catalog.publish(local_record(root), dependencies=(old.ref,))
     local = Record(root.ref, {"local": True})
     graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
-    assert graph.edges == (Dependency(root.ref.without_revision(), current.ref),)
-    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).get() == root
-    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).dependencies() == (old,)
+    assert tuple(sorted(graph.networkx.edges)) == ((root.ref.without_revision(), current.ref),)
+    assert catalog.get(Ref.from_fields(**root.ref.to_dict())) == root
+    assert Graph(catalog, Ref.from_fields(**root.ref.to_dict())).dependencies() == (old,)
 
 
 def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> None:
     catalog = local_catalog
     first, second = (
-        record("leaf", catalog=local_catalog),
-        record("leaf", "2.0", catalog=local_catalog),
+        record("leaf"),
+        record("leaf", "2.0"),
     )
-    left, right, root = (record(name, catalog=local_catalog) for name in ("left", "right", "top"))
+    left, right, root = (record(name) for name in ("left", "right", "top"))
     for item in (first, second):
         catalog.publish(local_record(item))
     left = catalog.publish(local_record(left), dependencies=(first.ref,))
     right = catalog.publish(local_record(right), dependencies=(second.ref,))
     with pytest.raises(Conflict):
-        Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
+        Graph(local_catalog, local_record(root), dependencies=(left.ref, right.ref))
 
 
 def test_local_graph_rejects_cycles_and_missing_dependencies(local_catalog: Catalog) -> None:
     catalog = local_catalog
-    root, child = record("top", catalog=local_catalog), record("child", catalog=local_catalog)
+    root, child = record("top"), record("child")
     with pytest.raises(InvalidPackage):
         Graph(catalog, local_record(root), dependencies=(root.ref,))
     with pytest.raises(NotFound):
@@ -101,7 +101,7 @@ def test_conan_resolves_one_consumer_without_exporting(
 ) -> None:
     connection = Catalog(catalog._client.home)
     catalog = connection
-    dependencies = tuple(record(name, catalog=catalog) for name in ("left", "right"))
+    dependencies = tuple(record(name) for name in ("left", "right"))
     for item in dependencies:
         catalog.publish(local_record(item))
     operations: list[tuple[str, ...]] = []
@@ -114,7 +114,7 @@ def test_conan_resolves_one_consumer_without_exporting(
     monkeypatch.setattr(connection._client, "run", track)
     Graph(
         catalog,
-        local_record(record("top", catalog=catalog)),
+        local_record(record("top")),
         dependencies=tuple(d.ref for d in dependencies),
     )
     graphs = [args for args in operations if args[:2] == ("graph", "info")]
@@ -122,7 +122,7 @@ def test_conan_resolves_one_consumer_without_exporting(
     assert not Path(graphs[0][2]).exists()  # Temporary consumer is removed.
     assert not {args[0] for args in operations} & {"export", "export-pkg", "upload"}
     with pytest.raises(NotFound):
-        Ref.from_fields(**record("top", catalog=catalog).ref.to_dict(), catalog=catalog).get()
+        catalog.get(Ref.from_fields(**record("top").ref.to_dict()))
 
 
 def test_conan_local_consumer_uses_opaque_project_lockfile(
@@ -130,7 +130,7 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(
 ) -> None:
     connection = Catalog(catalog._client.home)
     catalog = connection
-    leaf, child, root = (record(name, catalog=catalog) for name in ("leaf", "child", "top"))
+    leaf, child, root = (record(name) for name in ("leaf", "child", "top"))
     leaf = catalog.publish(local_record(leaf))
     child = catalog.publish(local_record(child), dependencies=(leaf.ref,))
     lockfile = Graph(catalog, local_record(root), dependencies=(child.ref,)).create_lockfile(

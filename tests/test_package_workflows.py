@@ -57,7 +57,7 @@ def history(catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path) 
     report = tmp_path / "report"
     report.write_text("first")
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
         {"generation": 1},
         source=checkout,
         files={"report": report},
@@ -74,16 +74,14 @@ def snapshot(
 ) -> Graph:
     reader = Catalog(conan_server.configure(tmp_path / "reader", local_sources=True))
     meta = history.publisher.publish(
-        LocalRecord(
-            Ref.from_fields("soc", "meta", "run", "default", "1.0", catalog=history.publisher)
-        )
+        LocalRecord(Ref.from_fields("soc", "meta", "run", "default", "1.0"))
     )
-    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=reader))
+    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
     requirements = (history.first.ref, meta.ref)
     if request.param == "local":
         return Graph(reader, root, dependencies=requirements)
     published = history.publisher.publish(root, dependencies=requirements)
-    return Ref.from_fields(**published.ref.to_dict(), catalog=reader).graph()
+    return Graph(reader, Ref.from_fields(**published.ref.to_dict()))
 
 
 def test_file_then_source_upgrade_survives_new_revision_and_lost_publisher(
@@ -109,15 +107,15 @@ def test_file_then_source_upgrade_survives_new_revision_and_lost_publisher(
         assert snapshot.get((history.first.ref,))[0] is ready
         assert snapshot.records == before
         assert sum(call.args[0] == "install" for call in run.call_args_list) == 2
-    latest = Ref.from_fields(
-        **second.ref.without_revision().to_dict(), catalog=snapshot.catalog
-    ).get_with_sources()
+    latest = snapshot.catalog.get_with_sources(
+        Ref.from_fields(**second.ref.without_revision().to_dict())
+    )
     assert latest.ref == second.ref and latest.source is not None
     assert "updated" in (latest.source / "cpu.sv").read_text()
     assert latest.files["report"].read_text() == "second"
     snapshot.create_lockfile()
     assert snapshot.lockfile == lock
-    assert ready.ref.graph(lockfile=lock).record.ref == history.first.ref
+    assert Graph(snapshot.catalog, ready.ref, lockfile=lock).record.ref == history.first.ref
 
 
 def test_failed_git_upgrade_preserves_files_and_retries_after_origin_returns(
@@ -149,7 +147,7 @@ def test_mixed_valid_and_invalid_batch_does_no_io_and_does_not_poison_retry(
         coordinates["component"] = "absent"
     else:
         coordinates["revision"] = "a" * 32
-    bad = Ref.from_fields(**coordinates, catalog=snapshot.catalog)
+    bad = Ref.from_fields(**coordinates)
     with patch.object(
         snapshot.catalog._client, "run", side_effect=AssertionError("Unexpected I/O")
     ):
@@ -166,9 +164,7 @@ def test_mixed_valid_and_invalid_batch_does_no_io_and_does_not_poison_retry(
 def test_retry_publication_after_upload_failure_keeps_the_original_lock_choice(
     history: SourceHistory, tmp_path: Path
 ) -> None:
-    local = LocalRecord(
-        Ref.from_fields("soc", "result", "be", "lib-lef", "1.0", catalog=history.publisher)
-    )
+    local = LocalRecord(Ref.from_fields("soc", "result", "be", "lib-lef", "1.0"))
     graph = Graph(history.publisher, local, dependencies=(history.first.ref.without_revision(),))
     lock = graph.create_lockfile(tmp_path / "result.lock")
     with (
@@ -183,8 +179,10 @@ def test_retry_publication_after_upload_failure_keeps_the_original_lock_choice(
     published = history.publisher.publish(
         local, dependencies=(history.first.ref.without_revision(),), lockfile=lock
     )
-    assert published.ref.dependencies() == (history.first,)
-    assert second.ref not in {record.ref for record in published.ref.graph().records}
+    assert Graph(history.publisher, published.ref).dependencies() == (history.first,)
+    assert second.ref not in {
+        record.ref for record in Graph(history.publisher, published.ref).records
+    }
     assert len(history.publisher.search(SearchQuery(component="result"), all_revisions=True)) == 1
     assert graph.get_with_sources((history.first.ref,))[0].payload == {"generation": 1}
 
@@ -194,28 +192,22 @@ def test_conflicting_diamond_revisions_do_not_damage_independent_snapshots(
     history: SourceHistory, reverse: bool
 ) -> None:
     left = history.publisher.publish(
-        LocalRecord(
-            Ref.from_fields("soc", "left", "rtl", "default", "1.0", catalog=history.publisher)
-        ),
+        LocalRecord(Ref.from_fields("soc", "left", "rtl", "default", "1.0")),
         dependencies=(history.first.ref,),
     )
-    existing = left.ref.graph()
+    existing = Graph(history.publisher, left.ref)
     second = history.advance()
     right = history.publisher.publish(
-        LocalRecord(
-            Ref.from_fields("soc", "right", "rtl", "default", "1.0", catalog=history.publisher)
-        ),
+        LocalRecord(Ref.from_fields("soc", "right", "rtl", "default", "1.0")),
         dependencies=(second.ref,),
     )
     requirements = (right.ref, left.ref) if reverse else (left.ref, right.ref)
     with pytest.raises(Conflict):
         Graph(
             history.publisher,
-            LocalRecord(
-                Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=history.publisher)
-            ),
+            LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
             dependencies=requirements,
         )
     assert history.first.ref in {record.ref for record in existing.records}
-    assert second.ref in {record.ref for record in right.ref.graph().records}
+    assert second.ref in {record.ref for record in Graph(history.publisher, right.ref).records}
     assert existing.get_with_sources((history.first.ref,))[0].source is not None

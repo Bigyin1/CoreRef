@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, ValidationError
 
+from .._internal.recipe import LocalRecipe
 from ..api.catalog import Catalog
 from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.graph import Graph
 from ..api.records import JSON, LocalRecord, Ref
+
+if TYPE_CHECKING:
+    from ..api.workspace import Workspace
 
 
 class DepsFile(BaseModel):
@@ -39,7 +43,7 @@ class DepsFile(BaseModel):
         self._catalog = catalog
         self._file = filename
         _ = self.lockfile
-        root = Ref(self.reference, catalog=catalog)
+        root = Ref(self.reference)
         if root.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
         names = [ref.package_name for ref in self.dependencies]
@@ -86,7 +90,7 @@ class DepsFile(BaseModel):
     def record(self) -> LocalRecord:
         """Build a detached local input; all paths are relative to the YAML directory."""
         return LocalRecord(
-            Ref(self.reference, catalog=self._catalog),
+            Ref(self.reference),
             cast(JSON, deepcopy(self.payload)),
             source=self._path(self.source) if self.source is not None else None,
             files={name: self._path(path) for name, path in self.files.items()},
@@ -94,7 +98,7 @@ class DepsFile(BaseModel):
 
     @property
     def dependencies(self) -> tuple[Ref, ...]:
-        return tuple(Ref(value, catalog=self._catalog) for value in self.requirements)
+        return tuple(Ref(value) for value in self.requirements)
 
     @property
     def lockfile(self) -> Path:
@@ -115,13 +119,22 @@ class DepsFile(BaseModel):
             lockfile=self.lockfile if self.lockfile.exists() and not update else None,
         )
 
+    def add_to_workspace(self, workspace: Workspace) -> None:
+        """Prepare a YAML-aware editable recipe, then delegate registration to Conan."""
+        directory = self.path.parent
+        if not (directory / "conanfile.py").exists():
+            LocalRecipe(self.record, tuple(self.requirements)).write_editable(
+                directory, manifest=self.path.name
+            )
+        workspace.add(directory)
+
     def create_lockfile(self) -> Path:
         """Resolve current declarations afresh, then save their exact revision selection."""
         return self.resolve(update=True).create_lockfile(self.lockfile)
 
     def add(self, ref: Ref) -> None:
         """Add or replace one package's requirement; changes are saved explicitly."""
-        if ref.package_name == Ref(self.reference, catalog=self._catalog).package_name:
+        if ref.package_name == Ref(self.reference).package_name:
             raise InvalidPackage("A package cannot depend on itself")
         values = [
             str(ref) if current.package_name == ref.package_name else str(current)

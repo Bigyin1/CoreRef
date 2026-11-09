@@ -36,21 +36,21 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
     assert isinstance(record.payload, dict)
     record.payload["sources"] = []
     assert document.record.payload == {"sources": ["top.sv"]}
-    document.add(Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog))
-    document.add(Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog))
-    assert document.dependencies == (Ref("soc.cpu.rtl.default/2.0#new", catalog=file_catalog),)
+    document.add(Ref("soc.cpu.rtl.default/2.0#new"))
+    document.add(Ref("soc.cpu.rtl.default/2.0#new"))
+    assert document.dependencies == (Ref("soc.cpu.rtl.default/2.0#new"),)
     assert "1.0#old" in path.read_text()
     document.save()
     restored = DepsFile(file_catalog, path)
     assert restored.dependencies == document.dependencies
     assert restored.record.payload == document.record.payload
     with pytest.raises(Conflict):
-        restored.remove(Ref("soc.cpu.rtl.default/2.0#other", catalog=file_catalog))
+        restored.remove(Ref("soc.cpu.rtl.default/2.0#other"))
     with pytest.raises(NotFound):
-        restored.remove(Ref("soc.unknown.rtl.default/1.0", catalog=file_catalog))
+        restored.remove(Ref("soc.unknown.rtl.default/1.0"))
     with pytest.raises(InvalidPackage, match="itself"):
         restored.add(restored.record.ref)
-    restored.remove(Ref("soc.cpu.rtl.default/2.0", catalog=file_catalog))
+    restored.remove(Ref("soc.cpu.rtl.default/2.0"))
     restored.save()
     assert DepsFile(file_catalog, path).dependencies == ()
     assert restored.lockfile == path.parent / "deps.lock"
@@ -93,7 +93,7 @@ def test_invalid_yaml_is_rejected_without_remote_access(
 def test_create_preserves_existing_files_and_supports_independent_manifests(
     file_catalog: Catalog, tmp_path: Path
 ) -> None:
-    ref = Ref("demo.block.analysis.model/1.0", catalog=file_catalog)
+    ref = Ref("demo.block.analysis.model/1.0")
     first = DepsFile.create(file_catalog, ref, tmp_path / "config/model.yaml", source="../source")
     second = DepsFile.create(file_catalog, ref, tmp_path / "config/report.yml")
     assert first.record.source == tmp_path / "source"
@@ -104,18 +104,14 @@ def test_create_preserves_existing_files_and_supports_independent_manifests(
         DepsFile.create(file_catalog, ref, first.path)
     assert first.path.read_bytes() == original
     with pytest.raises(InvalidPackage, match="revision"):
-        DepsFile.create(
-            file_catalog, Ref(f"{ref}#fixed", catalog=file_catalog), tmp_path / "bad.yaml"
-        )
+        DepsFile.create(file_catalog, Ref(f"{ref}#fixed"), tmp_path / "bad.yaml")
     assert not (tmp_path / "bad.yaml").exists()
 
 
 @pytest.fixture
 def scm_package(catalog: Catalog, checkout: Path, git_origin: Path) -> InstalledRecord:
     assert git_origin.is_dir()
-    return catalog.publish(
-        LocalRecord(Ref("soc.cpu.rtl.default/1.0", catalog=catalog), source=checkout)
-    )
+    return catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
 
 
 @pytest.mark.conan_remote
@@ -125,14 +121,14 @@ def test_full_tree_is_batched_and_lock_refresh_is_explicit(
     artifact = tmp_path / "leaf.bin"
     artifact.write_text("leaf bytes")
     leaf = catalog.publish(
-        LocalRecord(Ref("soc.leaf.data.default/1.0", catalog=catalog), files={"leaf.bin": artifact})
+        LocalRecord(Ref("soc.leaf.data.default/1.0"), files={"leaf.bin": artifact})
     )
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0", catalog=catalog)),
+        LocalRecord(Ref("soc.parent.rtl.default/1.0")),
         dependencies=(scm_package.ref, leaf.ref),
     )
     document = DepsFile.create(
-        catalog, Ref("soc.top.rtl.default/1.0", catalog=catalog), tmp_path / "project/deps.yaml"
+        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "project/deps.yaml"
     )
     document.add(parent.ref.without_revision())
     document.save()
@@ -158,12 +154,10 @@ def test_full_tree_is_batched_and_lock_refresh_is_explicit(
 
 @pytest.mark.conan_remote
 def test_failed_lock_refresh_preserves_previous_file(catalog: Catalog, tmp_path: Path) -> None:
-    document = DepsFile.create(
-        catalog, Ref("soc.top.rtl.default/1.0", catalog=catalog), tmp_path / "deps.yaml"
-    )
+    document = DepsFile.create(catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "deps.yaml")
     document.create_lockfile()
     original = document.lockfile.read_bytes()
-    document.add(Ref("soc.absent.rtl.default/1.0", catalog=catalog))
+    document.add(Ref("soc.absent.rtl.default/1.0"))
     document.save()
     with pytest.raises(CatalogError):
         document.create_lockfile()
@@ -175,7 +169,7 @@ def test_yaml_graph_uses_native_workspace_from_current_directory(
     catalog: Catalog, scm_package: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     document = DepsFile.create(
-        catalog, Ref("soc.top.rtl.default/1.0", catalog=catalog), tmp_path / "project/deps.yaml"
+        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "project/deps.yaml"
     )
     document.add(scm_package.ref)
     document.save()
@@ -193,7 +187,7 @@ def test_invalid_extension_never_creates_or_overwrites_a_manifest(
     file_catalog: Catalog, tmp_path: Path, name: str
 ) -> None:
     path = tmp_path / name
-    ref = Ref("soc.top.rtl.default/1.0", catalog=file_catalog)
+    ref = Ref("soc.top.rtl.default/1.0")
     with pytest.raises(InvalidPackage, match="extension"):
         DepsFile.create(file_catalog, ref, path)
     assert not path.exists()
@@ -207,9 +201,7 @@ def test_invalid_extension_never_creates_or_overwrites_a_manifest(
 def test_lockfile_alias_to_manifest_is_rejected_before_conan(
     file_catalog: Catalog, tmp_path: Path, link: str
 ) -> None:
-    document = DepsFile.create(
-        file_catalog, Ref("soc.top.rtl.default/1.0", catalog=file_catalog), tmp_path / "deps.yaml"
-    )
+    document = DepsFile.create(file_catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "deps.yaml")
     original = document.path.read_bytes()
     path = document.lockfile
     if link == "symlink":
@@ -237,5 +229,5 @@ def test_yaml_duplicate_keys_use_standard_loader_behavior(
         "payload: {value: 1, value: 2}\n"
     )
     document = DepsFile(file_catalog, path)
-    assert document.dependencies == (Ref("soc.second.rtl.default/1.0", catalog=file_catalog),)
+    assert document.dependencies == (Ref("soc.second.rtl.default/1.0"),)
     assert document.record.payload == {"value": 2}

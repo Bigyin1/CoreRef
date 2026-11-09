@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TypeVar
 
 from typing_extensions import Self
 
 from .._internal.references import COMPONENT_PART, NAME_PART, REVISION, VERSION
 from .records import LocalRecord, Record, Ref
-
-_RecordT = TypeVar("_RecordT", bound=LocalRecord | Record)
 
 
 @dataclass(frozen=True)
@@ -47,12 +43,12 @@ class SearchQuery:
             revision=revision,
         )
 
-    def conan_pattern(self, *, all_revisions: bool = False) -> str | None:
+    def _conan_pattern(self, *, all_revisions: bool = False) -> str | None:
         """Narrow the Conan search; matches_ref applies exact filters to the results."""
         patterns = {"component": COMPONENT_PART, "version": VERSION, "revision": REVISION}
         if any(
             value is not None and not patterns.get(field, NAME_PART).fullmatch(value)
-            for field, value in self.criteria().items()
+            for field, value in self._criteria().items()
         ):
             return None
         fields = (self.namespace, self._component_pattern, self.view, self.type)
@@ -60,7 +56,7 @@ class SearchQuery:
         revision = self.revision or ("*" if all_revisions else "latest")
         return f"{name}/{self.version if self.version is not None else '*'}#{revision}"
 
-    def criteria(self) -> dict[str, str | None]:
+    def _criteria(self) -> dict[str, str | None]:
         """Return the specified exact filters."""
         values = {
             "namespace": self.namespace,
@@ -83,7 +79,7 @@ class SearchQuery:
 
     def matches_ref(self, ref: Ref) -> bool:
         """Check logical coordinates before downloading a matching recipe."""
-        return all(getattr(ref, name) == value for name, value in self.criteria().items())
+        return all(getattr(ref, name) == value for name, value in self._criteria().items())
 
     @property
     def _component_pattern(self) -> str:
@@ -94,12 +90,6 @@ class SearchQuery:
         if self.component is None:
             return "*"
         return f"{self.component}*"
-
-    def select(self, records: Iterable[_RecordT]) -> tuple[_RecordT, ...]:
-        """Select matching records in Ref order without changing the input collection."""
-        return tuple(
-            sorted((record for record in records if self.matches(record)), key=lambda r: r.ref)
-        )
 
 
 __all__ = ["SearchQuery"]

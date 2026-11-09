@@ -11,11 +11,11 @@ from coreref.api.catalog import Catalog
 from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
 
 
-def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Catalog) -> None:
+def test_installed_paths_and_payload_are_detached_and_read_only(tmp_path: Path) -> None:
     paths = {"lib": str(tmp_path / "cpu.lib")}
     record = InstalledRecord(
         Record(
-            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
             payload={"external": paths},
             file_names=("report",),
             has_source=True,
@@ -24,23 +24,19 @@ def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Cata
         files={"report": tmp_path / "report.txt"},
     )
     paths.clear()
-    restored = Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
-    assert isinstance(restored, InstalledRecord)
-    assert restored == record
-    assert restored.payload == {"external": {"lib": str(tmp_path / "cpu.lib")}}
-    assert restored.files["report"] == tmp_path / "report.txt"
-    assert restored.source == tmp_path / "source"
+    output = json.loads(json.dumps(record.to_dict(), allow_nan=False))
+    assert output["source"] == str(record.source)
+    assert output["files"] == {"report": str(tmp_path / "report.txt")}
+    assert record.payload == {"external": {"lib": str(tmp_path / "cpu.lib")}}
+    assert record.files["report"] == tmp_path / "report.txt"
+    assert record.source == tmp_path / "source"
     with pytest.raises(TypeError):
-        restored.files["other"] = tmp_path  # type: ignore[index]
+        record.files["other"] = tmp_path  # type: ignore[index]
 
 
 @pytest.mark.parametrize("name,path", [("lib", Path("relative")), ("", Path("/data/lib"))])
-def test_package_file_input_validation_belongs_to_caller(
-    catalog: Catalog, name: str, path: Path
-) -> None:
-    record = LocalRecord(
-        Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog), files={name: path}
-    )
+def test_package_file_input_validation_belongs_to_caller(name: str, path: Path) -> None:
+    record = LocalRecord(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"), files={name: path})
     assert record.files == {name: path}
     assert (
         InstalledRecord(Record(record.ref, file_names=(name,)), files=record.files).files
@@ -51,11 +47,11 @@ def test_package_file_input_validation_belongs_to_caller(
 @pytest.mark.parametrize("paths", [{"lib": "relative/path"}, {"": "/unmounted/data"}])
 def test_external_paths_are_opaque_payload(catalog: Catalog, paths: dict[str, str]) -> None:
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog),
+        Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"),
         payload={"resources": paths},
     )
     record = catalog.publish(local)
-    assert record.ref.get().payload == {"resources": paths}
+    assert catalog.get(record.ref).payload == {"resources": paths}
     assert not hasattr(local, "nfs")
     assert not hasattr(record, "nfs")
     assert "nfs" not in json.loads(local.to_json())

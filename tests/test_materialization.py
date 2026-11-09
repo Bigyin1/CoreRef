@@ -19,7 +19,7 @@ def test_files_are_available_on_fetch_and_source_is_optional(
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
         payload={"lef": str(tmp_path / "mounted/cpu.lef")},
         source=checkout,
         files={"timing.lib": artifact},
@@ -29,9 +29,9 @@ def test_files_are_available_on_fetch_and_source_is_optional(
     assert not hasattr(published, "scm")
     assert "scm" not in published.to_dict()
     assert published.files["timing.lib"].read_text() == artifact.read_text()
-    fetched = published.ref.get()
+    fetched = catalog.get(published.ref)
     assert fetched.files["timing.lib"].read_text() == artifact.read_text()
-    materialized = fetched.ref.get_with_sources()
+    materialized = catalog.get_with_sources(fetched.ref)
     assert isinstance(materialized, Record)
     assert materialized.source is not None
     assert (materialized.source / "cpu.sv").is_file()
@@ -47,7 +47,7 @@ def test_payload_only_record_does_not_install_a_binary(
     paths = {"lib": str(tmp_path / "not-mounted-yet/cpu.lib")}
     record = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog),
+            Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"),
             payload={"paths": paths},
         )
     )
@@ -59,8 +59,8 @@ def test_payload_only_record_does_not_install_a_binary(
         return run(*arguments)
 
     monkeypatch.setattr(catalog._client, "run", track)
-    for fetch in (record.ref.get, record.ref.get_with_sources):
-        local = fetch()
+    for fetch in (catalog.get, catalog.get_with_sources):
+        local = fetch(record.ref)
         assert local.payload == {"paths": paths}
         assert local.files == {}
         assert local.source is None
@@ -68,17 +68,15 @@ def test_payload_only_record_does_not_install_a_binary(
 
 
 def test_published_record_is_not_a_local_publication_input(catalog: Catalog) -> None:
-    record = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+    record = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
     with pytest.raises(InvalidPackage, match="LocalRecord"):
         catalog.publish(record)  # type: ignore[arg-type]  # Deliberate contract misuse.
     assert catalog.search(SearchQuery()) == ()
 
 
-def test_local_metadata_uses_names_and_record_decodes_package_paths(
-    tmp_path: Path, *, catalog: Catalog
-) -> None:
+def test_local_metadata_uses_names_and_record_decodes_package_paths(tmp_path: Path) -> None:
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog),
+        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
         payload={"lef": str(tmp_path / "nfs/cpu.lef")},
         source=tmp_path / "working-tree",
         files={"timing/cpu.lib": tmp_path / "output.lib"},
@@ -86,11 +84,9 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
     metadata = local.to_json()
     assert "working-tree" not in metadata
     assert "output.lib" not in metadata
-    with pytest.raises(ValueError, match="Snapshot files"):
-        Record.from_json(metadata, catalog=catalog)
     local.source = None
     LocalRecipe(local).write(tmp_path / "downloaded")
-    record = StoredRecipe(tmp_path / "downloaded", local.ref, reference=str(local.ref)).record
+    record = StoredRecipe(tmp_path / "downloaded", reference=str(local.ref)).record
     assert record.file_names == ("timing/cpu.lib",)
     assert not hasattr(record, "files")
     assert record.payload == local.payload
@@ -98,15 +94,13 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
 
 
 @pytest.mark.parametrize("field", ["source", "source_path", "scm"])
-def test_package_source_metadata_belongs_to_conan(
-    tmp_path: Path, field: str, *, catalog: Catalog
-) -> None:
+def test_package_source_metadata_belongs_to_conan(tmp_path: Path, field: str) -> None:
     import json
 
-    local = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
+    local = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
     value = json.loads(local.to_json())
     value[field] = "unexpected"
     LocalRecipe(local).write(tmp_path)
     (tmp_path / "record.json").write_text(json.dumps(value))
     with pytest.raises(InvalidPackage, match="Conan SCM"):
-        StoredRecipe(tmp_path, local.ref, reference=str(local.ref))
+        StoredRecipe(tmp_path, reference=str(local.ref))
