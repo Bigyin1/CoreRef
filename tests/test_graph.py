@@ -1,5 +1,7 @@
 """Each project description has its own resolver and lockfile scope."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest

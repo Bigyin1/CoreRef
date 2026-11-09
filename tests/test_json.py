@@ -1,5 +1,7 @@
 """JSON transport and freezing preserve consumer values without domain rules."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
 from math import inf, nan

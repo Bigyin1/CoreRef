@@ -1,5 +1,7 @@
 """Resolved project graphs expose cached topology and dependency-first traversals."""
 
+from __future__ import annotations
+
 import networkx as nx
 import pytest
 

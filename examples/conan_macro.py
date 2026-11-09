@@ -1,5 +1,7 @@
 """Run with ``uv run python -m examples.conan_macro``; uses an owned local server."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 

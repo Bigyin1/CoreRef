@@ -1,5 +1,7 @@
 """Resolve unpublished consumers using the native Conan graph API."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest

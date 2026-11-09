@@ -4,6 +4,8 @@ These protocols describe existing Conan objects; they do not wrap or replace the
 Conan itself currently ships without typing metadata.
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Protocol
 

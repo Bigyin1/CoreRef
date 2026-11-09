@@ -1,5 +1,7 @@
 """Deterministic I/O budgets run separately from uninstrumented timing samples."""
 
+from __future__ import annotations
+
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager

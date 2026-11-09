@@ -1,5 +1,7 @@
 """The standard YAML format is an optional adapter over LocalRecord and Graph."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import patch
 

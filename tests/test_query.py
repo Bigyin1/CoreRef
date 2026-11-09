@@ -1,5 +1,7 @@
 """Name, version, kind and namespace participate in catalog search."""
 
+from __future__ import annotations
+
 import pytest
 
 from coreref.api.catalog import Catalog

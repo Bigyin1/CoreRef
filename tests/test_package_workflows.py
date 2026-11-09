@@ -1,5 +1,7 @@
 """Multi-stage workflows keep snapshots usable across failures and new publications."""
 
+from __future__ import annotations
+
 import shutil
 from dataclasses import dataclass
 from io import BytesIO

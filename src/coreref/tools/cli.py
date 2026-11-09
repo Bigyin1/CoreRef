@@ -1,5 +1,7 @@
 """Reusable Typer commands; requires the coreref[cli] optional dependency."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager

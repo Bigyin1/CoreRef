@@ -1,5 +1,7 @@
 """The test server retries only port collisions and always stops owned processes."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit

@@ -1,5 +1,7 @@
 """Native Conan workspaces select local recipes and retain untracked developer files."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch

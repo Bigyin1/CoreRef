@@ -1,5 +1,7 @@
 """Separate first topology construction from repeated in-memory queries."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from typing import Literal
 

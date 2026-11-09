@@ -1,5 +1,7 @@
 """Round trips through an owned Conan server, never a configured user server."""
 
+from __future__ import annotations
+
 import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import replace

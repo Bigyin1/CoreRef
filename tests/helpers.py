@@ -1,8 +1,10 @@
 """Consumer-owned sample payloads used by serialization and resource tests."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
 
 from coreref.api.catalog import Catalog
@@ -10,12 +12,12 @@ from coreref.api.graph import Graph
 from coreref.api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
 
 
-class ProjectTypeId(StrEnum):
+class ProjectTypeId(str, Enum):
     RTL_PROJECT = "test.rtl-project"
     HARDMACRO = "test.hardmacro"
 
 
-class RunTypeId(StrEnum):
+class RunTypeId(str, Enum):
     SYNTHESIS = "test.synthesis-run"
     LINT = "test.lint-run"
 

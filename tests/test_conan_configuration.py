@@ -1,5 +1,7 @@
 """The SDK consumes Conan configuration prepared by the caller."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol, cast

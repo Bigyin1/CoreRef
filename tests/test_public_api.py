@@ -1,5 +1,7 @@
 """Public domain models import without Conan; the adapter is loaded explicitly."""
 
+from __future__ import annotations
+
 import subprocess
 import sys
 from textwrap import dedent

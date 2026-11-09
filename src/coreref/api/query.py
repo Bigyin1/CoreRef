@@ -1,11 +1,17 @@
 """Exact search by the common reference fields."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Self
+from typing import TypeVar
+
+from typing_extensions import Self
 
 from .._internal.references import COMPONENT_PART, NAME_PART, REVISION, VERSION
 from .records import LocalRecord, Record, Ref
+
+_RecordT = TypeVar("_RecordT", bound=LocalRecord | Record)
 
 
 @dataclass(frozen=True)
@@ -89,7 +95,7 @@ class SearchQuery:
             return "*"
         return f"{self.component}*"
 
-    def select[T: LocalRecord | Record](self, records: Iterable[T]) -> tuple[T, ...]:
+    def select(self, records: Iterable[_RecordT]) -> tuple[_RecordT, ...]:
         """Select matching records in Ref order without changing the input collection."""
         return tuple(
             sorted((record for record in records if self.matches(record)), key=lambda r: r.ref)

@@ -1,5 +1,7 @@
 """Behavioral tests against real Conan recipes and its dependency graph evaluator."""
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess

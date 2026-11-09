@@ -4,6 +4,8 @@ All server state and credentials belong to a temporary directory; this module
 is used only by development examples and tests.
 """
 
+from __future__ import annotations
+
 import secrets
 import socket
 import subprocess
@@ -79,7 +81,7 @@ def _wait_for_server(server: LocalServer, process: subprocess.Popen[str], log: P
                 status = response.status
             if status == HTTPStatus.OK:
                 return
-        except URLError, TimeoutError:
+        except (URLError, TimeoutError):  # noqa: PERF203 - Startup polling retries connection errors.
             if process.poll() is not None:
                 break
             time.sleep(0.05)

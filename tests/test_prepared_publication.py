@@ -1,5 +1,7 @@
 """Prepared publication preserves one metadata and dependency snapshot across later changes."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import patch
 

@@ -1,5 +1,7 @@
 """Small reusable package datasets; all preparation happens outside timing."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import count

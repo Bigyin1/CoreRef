@@ -1,5 +1,7 @@
 """The public contract contains immutable records and exact dependencies."""
 
+from __future__ import annotations
+
 from itertools import pairwise
 from typing import cast
 

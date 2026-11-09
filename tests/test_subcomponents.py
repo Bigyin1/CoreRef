@@ -1,5 +1,7 @@
 """Optional component parts retain exact identity through Conan and project snapshots."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from unittest.mock import patch

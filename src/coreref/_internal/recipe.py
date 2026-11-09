@@ -1,5 +1,7 @@
 """Prepared local recipes and validated recipes obtained from Conan."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import shutil
@@ -71,8 +73,11 @@ class LocalRecipe:
                 raise InvalidPackage("Artifact would escape the package directory")
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, destination)
+            digest = hashlib.sha256()
             with destination.open("rb") as artifact:
-                digests[name] = hashlib.file_digest(artifact, "sha256").hexdigest()
+                for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            digests[name] = digest.hexdigest()
         if digests:
             metadata = directory / "record.json"
             value = json.loads(metadata.read_text())

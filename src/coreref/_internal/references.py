@@ -1,5 +1,7 @@
 """Pure conversions between catalog coordinates and Conan references."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from edify import RegexBuilder
@@ -11,17 +13,21 @@ if TYPE_CHECKING:
     from ..api.catalog import Catalog
 
 _ALPHANUMERIC = RegexBuilder().any_of().range("a", "z").range("0", "9").end()
-_COMPONENT_CHARACTER = RegexBuilder().any_of().use(_ALPHANUMERIC).char("-").end()
-_NAME_CHARACTER = RegexBuilder().any_of().use(_ALPHANUMERIC).any_of_chars("_-").end()
-_VERSION_START = RegexBuilder().any_of().use(_ALPHANUMERIC).char("_").end()
-_VERSION_CHARACTER = RegexBuilder().any_of().use(_ALPHANUMERIC).any_of_chars("_+.-").end()
+_COMPONENT_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).char("-").end()
+_NAME_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).any_of_chars("_-").end()
+_VERSION_START = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).char("_").end()
+_VERSION_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).any_of_chars("_+.-").end()
 
-COMPONENT_PART = RegexBuilder().one_or_more().use(_COMPONENT_CHARACTER).to_regex().compiled
-NAME_PART = RegexBuilder().one_or_more().use(_NAME_CHARACTER).to_regex().compiled
+COMPONENT_PART = RegexBuilder().one_or_more().subexpression(_COMPONENT_CHARACTER).to_regex()
+NAME_PART = RegexBuilder().one_or_more().subexpression(_NAME_CHARACTER).to_regex()
 VERSION = (
-    RegexBuilder().use(_VERSION_START).between(1, 100).use(_VERSION_CHARACTER).to_regex().compiled
+    RegexBuilder()
+    .subexpression(_VERSION_START)
+    .between(1, 100)
+    .subexpression(_VERSION_CHARACTER)
+    .to_regex()
 )
-REVISION = RegexBuilder().one_or_more().use(_ALPHANUMERIC).to_regex().compiled
+REVISION = RegexBuilder().one_or_more().subexpression(_ALPHANUMERIC).to_regex()
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 

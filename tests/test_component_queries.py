@@ -1,5 +1,7 @@
 """Representation queries preserve component identity, with independent versions and revisions."""
 
+from __future__ import annotations
+
 import pytest
 
 from coreref.api.catalog import Catalog
