@@ -34,7 +34,7 @@ class ResolvedConanGraph:
         )
 
     def package_ref(self, ref: Ref) -> Ref:
-        return Ref(self.package(ref).ref.repr_notime(), catalog=ref._catalog)
+        return Ref(self.package(ref).ref.repr_notime())
 
     def package(self, ref: Ref) -> NativePackage:
         package = self.native.root.conanfile.dependencies.host[str(ref.without_revision())]

@@ -48,8 +48,8 @@ namespace.component[_subcomponent].view.type/version[#revision]
 
 ```mermaid
 classDiagram
-    Ref --> Catalog : использует
-    Ref ..> Graph : graph()
+    Catalog ..> Record : info / get
+    Graph --> Catalog : операции Conan
     Graph o-- LocalRecord : локальный корень
     Graph o-- Record : опубликованные узлы
     LocalRecord --> Ref : координаты
@@ -61,7 +61,8 @@ classDiagram
 
 ## Ref и поиск
 
-`Ref(reference, *, catalog)` связывает координаты с конкретным каталогом.
+`Ref(reference)` — самостоятельные координаты без каталога и операций Conan.
+Один Ref можно передать любому Catalog; создание и сравнение Ref не выполняют I/O.
 Первый `_` отделяет subcomponent: `soc.cpu_alu.be.lib-lef/4.0`.
 В самом component используются буквы, цифры и дефис.
 
@@ -71,10 +72,10 @@ classDiagram
 | `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
 | `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
 | `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
-| `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)` | Создание из отдельных координат |
-| `ref.info()` | Метаданные `Record` |
-| `ref.get()` / `ref.get_with_sources()` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
-| `ref.graph(*, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
+| `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None)` | Создание из отдельных координат |
+| `catalog.info(ref)` | Метаданные `Record` |
+| `catalog.get(ref)` / `catalog.get_with_sources(ref)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
+| `Graph(catalog, ref, *, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
 
 `SearchQuery` задаёт точные AND-фильтры: `namespace`, `component`, `subcomponent`,
 `view`, `type`, `version`, `revision`. Значение `None` пропускает фильтр, кроме
@@ -136,10 +137,10 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 
 ## Graph и Workspace
 
-`Graph(record, *, dependencies=(), lockfile=None)` сразу
-разрешает локальный `LocalRecord` или опубликованный `Ref`. Каталог берётся из корневого Ref;
-повторно передавать его не нужно. Публиковать локальный корень не требуется.
-Прямые зависимости опубликованного пакета доступны через `ref.graph().dependencies()`.
+`Graph(catalog, record, *, dependencies=(), lockfile=None)` сразу
+разрешает локальный `LocalRecord` или опубликованный `Ref` через явно переданный каталог.
+Публиковать локальный корень не требуется. Прямые зависимости опубликованного пакета
+доступны через `Graph(catalog, ref).dependencies()`.
 Связи снимка можно читать через `graph.networkx.edges`.
 Стандартный deps.yaml читает DepsFile; собственные форматы и дополнительные зависимости
 по-прежнему может определять приложение.
@@ -196,13 +197,14 @@ record.json/conandata.yml и собственные маркеры в рабоч
 это не гарантированная revision опубликованной версии рабочей копии.
 
 ```python
+from coreref.api.graph import Graph
 from coreref.api.workspace import Workspace
 
 workspace = Workspace(catalog)  # запускаем из корня проекта
 workspace.add("../cpu", record=cpu_record, dependencies=cpu_dependencies)
 # cpu_record и cpu_dependencies сформированы парсером конкретного flow.
 # workspace.open(rtl_ref)       # либо Git-копия опубликованной зависимости
-graph = rtl_ref.graph()  # Conan уже видит зарегистрированную директорию
+graph = Graph(catalog, rtl_ref)  # Conan уже видит зарегистрированную директорию
 ready = graph.get_with_sources()
 local = [record for record in ready if record.is_editable]
 ```

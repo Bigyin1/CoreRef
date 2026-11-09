@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from edify import RegexBuilder
 
 from ..api.errors import InvalidPackage
 from ..api.records import Ref
-
-if TYPE_CHECKING:
-    from ..api.catalog import Catalog
 
 _ALPHANUMERIC = RegexBuilder().any_of().range("a", "z").range("0", "9").end()
 _COMPONENT_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).char("-").end()
@@ -59,6 +54,6 @@ def to_conan_reference(ref: Ref) -> str:
     return str(ref)
 
 
-def from_conan_reference(value: str, *, catalog: Catalog) -> Ref:
+def from_conan_reference(value: str) -> Ref:
     """Decode coordinates and a recipe revision, omitting transport timestamps."""
-    return Ref(value.split("%", 1)[0], catalog=catalog)
+    return Ref(value.split("%", 1)[0])

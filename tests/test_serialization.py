@@ -19,16 +19,16 @@ def test_registry_roundtrip_preserves_content_and_nested_immutability(*, catalog
         None,
     )
     a = Record(
-        release("source", catalog=catalog).ref,
+        release("source").ref,
         payload={
             "resources": resources,
             "numbers": [1, 1.0, -0.0, False, True, 2**100],
             "unicode": "Содержимое 💡",
         },
     )
-    execution = Record(run("run", catalog=catalog).ref, resources)
+    execution = Record(run("run").ref, resources)
     original = tuple(catalog.publish(local_record(record)) for record in (a, execution))
-    records = tuple(record.ref.info() for record in original)
+    records = tuple(catalog.info(record.ref) for record in original)
     assert records == original
     assert tuple(json.dumps(record.payload, allow_nan=False) for record in records) == tuple(
         json.dumps(record.payload, allow_nan=False) for record in original
@@ -39,8 +39,8 @@ def test_registry_roundtrip_preserves_content_and_nested_immutability(*, catalog
 
 @pytest.mark.parametrize("payload", ["{", "null", "[]", "{}", '[["metadata", {}]]'])
 def test_invalid_envelopes(payload: str, *, catalog: Catalog) -> None:
-    record = catalog.publish(local_record(release("broken", catalog=catalog)))
+    record = catalog.publish(local_record(release("broken")))
     directory = catalog._client.cache_path(str(record.ref))
     (directory / "record.json").write_text(payload)
     with pytest.raises(InvalidPackage):
-        record.ref.info()
+        catalog.info(record.ref)

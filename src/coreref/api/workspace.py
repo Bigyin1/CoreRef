@@ -28,7 +28,7 @@ class Workspace:
         if not self.path.exists():
             return {}
         return {
-            Ref(ref, catalog=self._catalog): path
+            Ref(ref): path
             for ref, path in self._catalog._client.workspace_members(self.path.parent).items()
         }
 

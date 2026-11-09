@@ -63,7 +63,7 @@ class _WorkspaceCommands:
         with _command_errors():
             catalog = self._catalog_factory()
             path = Workspace(catalog, project_dir / "conanws.yml").open(
-                Ref(ref, catalog=catalog),
+                Ref(ref),
                 directory=directory,
             )
             typer.echo(path)
@@ -115,7 +115,7 @@ class _DepsCommands:
         """Create deps.yaml without overwriting an existing file."""
         with _command_errors():
             catalog = self._catalog_factory()
-            document = DepsFile.create(catalog, Ref(ref, catalog=catalog), file, source=source)
+            document = DepsFile.create(catalog, Ref(ref), file, source=source)
             typer.echo(document.path)
 
     def add(self, ref: str, file: Manifest = Path("deps.yaml")) -> None:
@@ -123,7 +123,7 @@ class _DepsCommands:
         with _command_errors():
             catalog = self._catalog_factory()
             document = DepsFile(catalog, file)
-            document.add(Ref(ref, catalog=catalog))
+            document.add(Ref(ref))
             document.save()
             typer.echo(document.path)
 
@@ -132,7 +132,7 @@ class _DepsCommands:
         with _command_errors():
             catalog = self._catalog_factory()
             document = DepsFile(catalog, file)
-            document.remove(Ref(ref, catalog=catalog))
+            document.remove(Ref(ref))
             document.save()
             typer.echo(document.path)
 

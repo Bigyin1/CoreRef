@@ -43,7 +43,7 @@ class DepsFile(BaseModel):
         self._catalog = catalog
         self._file = filename
         _ = self.lockfile
-        root = Ref(self.reference, catalog=catalog)
+        root = Ref(self.reference)
         if root.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
         names = [ref.package_name for ref in self.dependencies]
@@ -90,7 +90,7 @@ class DepsFile(BaseModel):
     def record(self) -> LocalRecord:
         """Build a detached local input; all paths are relative to the YAML directory."""
         return LocalRecord(
-            Ref(self.reference, catalog=self._catalog),
+            Ref(self.reference),
             cast(JSON, deepcopy(self.payload)),
             source=self._path(self.source) if self.source is not None else None,
             files={name: self._path(path) for name, path in self.files.items()},
@@ -98,7 +98,7 @@ class DepsFile(BaseModel):
 
     @property
     def dependencies(self) -> tuple[Ref, ...]:
-        return tuple(Ref(value, catalog=self._catalog) for value in self.requirements)
+        return tuple(Ref(value) for value in self.requirements)
 
     @property
     def lockfile(self) -> Path:
@@ -113,6 +113,7 @@ class DepsFile(BaseModel):
     def resolve(self, *, update: bool = False) -> Graph:
         """Resolve a snapshot; update ignores the old lock but never writes it."""
         return Graph(
+            self._catalog,
             self.record,
             dependencies=self.dependencies,
             lockfile=self.lockfile if self.lockfile.exists() and not update else None,
@@ -133,7 +134,7 @@ class DepsFile(BaseModel):
 
     def add(self, ref: Ref) -> None:
         """Add or replace one package's requirement; changes are saved explicitly."""
-        if ref.package_name == Ref(self.reference, catalog=self._catalog).package_name:
+        if ref.package_name == Ref(self.reference).package_name:
             raise InvalidPackage("A package cannot depend on itself")
         values = [
             str(ref) if current.package_name == ref.package_name else str(current)

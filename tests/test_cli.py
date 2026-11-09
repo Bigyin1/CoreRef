@@ -48,9 +48,7 @@ def test_cli_workspace_lifecycle_preserves_working_copy(
     catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path
 ) -> None:
     assert git_origin.is_dir()
-    record = catalog.publish(
-        LocalRecord(Ref("soc.cpu.rtl.default/1.0", catalog=catalog), source=checkout)
-    )
+    record = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
     app = typer.Typer()
     app.add_typer(create_workspace_app(catalog_factory=lambda: catalog), name="workspace")
     project = tmp_path / "project with spaces"
@@ -108,9 +106,7 @@ def test_yaml_commands_initialize_edit_lock_and_install(
     catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path
 ) -> None:
     assert git_origin.is_dir()
-    package = catalog.publish(
-        LocalRecord(Ref("soc.cpu.rtl.default/1.0", catalog=catalog), source=checkout)
-    )
+    package = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
     app = create_deps_app(catalog_factory=lambda: catalog)
     path = tmp_path / "project/deps.yaml"
     options = ["--file", str(path)]
@@ -168,7 +164,7 @@ def test_cli_adds_an_existing_package_with_deps_yml(catalog: Catalog, tmp_path: 
         assert str(package) in result.stdout
     assert not (package / ".git").exists()
     assert (package / "cpu.sv").read_text() == "uncommitted local source"
-    ref = Ref("soc.cpu.rtl.default/1.0", catalog=catalog)
+    ref = Ref("soc.cpu.rtl.default/1.0")
     assert Workspace(catalog, project / "conanws.yml").members == {ref: package}
     result = runner.invoke(app, ["remove", str(package), "--project-dir", str(project)])
     assert result.exit_code == 0

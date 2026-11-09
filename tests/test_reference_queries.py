@@ -14,10 +14,10 @@ from examples.local_server import LocalServer
 def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
     catalog: Catalog, conan_server: LocalServer, tmp_path: Path
 ) -> None:
-    logical = Ref("soc.cpu.rtl.default/1.0", catalog=catalog)
+    logical = Ref("soc.cpu.rtl.default/1.0")
     first = catalog.publish(LocalRecord(logical, {"generation": 1}))
     second = catalog.publish(LocalRecord(logical, {"generation": 2}))
-    part = catalog.publish(LocalRecord(Ref("soc.cpu_alu.be.lib-lef/1.0", catalog=catalog)))
+    part = catalog.publish(LocalRecord(Ref("soc.cpu_alu.be.lib-lef/1.0")))
     reader = Catalog(conan_server.configure(tmp_path / "reader"))
     with (
         patch.object(reader._client, "download_recipe", side_effect=AssertionError("Metadata")),
@@ -25,7 +25,6 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
     ):
         refs = reader.search_refs(SearchQuery())
         assert refs == (second.ref, part.ref)
-        assert all(ref._catalog is reader for ref in refs)
         assert [call.args[0] for call in commands.call_args_list] == ["list"]
         assert reader.search_refs(SearchQuery(), all_revisions=True) == tuple(
             sorted((first.ref, second.ref, part.ref))

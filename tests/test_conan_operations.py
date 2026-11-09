@@ -18,23 +18,20 @@ def test_materialize_uses_published_requirements_without_project_lock(
 ) -> None:
     catalog = Catalog(catalog._client.home)
     rtl = catalog.publish(
-        local_record(
-            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
-        )
+        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
     )
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     record = catalog.publish(
         local_record(
-            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog)),
+            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0")),
             files={"cpu.lib": artifact},
         ),
         dependencies=(rtl.ref,),
     )
     project = Graph(
-        local_record(
-            Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-        ),
+        catalog,
+        local_record(Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))),
         dependencies=(record.ref,),
     )
     lock = project.create_lockfile(tmp_path / "conan.lock") if locked else None
@@ -53,7 +50,7 @@ def test_materialize_uses_published_requirements_without_project_lock(
         return run(*arguments)
 
     monkeypatch.setattr(catalog._client, "run", track)
-    package = record.ref.get()
+    package = catalog.get(record.ref)
     assert package.files["cpu.lib"].read_text() == artifact.read_text()
     assert sum(args[0] == "install" for args in operations) == 1
     assert not any(args[:2] == ("graph", "info") or args[0] == "lock" for args in operations)
@@ -65,14 +62,10 @@ def test_metadata_queries_do_not_resolve_dependency_graphs(
     connection = Catalog(catalog._client.home)
     catalog = connection
     rtl = catalog.publish(
-        local_record(
-            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
-        )
+        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
     )
     macro = catalog.publish(
-        local_record(
-            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0", catalog=catalog))
-        ),
+        local_record(Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"))),
         dependencies=(rtl.ref,),
     )
     run = connection._client.run
@@ -82,5 +75,5 @@ def test_metadata_queries_do_not_resolve_dependency_graphs(
         return run(*arguments)
 
     monkeypatch.setattr(connection._client, "run", track)
-    assert macro.ref.info() == macro
-    assert rtl.ref.info() == rtl
+    assert catalog.info(macro.ref) == macro
+    assert catalog.info(rtl.ref) == rtl

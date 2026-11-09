@@ -25,19 +25,19 @@ else:
 
 @dataclass(init=False)
 class Graph:
-    """Resolve a local or published package using the catalog bound to its root Ref."""
+    """Resolve a local or published package through an explicitly selected catalog."""
 
     _records: tuple[LocalRecord | Record, ...]
     _dependencies: tuple[tuple[Ref, Ref], ...]
 
     def __init__(
         self,
+        catalog: Catalog,
         record: LocalRecord | Ref,
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
-        catalog = record._catalog if isinstance(record, Ref) else record.ref._catalog
         self._catalog = catalog
         self._local: LocalPackage | None = None
         if isinstance(record, Ref):

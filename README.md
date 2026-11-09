@@ -13,11 +13,12 @@ uv sync --frozen
 
 ```python
 from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
 from coreref.api.records import Ref
 
 catalog = Catalog()
-rtl = Ref("soc.cpu.rtl.default/1.0", catalog=catalog)
-packages = rtl.graph().get_with_sources()
+rtl = Ref("soc.cpu.rtl.default/1.0")
+packages = Graph(catalog, rtl).get_with_sources()
 ```
 
 Готовый формат проекта — необязательный `deps.yaml`. С дополнением `coreref[cli]`

@@ -18,18 +18,18 @@ def test_construction_snapshots_mutable_project(catalog: Catalog, tmp_path: Path
     payload = UserPayload({"items": items})
     files = {"report": tmp_path / "original.txt"}
     local = LocalRecord(
-        Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog),
+        Ref.from_fields("soc", "top", "rtl", "default", "1.0"),
         payload,
         files=files,
     )
-    project = Graph(local)
+    project = Graph(catalog, local)
     first = project.records[0]
     assert isinstance(first, LocalRecord)
     assert payload.calls == 1
     items.append("changed")
     files.clear()
     local.source = tmp_path
-    second = Graph(local).records[0]
+    second = Graph(catalog, local).records[0]
     assert isinstance(second, LocalRecord)
     assert payload.calls == 2
     assert first is not local and second is not local
@@ -51,7 +51,7 @@ def test_publish_snapshots_before_conan_commands(
     artifact.write_text("report")
     payload = UserPayload({"original": True})
     local = LocalRecord(
-        Ref.from_fields("soc", "top", "be", "default", "1.0", catalog=catalog),
+        Ref.from_fields("soc", "top", "be", "default", "1.0"),
         payload,
         files={"report": artifact},
     )
@@ -68,7 +68,7 @@ def test_publish_snapshots_before_conan_commands(
     assert payload.calls == 1
     assert stored.payload == {"original": True}
     assert stored.files["report"].read_text() == "report"
-    assert stored.ref.get().payload == {"original": True}
+    assert catalog.get(stored.ref).payload == {"original": True}
     assert local.payload == {"changed": True} and local.files == {}
 
 
@@ -76,9 +76,9 @@ def test_construction_resolves_once_and_snapshots_before_conan(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dependency = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
+        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"))
     )
-    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
+    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
     resolve = catalog._client.graph
     calls = 0
 
@@ -91,7 +91,7 @@ def test_construction_resolves_once_and_snapshots_before_conan(
         return resolve(directory, lockfile=lockfile, update=update)
 
     monkeypatch.setattr(catalog._client, "graph", change_inputs)
-    project = Graph(local, dependencies=(dependency.ref,))
+    project = Graph(catalog, local, dependencies=(dependency.ref,))
     assert calls == 1
     assert project.networkx.number_of_edges() == 1
     assert next(record for record in project.records if record.ref == local.ref).payload is None

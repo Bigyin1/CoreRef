@@ -28,10 +28,7 @@ class Catalog:
 
     def search(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Record, ...]:
         """Find latest matching revisions, or history when all_revisions is requested."""
-        return tuple(
-            self._package(ref).info()
-            for ref in self.search_refs(query, all_revisions=all_revisions)
-        )
+        return tuple(self.info(ref) for ref in self.search_refs(query, all_revisions=all_revisions))
 
     def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
         """Find exact coordinates without downloading recipes or reading payloads."""
@@ -41,10 +38,22 @@ class Catalog:
         refs = []
         for reference, revisions in self._client.index(pattern).items():
             for revision in revisions.revisions:
-                ref = from_conan_reference(f"{reference}#{revision}", catalog=self)
+                ref = from_conan_reference(f"{reference}#{revision}")
                 if query.matches_ref(ref):
                     refs.append(ref)
         return tuple(sorted(refs))
+
+    def info(self, ref: Ref) -> Record:
+        """Read recipe metadata without installing package contents."""
+        return self._package(ref).info()
+
+    def get(self, ref: Ref) -> InstalledRecord:
+        """Get package files; an unpinned reference selects the latest recipe revision."""
+        return self._package(ref).get()
+
+    def get_with_sources(self, ref: Ref) -> InstalledRecord:
+        """Get package files and the Git checkout when the recipe declares one."""
+        return self._package(ref).get_with_sources()
 
     def publish(
         self,
@@ -66,7 +75,7 @@ class Catalog:
         return self._local_package(record, dependencies, lockfile).publish()
 
     def _package(self, ref: Ref) -> StoredPackage:
-        return StoredPackage(Ref.from_fields(**ref.to_dict(), catalog=self))
+        return StoredPackage(self, ref)
 
     def _local_package(
         self,

@@ -11,8 +11,8 @@ from tests.helpers import graph_json, local_record, release
 
 
 def test_local_root_without_dependencies(*, catalog: Catalog) -> None:
-    record = release("isolated", catalog=catalog)
-    snapshot = Graph(local_record(record))
+    record = release("isolated")
+    snapshot = Graph(catalog, local_record(record))
     graph = snapshot.networkx
     assert isinstance(graph, nx.DiGraph)
     assert not graph.is_multigraph()
@@ -23,25 +23,25 @@ def test_local_root_without_dependencies(*, catalog: Catalog) -> None:
 
 
 def test_export_preserves_exact_dependency_directions(*, catalog: Catalog) -> None:
-    source, left, right = (release(name, catalog=catalog) for name in ("source", "left", "right"))
+    source, left, right = (release(name) for name in ("source", "left", "right"))
     for record in (left, right):
         catalog.publish(local_record(record))
-    snapshot = Graph(local_record(source), dependencies=(left.ref, right.ref))
-    left, right = left.ref.get(), right.ref.get()
+    snapshot = Graph(catalog, local_record(source), dependencies=(left.ref, right.ref))
+    left, right = catalog.get(left.ref), catalog.get(right.ref)
     graph = snapshot.networkx
     assert graph.number_of_nodes() == 3 and graph.number_of_edges() == 2
     assert not graph.has_edge(left.ref, source.ref)
     for source_ref, target_ref in snapshot.networkx.edges:
         assert graph.edges[source_ref, target_ref] == {}
-    reordered = Graph(local_record(source), dependencies=(right.ref, left.ref))
+    reordered = Graph(catalog, local_record(source), dependencies=(right.ref, left.ref))
     assert set(reordered.networkx.edges) == set(graph.edges)
 
 
 def test_working_topology_copy_does_not_change_snapshot(*, catalog: Catalog) -> None:
-    source = release("source", manifest={"nested": {"ports": [1, 2]}}, catalog=catalog)
+    source = release("source", manifest={"nested": {"ports": [1, 2]}})
     source = catalog.publish(local_record(source))
-    result = release("result", catalog=catalog)
-    snapshot = Graph(local_record(result), dependencies=(source.ref,))
+    result = release("result")
+    snapshot = Graph(catalog, local_record(result), dependencies=(source.ref,))
     before = graph_json(snapshot)
     graph = snapshot.networkx.copy()
     graph.nodes[source.ref]["annotation"] = "local edits"
@@ -61,14 +61,16 @@ def test_ordering_prunes_private_branches_and_keeps_shared_dependencies(
     *, catalog: Catalog
 ) -> None:
     common, cpu, gpio, private, top = (
-        release(name, catalog=catalog) for name in ("common", "cpu", "gpio", "private", "top")
+        release(name) for name in ("common", "cpu", "gpio", "private", "top")
     )
     for record in (common, private):
         catalog.publish(local_record(record))
     cpu = catalog.publish(local_record(cpu), dependencies=(common.ref, private.ref))
     gpio = catalog.publish(local_record(gpio), dependencies=(common.ref,))
-    common, cpu, gpio, private = (record.ref.get() for record in (common, cpu, gpio, private))
-    snapshot = Graph(local_record(top), dependencies=(cpu.ref, gpio.ref))
+    common, cpu, gpio, private = (
+        catalog.get(record.ref) for record in (common, cpu, gpio, private)
+    )
+    snapshot = Graph(catalog, local_record(top), dependencies=(cpu.ref, gpio.ref))
     original = tuple(snapshot.networkx.edges)
     selected = snapshot.ordered_refs(top.ref, stop_at=(cpu.ref,))
     assert selected == (common.ref, cpu.ref, gpio.ref, top.ref)
@@ -85,11 +87,11 @@ def test_ordering_prunes_private_branches_and_keeps_shared_dependencies(
 
 
 def test_ordering_rejects_unknown_roots_and_hidden_stops(*, catalog: Catalog) -> None:
-    root, middle, leaf = (release(name, catalog=catalog) for name in ("root", "middle", "leaf"))
+    root, middle, leaf = (release(name) for name in ("root", "middle", "leaf"))
     leaf = catalog.publish(local_record(leaf))
     middle = catalog.publish(local_record(middle), dependencies=(leaf.ref,))
-    snapshot = Graph(local_record(root), dependencies=(middle.ref,))
-    absent = release("absent", catalog=catalog).ref
+    snapshot = Graph(catalog, local_record(root), dependencies=(middle.ref,))
+    absent = release("absent").ref
     with pytest.raises(ValueError, match="Unknown"):
         snapshot.ordered_refs(absent)
     for stops in ((root.ref,), (absent,)):

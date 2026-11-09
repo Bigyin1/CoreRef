@@ -23,10 +23,10 @@ class RunTypeId(str, Enum):
 
 
 def release(
-    name: str, version: str = "v1", *, manifest: Mapping[str, JSON] | None = None, catalog: Catalog
+    name: str, version: str = "v1", *, manifest: Mapping[str, JSON] | None = None
 ) -> Record:
     return Record(
-        Ref.from_fields("demo-ip", name, "release", "default", version, catalog=catalog),
+        Ref.from_fields("demo-ip", name, "release", "default", version),
         {
             "resources": [
                 {
@@ -43,9 +43,9 @@ def release(
     )
 
 
-def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS, catalog: Catalog) -> Record:
+def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS) -> Record:
     return Record(
-        Ref.from_fields("flow", name, "run", "default", "1.0", catalog=catalog),
+        Ref.from_fields("flow", name, "run", "default", "1.0"),
         {"type_id": type_id, "purpose": "synthesis", "details": {"array": [3, 1, 2]}},
     )
 
@@ -77,7 +77,7 @@ def graph_json(result: Graph) -> str:
 
 def resolve_published(catalog: Catalog, ref: Ref, *, lockfile: Path | None = None) -> Graph:
     """Resolve the published root itself through the public API."""
-    return Ref.from_fields(**ref.to_dict(), catalog=catalog).graph(lockfile=lockfile)
+    return Graph(catalog, Ref.from_fields(**ref.to_dict()), lockfile=lockfile)
 
 
 def local_record(

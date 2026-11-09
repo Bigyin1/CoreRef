@@ -21,9 +21,7 @@ pytestmark = pytest.mark.conan_remote
 @pytest.fixture
 def rtl(catalog: Catalog, checkout: Path, git_origin: Path) -> InstalledRecord:
     assert git_origin.is_dir()
-    return catalog.publish(
-        LocalRecord(Ref("soc.cpu.rtl.default/1.0", catalog=catalog), source=checkout)
-    )
+    return catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
 
 
 def test_open_writes_only_recipe_and_preserves_work(
@@ -48,17 +46,17 @@ def test_open_writes_only_recipe_and_preserves_work(
 def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cached = rtl.ref.get_with_sources()
+    cached = catalog.get_with_sources(rtl.ref)
     assert not cached.is_editable and cached.source is not None
     assert cached.source.is_relative_to(catalog.cache_directory)
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
-    graph = rtl.ref.without_revision().graph()
+    graph = Graph(catalog, rtl.ref.without_revision())
     installed = graph.get_with_sources()[0]
     assert installed.is_editable and installed.source == source
     assert not installed.source.is_relative_to(catalog.cache_directory)
-    assert rtl.ref.get_with_sources().source == source
+    assert catalog.get_with_sources(rtl.ref).source == source
     output = json.loads(json.dumps(installed.to_dict()))
     assert output["is_editable"] is True and output["source"] == str(source)
     with pytest.raises(AttributeError):
@@ -68,9 +66,9 @@ def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     assert ready_source is not None and (ready_source / "cpu.sv").read_text() == "working version"
     workspace.remove(source)
     assert (source / "conanfile.py").is_file()
-    assert not rtl.ref.get_with_sources().is_editable
+    assert not catalog.get_with_sources(rtl.ref).is_editable
     workspace.add(source)
-    assert rtl.ref.get().is_editable
+    assert catalog.get(rtl.ref).is_editable
 
 
 def test_mixed_graph_batches_only_cached_packages_and_supports_filters(
@@ -82,13 +80,13 @@ def test_mixed_graph_batches_only_cached_packages_and_supports_filters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0", catalog=catalog), source=checkout),
+        LocalRecord(Ref("soc.parent.rtl.default/1.0"), source=checkout),
         dependencies=(rtl.ref,),
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
-    graph = parent.ref.graph()
+    graph = Graph(catalog, parent.ref)
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
         selected = graph.get_with_sources(filters=SearchQuery(component="cpu"))
         assert len(selected) == 1 and selected[0].source == source
@@ -108,7 +106,7 @@ def test_editable_artifact_paths_can_exist_only_after_local_build(
     artifact.write_text("published library")
     record = catalog.publish(
         LocalRecord(
-            Ref("soc.cpu.be.lib-lef/1.0", catalog=catalog),
+            Ref("soc.cpu.be.lib-lef/1.0"),
             source=checkout,
             files={"timing/cpu.lib": artifact},
         )
@@ -116,7 +114,7 @@ def test_editable_artifact_paths_can_exist_only_after_local_build(
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(record.ref)
     monkeypatch.chdir(workspace.path.parent)
-    graph = record.ref.graph()
+    graph = Graph(catalog, record.ref)
     editable = graph.get()[0]
     path = source / "artifacts/timing/cpu.lib"
     assert editable.is_editable and editable.files == {"timing/cpu.lib": path}
@@ -133,16 +131,16 @@ def test_workspace_consumer_can_save_and_reuse_native_lockfile(
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
-    local = LocalRecord(Ref("soc.top.rtl.default/1.0", catalog=catalog))
-    graph = Graph(local, dependencies=(rtl.ref.without_revision(),))
+    local = LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    graph = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),))
     lock = graph.create_lockfile(tmp_path / "project.lock")
-    locked = Graph(local, dependencies=(rtl.ref.without_revision(),), lockfile=lock)
+    locked = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),), lockfile=lock)
     assert locked.get_with_sources()[0].source == source
     assert tuple(sorted(locked.networkx.edges)) == tuple(sorted(graph.networkx.edges))
 
 
 def test_open_without_repository_source_is_rejected(catalog: Catalog, tmp_path: Path) -> None:
-    record = catalog.publish(LocalRecord(Ref("soc.meta.data.default/1.0", catalog=catalog)))
+    record = catalog.publish(LocalRecord(Ref("soc.meta.data.default/1.0")))
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     with pytest.raises(InvalidPackage, match="no repository source"):
         workspace.open(record.ref)
@@ -181,16 +179,16 @@ def test_a_cached_snapshot_does_not_silently_switch_to_new_editables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0", catalog=catalog), source=checkout),
+        LocalRecord(Ref("soc.parent.rtl.default/1.0"), source=checkout),
         dependencies=(rtl.ref,),
     )
-    snapshot = parent.ref.graph()
+    snapshot = Graph(catalog, parent.ref)
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
     with pytest.raises(Conflict, match="Workspace changed"):
         snapshot.get_with_sources()
-    ready = parent.ref.graph().get_with_sources(filters=SearchQuery(component="cpu"))
+    ready = Graph(catalog, parent.ref).get_with_sources(filters=SearchQuery(component="cpu"))
     assert ready[0].is_editable and ready[0].source == source
 
 
