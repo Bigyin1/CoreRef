@@ -40,7 +40,7 @@ namespace.component[_subcomponent].view.type/version[#revision]
 - **Фиксация выбора.** Проектный lockfile сохраняет версии/revisions для последующих
   разрешений. Уже созданный Graph использует свой снимок выбора при получении пакетов.
 - **Совместная разработка зависимостей.** Workspace получает SCM-зависимости
-  в рабочие Git-копии или подключает существующие проекты с deps.yml без Git и публикации.
+  в рабочие Git-копии или подключает существующие проекты с deps.yaml без Git и публикации.
   Conan автоматически подставляет рабочие копии в Graph из текущей директории;
   регистрации хранит Conan в conanws.yml. Локальные artifacts могут быть ещё не созданы.
 
@@ -238,8 +238,12 @@ flow workspace list --project-dir ./project
 flow workspace remove ../existing-cpu --project-dir ./project
 ```
 
-Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/deps.yml`, если рецепта ещё нет:
-достаточно валидного YAML с `ref`. Класс Workspace от этого формата не зависит.
+Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/deps.yaml`, если рецепта ещё нет;
+при отсутствии этого файла используется `deps.yml`. Если присутствуют оба, выбирается
+`deps.yaml`; ошибка в нём не скрывается чтением другого файла. Достаточно валидного YAML
+с `ref`. Git-репозиторий и публикация не нужны. Класс Workspace от этого формата не зависит.
+Существующий conanfile.py передаётся Conan без перезаписи; YAML-рецепт продолжает
+читать свой манифест средствами Conan.
 `dependencies`, `source`, `files` и `payload` необязательны; пути считаются от директории YAML.
 Для Python-надстройки это `DepsFile(catalog, path).add_to_workspace(workspace)`.
 Рецепт читает выбранный YAML при следующих вызовах Conan, поэтому его изменения

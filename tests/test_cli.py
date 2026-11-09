@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError
+from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Ref
 from coreref.api.workspace import Workspace
 from coreref.tools.cli import create_deps_app, create_workspace_app
@@ -150,10 +151,13 @@ def test_yaml_lock_command_rejects_an_input_named_like_a_lockfile(tmp_path: Path
 
 
 @pytest.mark.conan_remote
-def test_cli_adds_an_existing_package_with_deps_yml(catalog: Catalog, tmp_path: Path) -> None:
+@pytest.mark.parametrize("filename", ["deps.yaml", "deps.yml"])
+def test_cli_adds_an_existing_package_with_yaml(
+    catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
     package = tmp_path / "existing package"
     package.mkdir()
-    (package / "deps.yml").write_text("ref: soc.cpu.rtl.default/1.0\n")
+    (package / filename).write_text("ref: soc.cpu.rtl.default/1.0\n")
     (package / "cpu.sv").write_text("uncommitted local source")
     project = tmp_path / "consumer"
     app = create_workspace_app(catalog_factory=lambda: catalog)
@@ -166,22 +170,28 @@ def test_cli_adds_an_existing_package_with_deps_yml(catalog: Catalog, tmp_path: 
     assert (package / "cpu.sv").read_text() == "uncommitted local source"
     ref = Ref("soc.cpu.rtl.default/1.0")
     assert Workspace(catalog, project / "conanws.yml").members == {ref: package}
+    monkeypatch.chdir(project)
+    installed = Graph(catalog, ref).get_with_sources()[0]
+    assert installed.is_editable and installed.source == package
+    assert (package / "conanfile.py").is_file()
     result = runner.invoke(app, ["remove", str(package), "--project-dir", str(project)])
     assert result.exit_code == 0
-    assert (package / "deps.yml").is_file()
+    assert (package / filename).is_file()
 
 
 @pytest.mark.conan_remote
+@pytest.mark.parametrize("filename", ["deps.yaml", "deps.yml"])
 @pytest.mark.parametrize("manifest", [None, "ref: [broken", "ref: unknown"])
 def test_cli_rejects_missing_or_invalid_local_package(
     catalog: Catalog,
     tmp_path: Path,
     manifest: str | None,
+    filename: str,
 ) -> None:
     package = tmp_path / "package"
     package.mkdir()
     if manifest is not None:
-        (package / "deps.yml").write_text(manifest)
+        (package / filename).write_text(manifest)
     project = tmp_path / "consumer"
     app = create_workspace_app(catalog_factory=lambda: catalog)
     result = runner.invoke(app, ["add", str(package), "--project-dir", str(project)])
@@ -189,3 +199,44 @@ def test_cli_rejects_missing_or_invalid_local_package(
     assert "Error:" in result.stderr and "Traceback" not in result.output
     assert not (project / "conanws.yml").exists()
     assert not (package / "conanfile.py").exists()
+
+
+@pytest.mark.conan_remote
+def test_workspace_cli_prefers_yaml_and_reuses_the_generated_recipe(
+    catalog: Catalog, tmp_path: Path
+) -> None:
+    package = tmp_path / "existing package"
+    package.mkdir()
+    (package / "deps.yaml").write_text("ref: soc.cpu.rtl.default/1.0\n")
+    (package / "deps.yml").write_text("deliberately invalid YAML: [")
+    app = create_workspace_app(catalog_factory=lambda: catalog)
+    project = tmp_path / "consumer"
+    arguments = ["add", str(package), "--project-dir", str(project)]
+    result = runner.invoke(app, arguments)
+    assert result.exit_code == 0, result.output
+    recipe = (package / "conanfile.py").read_text()
+    assert Workspace(catalog, project / "conanws.yml").members == {
+        Ref("soc.cpu.rtl.default/1.0"): package
+    }
+    (package / "deps.yaml").write_text("ref: soc.cpu.rtl.default/1.0\npayload: {edited: true}\n")
+    result = runner.invoke(app, arguments)
+    assert result.exit_code == 0, result.output
+    assert (package / "conanfile.py").read_text() == recipe
+
+
+@pytest.mark.conan_remote
+def test_workspace_cli_does_not_hide_invalid_yaml_behind_yml(
+    catalog: Catalog, tmp_path: Path
+) -> None:
+    package = tmp_path / "existing package"
+    package.mkdir()
+    (package / "deps.yaml").write_text("invalid YAML: [")
+    (package / "deps.yml").write_text("ref: soc.cpu.rtl.default/1.0\n")
+    project = tmp_path / "consumer"
+    result = runner.invoke(
+        create_workspace_app(catalog_factory=lambda: catalog),
+        ["add", str(package), "--project-dir", str(project)],
+    )
+    assert result.exit_code == 1 and "deps.yaml" in result.stderr
+    assert not (package / "conanfile.py").exists()
+    assert not (project / "conanws.yml").exists()
