@@ -44,7 +44,7 @@ def main() -> None:
             print(result.to_dict())
             graph = result.ref.graph()
             installed = graph.get((graph.record.ref,))[0]
-            print(f"{len(graph.records)} nodes, {len(graph.edges)} edges")
+            print(f"{len(graph.records)} nodes, {graph.networkx.number_of_edges()} edges")
             print(installed.files["cpu.lib"].read_text().strip())
 
 

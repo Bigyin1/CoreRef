@@ -109,7 +109,6 @@ class DepsFile(BaseModel):
     def resolve(self, *, update: bool = False) -> Graph:
         """Resolve a snapshot; update ignores the old lock but never writes it."""
         return Graph(
-            self._catalog,
             self.record,
             dependencies=self.dependencies,
             lockfile=self.lockfile if self.lockfile.exists() and not update else None,

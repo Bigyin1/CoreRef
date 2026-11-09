@@ -11,7 +11,9 @@ from coreref.api.catalog import Catalog
 from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
 
 
-def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Catalog) -> None:
+def test_installed_paths_and_payload_are_detached_and_read_only(
+    tmp_path: Path, *, catalog: Catalog
+) -> None:
     paths = {"lib": str(tmp_path / "cpu.lib")}
     record = InstalledRecord(
         Record(
@@ -24,14 +26,14 @@ def test_paths_roundtrip_as_immutable_snapshots(tmp_path: Path, *, catalog: Cata
         files={"report": tmp_path / "report.txt"},
     )
     paths.clear()
-    restored = Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
-    assert isinstance(restored, InstalledRecord)
-    assert restored == record
-    assert restored.payload == {"external": {"lib": str(tmp_path / "cpu.lib")}}
-    assert restored.files["report"] == tmp_path / "report.txt"
-    assert restored.source == tmp_path / "source"
+    output = json.loads(json.dumps(record.to_dict(), allow_nan=False))
+    assert output["source"] == str(record.source)
+    assert output["files"] == {"report": str(tmp_path / "report.txt")}
+    assert record.payload == {"external": {"lib": str(tmp_path / "cpu.lib")}}
+    assert record.files["report"] == tmp_path / "report.txt"
+    assert record.source == tmp_path / "source"
     with pytest.raises(TypeError):
-        restored.files["other"] = tmp_path  # type: ignore[index]
+        record.files["other"] = tmp_path  # type: ignore[index]
 
 
 @pytest.mark.parametrize("name,path", [("lib", Path("relative")), ("", Path("/data/lib"))])

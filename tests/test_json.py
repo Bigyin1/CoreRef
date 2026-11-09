@@ -22,10 +22,9 @@ def test_nonfinite_numbers_cannot_be_written_as_json(value: float, *, catalog: C
 
 def test_large_integers_are_consumer_data(*, catalog: Catalog) -> None:
     record = Record(release("large", catalog=catalog).ref, {"number": 2**100})
-    assert (
-        type(record).from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
-        == record
-    )
+    assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["payload"] == {
+        "number": 2**100
+    }
 
 
 def test_deepfreeze_detaches_nested_containers(*, catalog: Catalog) -> None:
@@ -47,9 +46,4 @@ def test_deepfreeze_detaches_nested_containers(*, catalog: Catalog) -> None:
 
 def test_consumer_timestamps_are_not_interpreted(*, catalog: Catalog) -> None:
     record = Record(run("timestamps", catalog=catalog).ref, {"started_at": "any user format"})
-    assert (
-        type(record)
-        .from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog)
-        .payload
-        == record.payload
-    )
+    assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["payload"] == record.payload

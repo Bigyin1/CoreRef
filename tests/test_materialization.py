@@ -86,8 +86,6 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(
     metadata = local.to_json()
     assert "working-tree" not in metadata
     assert "output.lib" not in metadata
-    with pytest.raises(ValueError, match="Snapshot files"):
-        Record.from_json(metadata, catalog=catalog)
     local.source = None
     LocalRecipe(local).write(tmp_path / "downloaded")
     record = StoredRecipe(tmp_path / "downloaded", local.ref, reference=str(local.ref)).record

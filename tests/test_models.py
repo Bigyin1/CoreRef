@@ -29,9 +29,7 @@ class UserPayload:
 def test_minimal_record(*, catalog: Catalog) -> None:
     record = Record(Ref.from_fields("demo", "core", "release", "default", "1.0", catalog=catalog))
     assert record.payload is None
-    assert (
-        Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=catalog) == record
-    )
+    assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["ref"] == record.ref.to_dict()
     with pytest.raises(AttributeError):
         record.payload = 1  # type: ignore[misc]
 
@@ -44,9 +42,7 @@ def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
     )
     record = catalog.publish(local_record(record))
     stored = Ref.from_fields(**record.ref.to_dict(), catalog=catalog).get()
-    assert stored == Record.from_json(
-        json.dumps(record.to_dict(), allow_nan=False), catalog=catalog
-    )
+    assert stored == record
     assert not isinstance(stored.payload, JSONSerializable)
 
 
@@ -65,9 +61,9 @@ def test_custom_payload_is_serialized_once_and_frozen(catalog: Catalog) -> None:
     assert stored.payload["nested"] == (1, {"ports": (2, 3)})
     with pytest.raises(TypeError):
         stored.payload["new"] = 1  # type: ignore[index]
-    assert (
-        Record.from_json(json.dumps(stored.to_dict(), allow_nan=False), catalog=catalog) == stored
-    )
+    assert json.loads(json.dumps(stored.to_dict(), allow_nan=False))["payload"] == {
+        "nested": [1, {"ports": [2, 3]}]
+    }
 
 
 def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -> None:

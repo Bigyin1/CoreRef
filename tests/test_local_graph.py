@@ -8,7 +8,7 @@ import pytest
 
 from coreref.api.catalog import Catalog
 from coreref.api.errors import Conflict, InvalidPackage, NotFound
-from coreref.api.graph import Dependency, Graph
+from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
 from coreref.api.records import Record, Ref
 from tests.helpers import local_record
@@ -31,13 +31,13 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
         catalog.publish(local_record(branch), dependencies=(leaf.ref,)) for branch in (left, right)
     )
     root = Record(record("top", catalog=local_catalog).ref, {"local": ["working-tree"]})
-    graph = Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
+    graph = Graph(local_record(root), dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
-    assert set(graph.edges) == {
-        Dependency(root.ref, left.ref),
-        Dependency(root.ref, right.ref),
-        Dependency(left.ref, leaf.ref),
-        Dependency(right.ref, leaf.ref),
+    assert set(graph.networkx.edges) == {
+        (root.ref, left.ref),
+        (root.ref, right.ref),
+        (left.ref, leaf.ref),
+        (right.ref, leaf.ref),
     }
     stored_root = next(item for item in graph.records if item.ref == root.ref)
     assert stored_root.payload == {"local": ("working-tree",)}
@@ -48,9 +48,9 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
 
 def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     root = record("top", catalog=local_catalog)
-    graph = Graph(local_catalog, local_record(root))
+    graph = Graph(local_record(root))
     assert graph.records == (local_record(root),)
-    assert graph.edges == ()
+    assert tuple(sorted(graph.networkx.edges)) == ()
     assert local_catalog.search(SearchQuery()) == ()
 
 
@@ -61,11 +61,11 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     current = catalog.publish(local_record(current))
     root = catalog.publish(local_record(root), dependencies=(old.ref,))
     local = Record(root.ref, {"local": True})
-    graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
+    graph = Graph(local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
-    assert graph.edges == (Dependency(root.ref.without_revision(), current.ref),)
+    assert tuple(sorted(graph.networkx.edges)) == ((root.ref.without_revision(), current.ref),)
     assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).get() == root
-    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).dependencies() == (old,)
+    assert Ref.from_fields(**root.ref.to_dict(), catalog=catalog).graph().dependencies() == (old,)
 
 
 def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> None:
@@ -80,20 +80,20 @@ def test_local_graph_checks_versions_across_branches(local_catalog: Catalog) -> 
     left = catalog.publish(local_record(left), dependencies=(first.ref,))
     right = catalog.publish(local_record(right), dependencies=(second.ref,))
     with pytest.raises(Conflict):
-        Graph(catalog, local_record(root), dependencies=(left.ref, right.ref))
+        Graph(local_record(root), dependencies=(left.ref, right.ref))
 
 
 def test_local_graph_rejects_cycles_and_missing_dependencies(local_catalog: Catalog) -> None:
     catalog = local_catalog
     root, child = record("top", catalog=local_catalog), record("child", catalog=local_catalog)
     with pytest.raises(InvalidPackage):
-        Graph(catalog, local_record(root), dependencies=(root.ref,))
+        Graph(local_record(root), dependencies=(root.ref,))
     with pytest.raises(NotFound):
-        Graph(catalog, local_record(root), dependencies=(child.ref,))
+        Graph(local_record(root), dependencies=(child.ref,))
     root = catalog.publish(local_record(root))
     child = catalog.publish(local_record(child), dependencies=(root.ref,))
     with pytest.raises(InvalidPackage):
-        Graph(catalog, local_record(root), dependencies=(child.ref,))
+        Graph(local_record(root), dependencies=(child.ref,))
 
 
 def test_conan_resolves_one_consumer_without_exporting(
@@ -113,7 +113,6 @@ def test_conan_resolves_one_consumer_without_exporting(
 
     monkeypatch.setattr(connection._client, "run", track)
     Graph(
-        catalog,
         local_record(record("top", catalog=catalog)),
         dependencies=tuple(d.ref for d in dependencies),
     )
@@ -133,14 +132,12 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(
     leaf, child, root = (record(name, catalog=catalog) for name in ("leaf", "child", "top"))
     leaf = catalog.publish(local_record(leaf))
     child = catalog.publish(local_record(child), dependencies=(leaf.ref,))
-    lockfile = Graph(catalog, local_record(root), dependencies=(child.ref,)).create_lockfile(
+    lockfile = Graph(local_record(root), dependencies=(child.ref,)).create_lockfile(
         tmp_path / "project/conan.lock"
     )
     original = lockfile.read_bytes()
-    expected = Graph(catalog, local_record(root), dependencies=(child.ref,))
-    assert (
-        Graph(catalog, local_record(root), dependencies=(child.ref,), lockfile=lockfile) == expected
-    )
+    expected = Graph(local_record(root), dependencies=(child.ref,))
+    assert Graph(local_record(root), dependencies=(child.ref,), lockfile=lockfile) == expected
     assert lockfile.read_bytes() == original
     connection._client.run(
         "lock",
@@ -153,5 +150,5 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(
     )
     incomplete = lockfile.read_bytes()
     with pytest.raises(InvalidPackage, match="absent from its lockfile"):
-        Graph(catalog, local_record(root), dependencies=(child.ref,), lockfile=lockfile)
+        Graph(local_record(root), dependencies=(child.ref,), lockfile=lockfile)
     assert lockfile.read_bytes() == incomplete

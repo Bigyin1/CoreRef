@@ -28,9 +28,8 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
         )
     )
     root = Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    left = Graph(catalog, local_record(root), dependencies=(first.ref,))
+    left = Graph(local_record(root), dependencies=(first.ref,))
     right = Graph(
-        catalog,
         local_record(
             Record(
                 Ref.from_fields(**(root.ref.to_dict() | {"component": "other"}), catalog=catalog),
@@ -54,7 +53,6 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
 
 def test_graph_lockfile_requires_a_path(catalog: Catalog) -> None:
     graph = Graph(
-        catalog,
         local_record(
             Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
         ),
@@ -67,7 +65,6 @@ def test_failed_lock_creation_preserves_previous_scope(catalog: Catalog, tmp_pat
     parent = tmp_path / "directory"
     parent.mkdir()
     graph = Graph(
-        catalog,
         local_record(
             Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
         ),
@@ -98,8 +95,8 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
     local = local_record(
         Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
     )
-    graph = Graph(catalog, local, dependencies=(dependency.ref,))
-    records, edges = graph.records, graph.edges
+    graph = Graph(local, dependencies=(dependency.ref,))
+    records, topology = graph.records, graph.networkx
 
     def reject(*_arguments: str) -> object:
         raise AssertionError("Saving a resolved graph must not issue more Conan commands")
@@ -108,8 +105,8 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         patch.setattr(catalog._client, "run", reject)
         lockfile = graph.create_lockfile(tmp_path / "conan.lock")
         assert graph.create_lockfile() == lockfile
-    assert graph.records == records and graph.edges is edges
-    assert Graph(catalog, local, dependencies=(dependency.ref,), lockfile=lockfile) == graph
+    assert graph.records == records and graph.networkx is topology
+    assert Graph(local, dependencies=(dependency.ref,), lockfile=lockfile) == graph
 
 
 @pytest.mark.parametrize(
@@ -118,7 +115,6 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         "catalog",
         "record",
         "records",
-        "edges",
         "requirements",
         "networkx",
         "lockfile",
@@ -126,7 +122,7 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
 )
 def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: str) -> None:
     local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    graph = Graph(catalog, local)
+    graph = Graph(local)
     expected = graph.ordered_refs(local.ref)
     with pytest.raises(AttributeError):
         setattr(graph, attribute, None)
@@ -136,7 +132,7 @@ def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: st
 
 def test_local_views_cannot_change_the_resolved_root(catalog: Catalog) -> None:
     local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    graph = Graph(catalog, local)
+    graph = Graph(local)
     expected = graph.ordered_refs(local.ref)
     views = (graph.record, graph.records[0], graph.ordered_records(local.ref)[0])
     for record in views:

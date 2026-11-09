@@ -41,7 +41,6 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
         dependencies=(leaf.ref,),
     )
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(parent.ref,),
     )
@@ -78,7 +77,6 @@ def test_metadata_only_selection_does_not_run_conan(
         LocalRecord(Ref.from_fields("soc", "meta", "be", "default", "1.0", catalog=catalog))
     )
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(record.ref,),
     )
@@ -106,7 +104,6 @@ def test_failed_batch_can_be_retried(
         )
     )
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(dependency.ref,),
     )
@@ -133,8 +130,8 @@ def test_install_must_match_the_resolved_references(
         LocalRecord(Ref.from_fields("soc", "other", "rtl", "default", "1.0", catalog=catalog))
     )
     root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    graph = Graph(catalog, root, dependencies=(requested.ref,))
-    wrong = Graph(catalog, root, dependencies=(unexpected.ref,))
+    graph = Graph(root, dependencies=(requested.ref,))
+    wrong = Graph(root, dependencies=(unexpected.ref,))
 
     def changed(_directory: Path, _sources: Mapping[str, bool]) -> NativeGraph:
         return wrong._package.graph.native
@@ -156,7 +153,6 @@ def test_unpinned_external_requirement_stays_at_resolved_revision(
     assert native.root.ref is not None
     catalog._client.upload(native.root.ref.repr_notime())
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(parent,),
     )
@@ -186,7 +182,6 @@ def test_required_parent_does_not_fetch_unselected_transitive_source(
         dependencies=(hidden.ref,),
     )
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(parent.ref,),
     )
@@ -214,7 +209,6 @@ def test_metadata_only_record_is_not_installed_with_source_packages(
         )
     )
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(metadata, dependency.ref),
     )
@@ -240,7 +234,6 @@ def test_batch_files_do_not_require_scm_and_can_be_upgraded_to_sources(
         for component in ("cpu", "gpio")
     )
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=tuple(record.ref for record in records),
     )
@@ -280,7 +273,6 @@ def test_source_only_metadata_get_does_not_install(
         )
     )
     graph = Graph(
-        catalog,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog)),
         dependencies=(dependency.ref,),
     )

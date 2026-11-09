@@ -154,5 +154,5 @@ def test_local_consumer_gets_editable_dependencies_automatically(
     workspace.add(document.path.parent)
     monkeypatch.chdir(workspace.path.parent)
     root = LocalRecord(Ref("soc.top.rtl.default/1.0", catalog=catalog))
-    graph = Graph(catalog, root, dependencies=(document.record.ref,))
+    graph = Graph(root, dependencies=(document.record.ref,))
     assert graph.get_with_sources()[0].source == document.path.parent

@@ -46,6 +46,10 @@ def test_same_coordinates_use_their_own_catalog(catalog: Catalog, other_catalog:
     assert second.get().payload == {"origin": "second"}
     assert first.get().ref._catalog is catalog
     assert second.get().ref._catalog is other
+    assert first.graph().record.payload == {"origin": "first"}
+    assert second.graph().record.payload == {"origin": "second"}
+    assert Graph(local_record(Record(first))).catalog is catalog
+    assert Graph(local_record(Record(second))).catalog is other
 
 
 def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog) -> None:
@@ -60,11 +64,14 @@ def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog
         ),
         dependencies=(leaf.ref,),
     )
-    for record in (*catalog.search(SearchQuery()), root.ref.get(), *root.ref.dependencies()):
+    for record in (
+        *catalog.search(SearchQuery()),
+        root.ref.get(),
+        *root.ref.graph().dependencies(),
+    ):
         assert record.ref._catalog is catalog
         assert record.ref.get() == record
     graph = Graph(
-        catalog,
         local_record(
             Record(Ref.from_fields("soc", "local", "rtl", "default", "1.0", catalog=catalog))
         ),
@@ -73,21 +80,10 @@ def test_catalog_creates_operational_refs_in_records_and_graphs(catalog: Catalog
     records = {record.ref: record for record in graph.records}
     for graph_record in graph.records:
         assert graph_record.ref._catalog is catalog
-    for edge in graph.edges:
-        assert edge.source is records[edge.source].ref
-        assert edge.target is records[edge.target].ref
-        assert edge.target.get() == records[edge.target]
-
-
-def test_json_decoding_creates_refs_with_explicit_context(catalog: Catalog) -> None:
-    published = catalog.publish(
-        local_record(
-            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
-        )
-    )
-    restored = Record.from_json(json.dumps(published.to_dict(), allow_nan=False), catalog=catalog)
-    assert restored.ref.get() == published
-    assert restored.ref._catalog is catalog
+    for source, target in graph.networkx.edges:
+        assert source is records[source].ref
+        assert target is records[target].ref
+        assert target.get() == records[target]
 
 
 def test_reference_requires_a_private_catalog(catalog: Catalog) -> None:

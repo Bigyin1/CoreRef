@@ -22,14 +22,14 @@ def test_construction_snapshots_mutable_project(catalog: Catalog, tmp_path: Path
         payload,
         files=files,
     )
-    project = Graph(catalog, local)
+    project = Graph(local)
     first = project.records[0]
     assert isinstance(first, LocalRecord)
     assert payload.calls == 1
     items.append("changed")
     files.clear()
     local.source = tmp_path
-    second = Graph(catalog, local).records[0]
+    second = Graph(local).records[0]
     assert isinstance(second, LocalRecord)
     assert payload.calls == 2
     assert first is not local and second is not local
@@ -91,9 +91,9 @@ def test_construction_resolves_once_and_snapshots_before_conan(
         return resolve(directory, lockfile=lockfile, update=update)
 
     monkeypatch.setattr(catalog._client, "graph", change_inputs)
-    project = Graph(catalog, local, dependencies=(dependency.ref,))
+    project = Graph(local, dependencies=(dependency.ref,))
     assert calls == 1
-    assert len(project.edges) == 1
+    assert project.networkx.number_of_edges() == 1
     assert next(record for record in project.records if record.ref == local.ref).payload is None
     assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
     assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)

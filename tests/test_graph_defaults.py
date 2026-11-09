@@ -21,7 +21,7 @@ def test_transitive_filters_do_not_prune_intermediate_nodes(catalog: Catalog) ->
         dependencies=(leaf.ref,),
     )
     local = LocalRecord(Ref("soc.top.rtl.default/1.0", catalog=catalog))
-    graph = Graph(catalog, local, dependencies=(middle.ref, leaf.ref))
+    graph = Graph(local, dependencies=(middle.ref, leaf.ref))
     newer = catalog.publish(LocalRecord(leaf.ref.without_revision(), {"generation": 2}))
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected I/O")):
         assert graph.dependencies() == (middle, leaf)
@@ -52,9 +52,7 @@ def test_default_retrieval_batches_the_tree_and_preserves_snapshot(
     )
     stored = catalog.publish(root, dependencies=(leaf.ref.without_revision(),))
     graph = (
-        root.ref.graph()
-        if published
-        else Graph(catalog, root, dependencies=(leaf.ref.without_revision(),))
+        root.ref.graph() if published else Graph(root, dependencies=(leaf.ref.without_revision(),))
     )
     artifact.write_text("later")
     catalog.publish(root, dependencies=(leaf.ref,))
@@ -97,7 +95,7 @@ def test_default_get_leaves_sources_for_an_explicit_source_request(
 
 
 def test_empty_local_graph_defaults_do_not_run_conan(catalog: Catalog) -> None:
-    graph = Graph(catalog, LocalRecord(Ref("soc.empty.rtl.default/1.0", catalog=catalog)))
+    graph = Graph(LocalRecord(Ref("soc.empty.rtl.default/1.0", catalog=catalog)))
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected I/O")):
         assert graph.dependencies(transitive=True) == ()
         assert graph.get() == graph.get_with_sources() == ()

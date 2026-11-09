@@ -28,7 +28,7 @@ def test_revision_identity_and_snapshots(catalog: Catalog) -> None:
     assert from_conan_reference(str(first) + "%123.0", catalog=catalog) == first
     assert to_conan_reference(first) == str(first)
     record = Record(first, {"generation": 1})
-    assert Record.from_json(json.dumps(record.to_dict()), catalog=catalog) == record
+    assert json.loads(json.dumps(record.to_dict()))["ref"] == first.to_dict()
     assert "revision" not in json.loads(LocalRecord(first).to_json())["ref"]
 
 
@@ -60,12 +60,12 @@ def test_search_selects_latest_history_and_explicit_revision(catalog: Catalog) -
 
 def test_query_builds_revision_patterns_directly() -> None:
     query = SearchQuery(component="cpu")
-    assert query.conan_pattern() == "*.cpu*.*.*/*#latest"
-    assert query.conan_pattern(all_revisions=True) == "*.cpu*.*.*/*#*"
+    assert query._conan_pattern() == "*.cpu*.*.*/*#latest"
+    assert query._conan_pattern(all_revisions=True) == "*.cpu*.*.*/*#*"
     exact = SearchQuery(revision="a" * 32)
-    assert exact.conan_pattern() == exact.conan_pattern(all_revisions=True)
-    assert exact.conan_pattern() == f"*.*.*.*/*#{'a' * 32}"
-    assert SearchQuery(revision="*").conan_pattern() is None
+    assert exact._conan_pattern() == exact._conan_pattern(all_revisions=True)
+    assert exact._conan_pattern() == f"*.*.*.*/*#{'a' * 32}"
+    assert SearchQuery(revision="*")._conan_pattern() is None
 
 
 @pytest.mark.parametrize("operation", ["publish", "graph"])
@@ -77,7 +77,7 @@ def test_local_roots_cannot_claim_a_revision(catalog: Catalog, operation: str) -
         if operation == "publish":
             catalog.publish(local)
         else:
-            Graph(catalog, local)
+            Graph(local)
     assert catalog.search(SearchQuery()) == ()
 
 
@@ -89,21 +89,21 @@ def test_lockfile_and_graph_keep_old_files_after_new_revision(
     file.write_text("first")
     first = catalog.publish(LocalRecord(ref, files={"report": file}))
     root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    graph = Graph(catalog, root, dependencies=(ref,))
+    graph = Graph(root, dependencies=(ref,))
     lock = graph.create_lockfile(tmp_path / "project.lock")
     contents = lock.read_bytes()
     file.write_text("second")
     second = catalog.publish(LocalRecord(ref, files={"report": file}))
     assert graph.ordered_refs(root.ref) == (first.ref, root.ref)
     assert graph.get((ref,))[0].files["report"].read_text() == "first"
-    assert Graph(catalog, root, dependencies=(ref,)).requirements == (second.ref,)
-    locked = Graph(catalog, root, dependencies=(ref,), lockfile=lock)
+    assert Graph(root, dependencies=(ref,)).requirements == (second.ref,)
+    locked = Graph(root, dependencies=(ref,), lockfile=lock)
     assert locked.requirements == (first.ref,)
     published = catalog.publish(root, dependencies=(ref,), lockfile=lock)
-    assert published.ref.dependencies() == (first,)
+    assert published.ref.graph().dependencies() == (first,)
     assert lock.read_bytes() == contents
     with pytest.raises(CatalogError, match="lockfile"):
-        Graph(catalog, root, dependencies=(second.ref,), lockfile=lock)
+        Graph(root, dependencies=(second.ref,), lockfile=lock)
     with pytest.raises(InvalidPackage, match="Revision"):
         graph.get((second.ref,))
     with pytest.raises(ValueError, match="Revision"):
@@ -132,4 +132,4 @@ def test_external_unpinned_requirements_resolve_independently(
         tmp_path
     )
     catalog._client.upload(catalog._client.export(tmp_path))
-    assert root.ref.dependencies() == leaves
+    assert root.ref.graph().dependencies() == leaves

@@ -185,7 +185,6 @@ def publish_result(
 ) -> InstalledRecord:
     """Разрешить и опубликовать результат, учитывая имеющийся lockfile."""
     graph = Graph(
-        catalog,
         record,
         dependencies=dependencies,
         lockfile=lockfile if lockfile.exists() else None,

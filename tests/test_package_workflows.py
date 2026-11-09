@@ -81,7 +81,7 @@ def snapshot(
     root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=reader))
     requirements = (history.first.ref, meta.ref)
     if request.param == "local":
-        return Graph(reader, root, dependencies=requirements)
+        return Graph(root, dependencies=requirements)
     published = history.publisher.publish(root, dependencies=requirements)
     return Ref.from_fields(**published.ref.to_dict(), catalog=reader).graph()
 
@@ -169,7 +169,7 @@ def test_retry_publication_after_upload_failure_keeps_the_original_lock_choice(
     local = LocalRecord(
         Ref.from_fields("soc", "result", "be", "lib-lef", "1.0", catalog=history.publisher)
     )
-    graph = Graph(history.publisher, local, dependencies=(history.first.ref.without_revision(),))
+    graph = Graph(local, dependencies=(history.first.ref.without_revision(),))
     lock = graph.create_lockfile(tmp_path / "result.lock")
     with (
         patch.object(history.publisher._client, "upload", side_effect=CatalogError("offline")),
@@ -183,7 +183,7 @@ def test_retry_publication_after_upload_failure_keeps_the_original_lock_choice(
     published = history.publisher.publish(
         local, dependencies=(history.first.ref.without_revision(),), lockfile=lock
     )
-    assert published.ref.dependencies() == (history.first,)
+    assert published.ref.graph().dependencies() == (history.first,)
     assert second.ref not in {record.ref for record in published.ref.graph().records}
     assert len(history.publisher.search(SearchQuery(component="result"), all_revisions=True)) == 1
     assert graph.get_with_sources((history.first.ref,))[0].payload == {"generation": 1}
@@ -210,7 +210,6 @@ def test_conflicting_diamond_revisions_do_not_damage_independent_snapshots(
     requirements = (right.ref, left.ref) if reverse else (left.ref, right.ref)
     with pytest.raises(Conflict):
         Graph(
-            history.publisher,
             LocalRecord(
                 Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=history.publisher)
             ),

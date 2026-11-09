@@ -29,7 +29,6 @@ class Dataset:
     def resolve(self, catalog: Catalog, *, lockfile: Path | None = None) -> Graph:
         root = LocalRecord(Ref(f"{self.namespace}.local.rtl.default/1.0", catalog=catalog))
         return Graph(
-            catalog,
             root,
             dependencies=tuple(
                 Ref(str(ref.without_revision()), catalog=catalog) for ref in self.roots
@@ -42,7 +41,7 @@ class Dataset:
             record.ref for record in self.records
         }
         expected = {*self.edges, *((graph.record.ref, ref) for ref in self.roots)}
-        assert {(edge.source, edge.target) for edge in graph.edges} == expected
+        assert set(graph.networkx.edges) == expected
 
 
 class Registry:

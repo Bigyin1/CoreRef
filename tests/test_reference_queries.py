@@ -5,11 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from coreref._internal.recipe import LocalRecipe
 from coreref.api.catalog import Catalog
-from coreref.api.errors import NotFound
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Ref
 from examples.local_server import LocalServer
@@ -43,50 +39,3 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
     assert reader.search_refs(SearchQuery()) == tuple(
         record.ref for record in reader.search(SearchQuery())
     )
-
-
-def test_dependency_refs_downloads_only_the_parent_recipe(
-    catalog: Catalog, conan_server: LocalServer, tmp_path: Path
-) -> None:
-    leaf = catalog.publish(LocalRecord(Ref("soc.leaf.rtl.default/1.0", catalog=catalog)))
-    parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0", catalog=catalog)),
-        dependencies=(leaf.ref.without_revision(),),
-    )
-    reader = Catalog(conan_server.configure(tmp_path / "reader"))
-    requested = Ref("soc.parent.rtl.default/1.0", catalog=reader)
-    with patch.object(
-        reader._client, "download_recipe", wraps=reader._client.download_recipe
-    ) as read:
-        refs = requested.dependency_refs()
-        assert refs == (leaf.ref,)
-        assert refs[0]._catalog is reader
-        assert [call.args[0] for call in read.call_args_list] == [str(parent.ref)]
-    with pytest.raises(NotFound):
-        reader._client.cache_path(str(leaf.ref))
-    assert requested.dependency_refs(SearchQuery(view="be")) == ()
-    assert requested.dependency_refs(SearchQuery(revision=leaf.ref.revision)) == refs
-    assert requested.dependencies()[0].ref == refs[0]
-
-
-def test_floating_dependency_refs_select_latest_without_reading_child_metadata(
-    catalog: Catalog, tmp_path: Path
-) -> None:
-    logical = Ref("soc.leaf.rtl.default/1.0", catalog=catalog)
-    first = catalog.publish(LocalRecord(logical))
-    parent = LocalRecord(Ref("soc.external.rtl.default/1.0", catalog=catalog))
-    LocalRecipe(parent, (str(logical),)).write(tmp_path / "recipe")
-    reference = catalog._client.export(tmp_path / "recipe")
-    catalog._client.upload(reference)
-    second = catalog.publish(LocalRecord(logical, {"generation": 2}))
-    folder = catalog._client.cache_path(str(second.ref))
-    (folder / "record.json").unlink()
-    with patch.object(
-        catalog._client, "download_recipe", wraps=catalog._client.download_recipe
-    ) as read:
-        assert parent.ref.dependency_refs() == (second.ref,)
-        assert parent.ref.dependency_refs(SearchQuery(revision=first.ref.revision)) == ()
-        assert parent.ref.dependency_refs(SearchQuery(revision=second.ref.revision)) == (
-            second.ref,
-        )
-        assert all(call.args[0] == reference for call in read.call_args_list)

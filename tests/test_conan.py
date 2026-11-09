@@ -16,7 +16,7 @@ from coreref._internal.references import (
 )
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
-from coreref.api.graph import Dependency, Graph
+from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
 from coreref.api.records import Record, Ref
 from examples.conan_config import configured_home
@@ -144,16 +144,17 @@ def test_conan_round_trip_search_and_project_lockfile(
     assert not catalog.search(SearchQuery(component="missing"))
     assert not catalog.search(SearchQuery(component=""))
     expected = resolve_published(catalog, be.ref)
-    assert expected.edges == (Dependency(be.ref, rtl.ref),)
+    assert tuple(sorted(expected.networkx.edges)) == ((be.ref, rtl.ref),)
     assert len(expected.networkx) == 2
-    assert Ref.from_fields(**be.ref.to_dict(), catalog=catalog).dependencies()[0] == stored
-    assert not Ref.from_fields(**be.ref.to_dict(), catalog=catalog).dependencies(
-        filters=SearchQuery(view="missing")
+    assert Ref.from_fields(**be.ref.to_dict(), catalog=catalog).graph().dependencies()[0] == stored
+    assert (
+        not Ref.from_fields(**be.ref.to_dict(), catalog=catalog)
+        .graph()
+        .dependencies(filters=SearchQuery(view="missing"))
     )
     folder = conan_catalog._package(be.ref).recipe().directory
     assert not (folder / "conan.lock").exists()
     lockfile = Graph(
-        catalog,
         local_record(record(name="consumer", catalog=conan_catalog)),
         dependencies=(be.ref,),
     ).create_lockfile(tmp_path / "workspace/conan.lock")
@@ -227,7 +228,7 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
         == be.ref
     )
     graph = be.ref.graph()
-    assert graph.edges == (Dependency(graph.record.ref, rtl.ref),)
+    assert tuple(sorted(graph.networkx.edges)) == ((graph.record.ref, rtl.ref),)
 
 
 @pytest.mark.parametrize("damage", ["missing", "missing-data", "bad-marker", "bad-coordinates"])
@@ -334,13 +335,13 @@ def test_native_graph_exposes_conans_dependencies_and_topological_order(
         dependencies.host[to_conan_reference(shared.ref)].ref.name == "soc.zzz-shared.rtl.default"
     )
     edges = (
-        Dependency(root.ref, left.ref),
-        Dependency(root.ref, right.ref),
-        Dependency(left.ref, shared.ref),
-        Dependency(right.ref, shared.ref),
+        (root.ref, left.ref),
+        (root.ref, right.ref),
+        (left.ref, shared.ref),
+        (right.ref, shared.ref),
     )
-    assert resolve_published(conan_catalog, root.ref).edges == tuple(
-        sorted(edges, key=lambda edge: (edge.source, edge.target))
+    assert tuple(sorted(resolve_published(conan_catalog, root.ref).networkx.edges)) == tuple(
+        sorted(edges, key=lambda edge: (edge[0], edge[1]))
     )
 
 
@@ -423,7 +424,6 @@ def test_native_graph_rejects_an_unlocked_transitive_dependency(
     middle = conan_catalog.publish(local_record(middle), dependencies=(leaf.ref,))
     root = conan_catalog.publish(local_record(root), dependencies=(middle.ref,))
     lock_path = Graph(
-        conan_catalog,
         local_record(record(name="consumer", catalog=conan_catalog)),
         dependencies=(root.ref,),
     ).create_lockfile(tmp_path / "project/conan.lock")

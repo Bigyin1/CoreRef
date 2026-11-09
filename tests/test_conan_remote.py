@@ -216,7 +216,7 @@ def test_warm_operations_do_not_redownload_recipes(
     monkeypatch.setattr(remote_catalog._client, "run", track)
     actions: dict[str, Callable[[], object]] = {
         "get": root.ref.get,
-        "resolve": lambda: Graph(remote_catalog, local_record(root), dependencies=(leaf.ref,)),
+        "resolve": lambda: Graph(local_record(root), dependencies=(leaf.ref,)),
         "search": lambda: remote_catalog.search(SearchQuery()),
         "publish": lambda: remote_catalog.publish(local_record(root), dependencies=(leaf.ref,)),
     }
@@ -257,7 +257,6 @@ def test_graph_batch_downloads_sources_and_artifacts_into_a_fresh_reader(
     (home / "global.conf").write_text("core.scm:local_url=allow\n")
     reader = Catalog(configured_home(home), remote="catalog")
     graph = Graph(
-        reader,
         LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=reader)),
         dependencies=(parent.ref,),
     )
@@ -304,7 +303,7 @@ def test_partial_be_is_searchable_from_rtl_in_a_fresh_reader(
     found = reader.search(SearchQuery(namespace="soc", component="cpu", view="be"))
     assert tuple(record.ref for record in found) == (partial.ref,)
     assert found[0].ref.subcomponent == "alu"
-    assert found[0].ref.dependencies()[0].ref == rtl.ref
+    assert found[0].ref.graph().dependencies()[0].ref == rtl.ref
     assert found[0].ref.get().files["lib"].read_text() == "library from server"
 
 
@@ -318,14 +317,12 @@ def test_remote_latest_and_locked_graphs_survive_new_revisions(
     reader = Catalog(home)
     dependency = Ref.from_fields(**logical.to_dict(), catalog=reader)
     root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=reader))
-    graph = Graph(reader, root, dependencies=(dependency,))
+    graph = Graph(root, dependencies=(dependency,))
     lock = graph.create_lockfile(tmp_path / "old.lock")
     second = remote_catalog.publish(LocalRecord(logical, {"generation": 2}))
     assert dependency.get().ref == second.ref
-    assert Graph(reader, root, dependencies=(dependency,)).requirements == (second.ref,)
-    assert Graph(reader, root, dependencies=(dependency,), lockfile=lock).requirements == (
-        first.ref,
-    )
+    assert Graph(root, dependencies=(dependency,)).requirements == (second.ref,)
+    assert Graph(root, dependencies=(dependency,), lockfile=lock).requirements == (first.ref,)
     assert graph.get((dependency,))[0].ref == first.ref
     assert reader.search(SearchQuery()) == (second,)
     assert set(reader.search(SearchQuery(), all_revisions=True)) == {first, second}

@@ -7,11 +7,10 @@ from functools import cached_property
 from pathlib import Path
 
 from ..api.errors import InvalidPackage
-from ..api.graph import Dependency
 from ..api.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
 
-GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[Dependency, ...]]
+GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[tuple[Ref, Ref], ...]]
 
 
 class ResolvedConanGraph:
@@ -76,8 +75,8 @@ class ResolvedConanGraph:
             self._edges(records),
         )
 
-    def _edges(self, records: Mapping[str, LocalRecord | Record]) -> tuple[Dependency, ...]:
-        edges: set[Dependency] = set()
+    def _edges(self, records: Mapping[str, LocalRecord | Record]) -> tuple[tuple[Ref, Ref], ...]:
+        edges: set[tuple[Ref, Ref]] = set()
         packages = self._packages
         if self.native.root.ref is not None and self.native.root.ref.name is not None:
             packages = (self.native.root.conanfile, *packages)
@@ -87,8 +86,8 @@ class ResolvedConanGraph:
                 destination = str(target.ref)
                 if source not in records or destination not in records:
                     raise InvalidPackage("Conan graph contains an unknown endpoint")
-                edges.add(Dependency(records[source].ref, records[destination].ref))
-        return tuple(sorted(edges, key=lambda edge: (edge.source, edge.target)))
+                edges.add((records[source].ref, records[destination].ref))
+        return tuple(sorted(edges))
 
     @staticmethod
     def _validate_package(package: NativePackage) -> None:

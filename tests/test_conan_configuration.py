@@ -40,7 +40,7 @@ def test_configured_profile_defaults_are_used_without_rewriting(*, catalog: Cata
     assert profiles["host"].settings["build_type"] == "Debug"
     assert profiles["build"].settings["build_type"] == "Release"
     root = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
-    assert Graph(catalog, local_record(root)).records == (local_record(root),)
+    assert Graph(local_record(root)).records == (local_record(root),)
     root = catalog.publish(local_record(root))
     assert before == {path.name: path.read_bytes() for path in (home / "profiles").iterdir()}
     assert config.read_text() == (
@@ -56,7 +56,6 @@ def test_unconfigured_profile_is_reported_by_conan(tmp_path: Path, *, catalog: C
     catalog = Catalog(home)
     with pytest.raises(CatalogError, match="profile"):
         Graph(
-            catalog,
             local_record(
                 Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog))
             ),
@@ -90,4 +89,4 @@ def test_publish_without_remote_fails_before_preparing_inputs(tmp_path: Path) ->
             catalog._client.upload(str(record.ref))
     assert payload.calls == 0
     assert catalog.search(SearchQuery()) == ()
-    assert Graph(catalog, record).edges == ()
+    assert tuple(sorted(Graph(record).networkx.edges)) == ()

@@ -24,7 +24,7 @@ def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog)
     local = LocalRecord(
         Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog), {"root": True}
     )
-    graph = Graph(catalog, local, dependencies=(parent.ref, leaf.ref))
+    graph = Graph(local, dependencies=(parent.ref, leaf.ref))
     newer = catalog.publish(LocalRecord(leaf.ref.without_revision(), {"generation": 2}))
     with patch.object(
         catalog._client, "run", side_effect=AssertionError("Metadata must not call Conan")

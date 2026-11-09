@@ -11,7 +11,7 @@ import pytest
 from coreref._internal import recipe as recipe_module
 from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.graph import Dependency, Graph
+from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Record, Ref
 from examples.local_server import LocalServer
 
@@ -28,7 +28,7 @@ def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Cata
     assert graph.record == root
     assert type(graph.record) is Record
     assert graph.requirements == (leaf.ref,)
-    assert graph.edges == (Dependency(root.ref, leaf.ref),)
+    assert tuple(sorted(graph.networkx.edges)) == ((root.ref, leaf.ref),)
     assert graph.ordered_refs(root.ref.without_revision()) == (leaf.ref, root.ref)
     assert graph.ordered_records(root.ref) == (leaf, root)
     assert graph.networkx is graph.networkx
@@ -38,7 +38,7 @@ def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Cata
         assert graph.get((root.ref.without_revision(), leaf.ref)) == (root, leaf)
         assert graph.get_with_sources((root.ref,))[0] is graph.get((root.ref,))[0]
     with pytest.raises(InvalidPackage, match="requirements come from"):
-        Graph(catalog, root.ref, dependencies=(leaf.ref,))
+        Graph(root.ref, dependencies=(leaf.ref,))
     with pytest.raises(NotFound):
         Ref.from_fields("soc", "missing", "rtl", "default", "1.0", catalog=catalog).graph()
 

@@ -32,7 +32,6 @@ def test_materialize_uses_published_requirements_without_project_lock(
         dependencies=(rtl.ref,),
     )
     project = Graph(
-        catalog,
         local_record(
             Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
         ),
@@ -60,7 +59,7 @@ def test_materialize_uses_published_requirements_without_project_lock(
     assert not any(args[:2] == ("graph", "info") or args[0] == "lock" for args in operations)
 
 
-def test_direct_queries_do_not_resolve_dependency_graphs(
+def test_metadata_queries_do_not_resolve_dependency_graphs(
     monkeypatch: pytest.MonkeyPatch, *, catalog: Catalog
 ) -> None:
     connection = Catalog(catalog._client.home)
@@ -83,4 +82,5 @@ def test_direct_queries_do_not_resolve_dependency_graphs(
         return run(*arguments)
 
     monkeypatch.setattr(connection._client, "run", track)
-    assert macro.ref.dependencies() == (rtl,)
+    assert macro.ref.info() == macro
+    assert rtl.ref.info() == rtl

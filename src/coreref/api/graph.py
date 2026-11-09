@@ -23,29 +23,21 @@ else:
     _RefGraph = nx.DiGraph
 
 
-@dataclass(frozen=True, order=True)
-class Dependency:
-    """A source record requires an exact target record."""
-
-    source: Ref
-    target: Ref
-
-
 @dataclass(init=False)
 class Graph:
-    """One resolved local or published package with records, ordering and lockfiles."""
+    """Resolve a local or published package using the catalog bound to its root Ref."""
 
     _records: tuple[LocalRecord | Record, ...]
-    _dependencies: tuple[Dependency, ...]
+    _dependencies: tuple[tuple[Ref, Ref], ...]
 
     def __init__(
         self,
-        catalog: Catalog,
         record: LocalRecord | Ref,
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
+        catalog = record._catalog if isinstance(record, Ref) else record.ref._catalog
         self._catalog = catalog
         self._local: LocalPackage | None = None
         if isinstance(record, Ref):
@@ -58,7 +50,7 @@ class Graph:
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result
         self._requirements = tuple(
-            edge.target for edge in self._dependencies if edge.source == self._package.record.ref
+            target for source, target in self._dependencies if source == self._package.record.ref
         )
         self._orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = {}
 
@@ -79,10 +71,6 @@ class Graph:
             replace(record) if isinstance(record, LocalRecord) else record
             for record in self._records
         )
-
-    @property
-    def edges(self) -> tuple[Dependency, ...]:
-        return self._dependencies
 
     def info(self, ref: Ref) -> LocalRecord | Record:
         """Read a node from this snapshot, without recipe downloads or package installation."""
@@ -111,8 +99,8 @@ class Graph:
     @cached_property
     def _neighbors(self) -> dict[Ref, tuple[Ref, ...]]:
         neighbors: dict[Ref, list[Ref]] = {record.ref: [] for record in self._records}
-        for edge in self._dependencies:
-            neighbors[edge.source].append(edge.target)
+        for source, target in self._dependencies:
+            neighbors[source].append(target)
         return {ref: tuple(targets) for ref, targets in neighbors.items()}
 
     def _publish(self) -> InstalledRecord:
@@ -179,7 +167,7 @@ class Graph:
         """Build topology once; use .copy() when a mutable working graph is needed."""
         graph: nx.DiGraph[Ref] = nx.DiGraph()
         graph.add_nodes_from(record.ref for record in self._records)
-        graph.add_edges_from((edge.source, edge.target) for edge in self._dependencies)
+        graph.add_edges_from(self._dependencies)
         nx.freeze(graph)
         return graph
 
@@ -226,4 +214,4 @@ class Graph:
         )
 
 
-__all__ = ["Dependency", "Graph"]
+__all__ = ["Graph"]

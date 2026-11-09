@@ -45,9 +45,10 @@ def test_metadata_operations_leave_artifacts_on_the_server(
         assert reader.search(SearchQuery()) == tuple(
             sorted((leaf, parent), key=lambda item: item.ref)
         )
-        assert Ref.from_fields(**parent.ref.to_dict(), catalog=reader).dependencies() == (metadata,)
+        assert Ref.from_fields(**parent.ref.to_dict(), catalog=reader).graph().dependencies() == (
+            metadata,
+        )
         graph = Graph(
-            reader,
             LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=reader)),
             dependencies=(parent.ref,),
         )
@@ -109,9 +110,8 @@ def test_source_presence_and_source_readiness_are_distinct(
         LocalRecord(Ref.from_fields("soc", "empty", "be", "lib-lef", "1.0", catalog=catalog))
     )
     assert not empty.has_source and empty.source is None and empty.sources_ready
-    restored = Record.from_json(json.dumps(fetched.to_dict()), catalog=catalog)
-    assert isinstance(restored, InstalledRecord) and restored.sources_ready
-    assert restored.source == fetched.source
+    output = json.loads(json.dumps(fetched.to_dict()))
+    assert output["source"] == str(fetched.source)
 
 
 def test_missing_package_file_is_not_reported_as_installed(
@@ -163,9 +163,6 @@ def test_installation_reuses_the_immutable_payload(catalog: Catalog) -> None:
     ready = InstalledRecord(metadata)
     assert payload.calls == 1
     assert ready.payload is metadata.payload
-    malformed = metadata.to_dict() | {"source": "/source"}
-    with pytest.raises(ValueError, match="must include its files mapping"):
-        Record.from_json(json.dumps(malformed), catalog=catalog)
 
 
 def test_incomplete_package_is_rejected_before_upload(

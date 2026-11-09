@@ -68,8 +68,8 @@ def graph_json(result: Graph) -> str:
             for record in result.records
         ],
         "dependencies": [
-            {"source": edge.source.to_dict(), "target": edge.target.to_dict()}
-            for edge in result.edges
+            {"source": source.to_dict(), "target": target.to_dict()}
+            for source, target in sorted(result.networkx.edges)
         ],
     }
     return json.dumps(value, sort_keys=True, separators=(",", ":"))

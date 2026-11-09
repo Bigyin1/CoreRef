@@ -6,23 +6,8 @@ import pytest
 
 from coreref.api.catalog import Catalog
 from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.records import Record, Ref
 from tests.helpers import local_record, release, resolve_published, run
-
-
-def test_criteria_are_detached() -> None:
-    query = SearchQuery(component="", version=" ", view="", type="", namespace="")
-    criteria = query.criteria()
-    assert criteria == {"component": "", "version": " ", "view": "", "type": "", "namespace": ""}
-    criteria.clear()
-    assert query.criteria() == {
-        "component": "",
-        "version": " ",
-        "view": "",
-        "type": "",
-        "namespace": "",
-    }
-    assert SearchQuery().criteria() == {}
 
 
 @pytest.mark.parametrize(
@@ -144,21 +129,4 @@ def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catal
     ],
 )
 def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str | None) -> None:
-    assert query.conan_pattern(all_revisions=True) == pattern
-
-
-def test_selection_supports_local_and_stored_records_without_mutating_inputs(
-    catalog: Catalog,
-) -> None:
-    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0", catalog=catalog))
-    leaf = Record(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0", catalog=catalog))
-    macro = Record(Ref.from_fields("soc", "leaf", "be", "lib-lef", "4.0", catalog=catalog))
-    records: list[LocalRecord | Record] = [local, macro, leaf]
-    query = SearchQuery(namespace="soc", view="rtl")
-    selected = query.select(iter(records))
-    assert records == [local, macro, leaf]
-    assert selected == (leaf, local)
-    assert selected[0] is leaf and selected[1] is local
-    records.clear()
-    assert selected == (leaf, local)
-    assert SearchQuery(version="2.0").select(selected) == ()
+    assert query._conan_pattern(all_revisions=True) == pattern

@@ -74,7 +74,6 @@ classDiagram
 | `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None, catalog)` | Создание из отдельных координат |
 | `ref.info()` | Метаданные `Record` |
 | `ref.get()` / `ref.get_with_sources()` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
-| `ref.dependency_refs(filters=None)` / `ref.dependencies(filters=None)` | Прямые требования как Ref / Record |
 | `ref.graph(*, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
 
 `SearchQuery` задаёт точные AND-фильтры: `namespace`, `component`, `subcomponent`,
@@ -83,7 +82,8 @@ classDiagram
 Остальные поля не принимают glob-шаблоны.
 `SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
 сохраняет namespace/component/subcomponent, а версию и revision выбирает независимо.
-`matches_ref`, `matches` и `select` позволяют фильтровать уже полученные данные.
+`matches_ref` и `matches` проверяют уже полученные ссылки и записи.
+Фильтры зависимостей задаются в Graph.
 
 `query` обязателен; поиск без ограничений — `catalog.search(SearchQuery())`.
 
@@ -131,18 +131,22 @@ Graph фиксирует выбранные revisions при разрешени�
 Payload принимает JSON или объект с `to_json() -> str` (`JSONSerializable`).
 Его схему, списки RTL-файлов, NFS-пути и их проверку определяет приложение.
 `LocalRecord.to_json()` подготавливает метаданные пакета;
-`Record.to_dict()` и `Record.from_json(data, *, catalog)` предназначены для снимков.
+`Record.to_dict()` предоставляет данные для вывода в CLI и пользовательской сериализации.
+Метаданные скачанных пакетов читает внутренняя реализация SDK.
 
 ## Graph и Workspace
 
-`Graph(catalog, record, *, dependencies=(), lockfile=None)` сразу
-разрешает локальный `LocalRecord` или опубликованный `Ref`. Публиковать локальный корень не требуется.
+`Graph(record, *, dependencies=(), lockfile=None)` сразу
+разрешает локальный `LocalRecord` или опубликованный `Ref`. Каталог берётся из корневого Ref;
+повторно передавать его не нужно. Публиковать локальный корень не требуется.
+Прямые зависимости опубликованного пакета доступны через `ref.graph().dependencies()`.
+Связи снимка можно читать через `graph.networkx.edges`.
 Стандартный deps.yaml читает DepsFile; собственные форматы и дополнительные зависимости
 по-прежнему может определять приложение.
 
 | API Graph | Результат |
 |---|---|
-| `record`, `records`, `edges`, `requirements` | Корень, все метаданные, связи `Dependency(source, target)`, прямые Ref корня |
+| `record`, `records`, `requirements` | Корень, все метаданные и прямые Ref корня |
 | `info(ref)` | Метаданные выбранного узла без I/O |
 | `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
 | `ordered_refs(root, *, stop_at=())`, `ordered_records(...)` | Обход с корнем; у stop_at не обходятся зависимости, сами узлы включены |

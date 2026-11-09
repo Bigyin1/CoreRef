@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 from frozendict import deepfreeze, frozendict
 
 from ..api.errors import Conflict, InvalidPackage, NotFound
-from ..api.query import SearchQuery
 from ..api.records import InstalledRecord, LocalRecord, Record, Ref
 from .graph import GraphData, ResolvedConanGraph
 from .recipe import ConsumerRecipe, LocalRecipe, StoredRecipe
@@ -81,23 +80,6 @@ class StoredPackage:
         # Later fetches must reuse Conan's choice, including an older locked root.
         self._resolved[self.ref.without_revision()] = record.ref
         return PackageGraph(record, graph, packages={record.ref: self})
-
-    def dependencies(self, query: SearchQuery) -> tuple[Record, ...]:
-        return tuple(self._load(str(ref)).record for ref in self.dependency_refs(query))
-
-    def dependency_refs(self, query: SearchQuery) -> tuple[Ref, ...]:
-        refs = set()
-        logical_query = replace(query, revision=None)
-        for reference in dict.fromkeys(self.recipe().requirements):
-            ref = from_conan_reference(reference, catalog=self._catalog)
-            # Floating requirements need Conan's latest choice before filtering RREV.
-            prefilter = logical_query if ref.revision is None else query
-            if not prefilter.matches_ref(ref):
-                continue
-            resolved = self._resolve_ref(ref)
-            if query.matches_ref(resolved):
-                refs.add(resolved)
-        return tuple(sorted(refs))
 
     def _get(self, *, with_sources: bool) -> InstalledRecord:
         if self._client.editable(str(self.ref)) is not None:

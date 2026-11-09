@@ -13,7 +13,6 @@ from frozendict import deepfreeze, frozendict
 if TYPE_CHECKING:
     from .catalog import Catalog
     from .graph import Graph
-    from .query import SearchQuery
 
 
 JSON: TypeAlias = (
@@ -200,21 +199,7 @@ class Ref:
         """Resolve a registry or workspace root and its full tree without installing files."""
         from .graph import Graph
 
-        return Graph(self._catalog, self, lockfile=lockfile)
-
-    def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
-        """Read immediate dependencies, optionally filtered by their coordinates."""
-        from .query import SearchQuery
-
-        query = SearchQuery() if filters is None else filters
-        return self._catalog._package(self).dependencies(query)
-
-    def dependency_refs(self, filters: SearchQuery | None = None) -> tuple[Ref, ...]:
-        """Read exact direct requirements without fetching their records or package contents."""
-        from .query import SearchQuery
-
-        query = SearchQuery() if filters is None else filters
-        return self._catalog._package(self).dependency_refs(query)
+        return Graph(self, lockfile=lockfile)
 
 
 @dataclass
@@ -300,34 +285,6 @@ class Record:
             "file_names": self.file_names,
             "has_source": self.has_source,
         }
-
-    @staticmethod
-    def from_json(payload: str, *, catalog: Catalog) -> Record:
-        """Restore a metadata or installed snapshot, according to its fields."""
-        value = json.loads(payload)
-        if not isinstance(value, dict):
-            raise ValueError("Record must be a JSON object")
-        if "scm" in value:
-            raise ValueError("Git source must be stored in Conan SCM metadata")
-        record = Record(
-            Ref.from_fields(**value["ref"], catalog=catalog),
-            value["payload"],
-            file_names=tuple(value.get("file_names", ())),
-            has_source=value.get("has_source", False),
-        )
-        if "files" not in value:
-            if "source" in value:
-                raise ValueError("An installed snapshot must include its files mapping")
-            return record
-        files = value["files"]
-        if not isinstance(files, dict):
-            raise ValueError("Snapshot files must be a path dictionary")
-        return InstalledRecord(
-            record,
-            source=Path(value["source"]) if value.get("source") else None,
-            files={name: Path(path) for name, path in files.items()},
-            is_editable=value.get("is_editable", False),
-        )
 
 
 class InstalledRecord(Record):

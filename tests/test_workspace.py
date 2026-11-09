@@ -12,7 +12,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage
 from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
-from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.records import InstalledRecord, LocalRecord, Ref
 from coreref.api.workspace import Workspace
 
 pytestmark = pytest.mark.conan_remote
@@ -59,8 +59,8 @@ def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     assert installed.is_editable and installed.source == source
     assert not installed.source.is_relative_to(catalog.cache_directory)
     assert rtl.ref.get_with_sources().source == source
-    restored = Record.from_json(json.dumps(installed.to_dict()), catalog=catalog)
-    assert isinstance(restored, InstalledRecord) and restored.is_editable
+    output = json.loads(json.dumps(installed.to_dict()))
+    assert output["is_editable"] is True and output["source"] == str(source)
     with pytest.raises(AttributeError):
         installed.is_editable = False  # type: ignore[misc]
     (source / "cpu.sv").write_text("working version")
@@ -134,11 +134,11 @@ def test_workspace_consumer_can_save_and_reuse_native_lockfile(
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
     local = LocalRecord(Ref("soc.top.rtl.default/1.0", catalog=catalog))
-    graph = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),))
+    graph = Graph(local, dependencies=(rtl.ref.without_revision(),))
     lock = graph.create_lockfile(tmp_path / "project.lock")
-    locked = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),), lockfile=lock)
+    locked = Graph(local, dependencies=(rtl.ref.without_revision(),), lockfile=lock)
     assert locked.get_with_sources()[0].source == source
-    assert locked.edges == graph.edges
+    assert tuple(sorted(locked.networkx.edges)) == tuple(sorted(graph.networkx.edges))
 
 
 def test_open_without_repository_source_is_rejected(catalog: Catalog, tmp_path: Path) -> None:

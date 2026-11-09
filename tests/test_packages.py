@@ -13,7 +13,6 @@ from dulwich.repo import Repo
 from coreref._internal.recipe import LocalRecipe, StoredRecipe
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage, NotFound
-from coreref.api.graph import Dependency
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Record, Ref
 from tests.helpers import local_record, resolve_published
@@ -45,8 +44,10 @@ def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path
     assert tuple(record.files) == ("timing/cpu.lib",)
     assert record.source is None
     assert record.ref.get() == record
-    assert record.ref.dependencies() == (rtl,)
-    assert resolve_published(packages, record.ref).edges == (Dependency(record.ref, rtl.ref),)
+    assert record.ref.graph().dependencies() == (rtl,)
+    assert tuple(sorted(resolve_published(packages, record.ref).networkx.edges)) == (
+        (record.ref, rtl.ref),
+    )
     artifact.unlink()
     content = record.ref.get().files["timing/cpu.lib"]
     assert content.read_bytes() == b"library(cpu) {}\n\x00"
@@ -76,9 +77,8 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
     assert fetched.source.is_relative_to(packages._client.home)
     shutil.rmtree(checkout)
     assert record.ref.get_with_sources().source == fetched.source
-    assert (
-        Record.from_json(json.dumps(record.to_dict(), allow_nan=False), catalog=packages) == record
-    )
+    assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["has_source"] is True
+    assert "source" not in record.to_dict()
 
 
 def test_pinned_source_round_trip_uses_conan_scm(checkout: Path, *, catalog: Catalog) -> None:
@@ -214,7 +214,7 @@ def test_requirements_and_scm_share_one_exported_conandata(
     assert data["requires"][0] == str(dependency.ref)
     assert data["scm"]["commit"] == _commit(checkout)
     assert recipe.has_source
-    assert parent.ref.dependencies() == (dependency,)
+    assert parent.ref.graph().dependencies() == (dependency,)
     assert "requires =" not in (recipe.directory / "conanfile.py").read_text()
     assert parent.ref.get_with_sources().source is not None
 
