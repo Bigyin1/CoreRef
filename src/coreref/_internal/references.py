@@ -8,12 +8,10 @@ from ..api.errors import InvalidPackage
 from ..api.records import Ref
 
 _ALPHANUMERIC = RegexBuilder().any_of().range("a", "z").range("0", "9").end()
-_COMPONENT_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).char("-").end()
 _NAME_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).any_of_chars("_-").end()
 _VERSION_START = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).char("_").end()
 _VERSION_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).any_of_chars("_+.-").end()
 
-COMPONENT_PART = RegexBuilder().one_or_more().subexpression(_COMPONENT_CHARACTER).to_regex()
 NAME_PART = RegexBuilder().one_or_more().subexpression(_NAME_CHARACTER).to_regex()
 VERSION = (
     RegexBuilder()
@@ -33,10 +31,6 @@ def to_conan_reference(ref: Ref) -> str:
         NAME_PART.fullmatch(value) for value in (ref.namespace, ref.component, ref.view, ref.type)
     ):
         raise InvalidPackage("Conan coordinates require lowercase tokens without dots or slashes")
-    if not COMPONENT_PART.fullmatch(ref.component):
-        raise InvalidPackage(
-            "Underscore separates component from subcomponent; use hyphens in component"
-        )
     if ref.subcomponent is not None and not NAME_PART.fullmatch(ref.subcomponent):
         raise InvalidPackage("Subcomponent must be a nonempty lowercase token")
     name = ref.package_name

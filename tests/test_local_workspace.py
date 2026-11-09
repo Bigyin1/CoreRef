@@ -235,3 +235,20 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     installed = catalog.get_with_sources(document.record.ref)
     assert installed.source == source and installed.payload == {"edited": True}
     assert not (directory / "deps.yml").exists()
+
+
+def test_dotted_part_with_underscore_component_is_native_editable(
+    catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "cpu source"
+    directory.mkdir()
+    ref = Ref("soc.cpu_core.alu.rtl.default/1.0")
+    document = DepsFile.create(catalog, ref, directory / "deps.yml")
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    document.add_to_workspace(workspace)
+    assert workspace.members == {ref: directory}
+    monkeypatch.chdir(workspace.path.parent)
+    graph = Graph(catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(ref,))
+    installed = graph.get_with_sources()[0]
+    assert installed.ref == ref and installed.source == directory
+    assert installed.is_editable

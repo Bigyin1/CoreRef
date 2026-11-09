@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from typing_extensions import Self
 
-from .._internal.references import COMPONENT_PART, NAME_PART, REVISION, VERSION
+from .._internal.references import NAME_PART, REVISION, VERSION
 from .records import LocalRecord, Record, Ref
 
 
@@ -45,7 +45,7 @@ class SearchQuery:
 
     def _conan_pattern(self, *, all_revisions: bool = False) -> str | None:
         """Narrow the Conan search; matches_ref applies exact filters to the results."""
-        patterns = {"component": COMPONENT_PART, "version": VERSION, "revision": REVISION}
+        patterns = {"version": VERSION, "revision": REVISION}
         if any(
             value is not None and not patterns.get(field, NAME_PART).fullmatch(value)
             for field, value in self._criteria().items()
@@ -86,7 +86,7 @@ class SearchQuery:
         if self.subcomponent is None:
             return self.component or "*"
         if self.subcomponent != "*":
-            return f"{self.component or '*'}_{self.subcomponent}"
+            return f"{self.component or '*'}.{self.subcomponent}"
         if self.component is None:
             return "*"
         return f"{self.component}*"

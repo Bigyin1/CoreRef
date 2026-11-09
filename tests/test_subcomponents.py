@@ -19,7 +19,7 @@ from coreref.api.records import LocalRecord, Record, Ref
 @pytest.mark.parametrize("subcomponent", [None, "alu", "cluster_0"])
 def test_ref_and_record_roundtrip(subcomponent: str | None) -> None:
     ref = Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0", subcomponent=subcomponent)
-    component = "cpu" if subcomponent is None else f"cpu_{subcomponent}"
+    component = "cpu" if subcomponent is None else f"cpu.{subcomponent}"
     assert str(ref) == f"soc.{component}.be.lib-lef/1.0"
     assert from_conan_reference(to_conan_reference(ref) + "#revision").without_revision() == ref
     assert Ref.from_fields(**ref.to_dict()) == ref
@@ -44,23 +44,25 @@ def test_parts_reject_lossy_conan_names(subcomponent: str) -> None:
         to_conan_reference(ref)
 
 
-def test_underscore_is_reserved_as_the_component_separator() -> None:
-    with pytest.raises(InvalidPackage, match="Underscore"):
-        to_conan_reference(Ref.from_fields("soc", "cpu_alu", "be", "lib-lef", "1.0"))
-    for value in ("soc.cpu_.be.lib-lef/1.0", "soc._alu.be.lib-lef/1.0"):
-        with pytest.raises(InvalidPackage):
-            from_conan_reference(value)
+@pytest.mark.parametrize("component", ["cpu_core", "cpu_alu_cluster", "cpu__core", "cpu_"])
+def test_underscores_are_literal_component_characters(component: str) -> None:
+    ref = Ref(f"soc.{component}.be.lib-lef/1.0")
+    assert ref.component == component
+    assert ref.subcomponent is None
+    part = Ref.from_fields(**(ref.to_dict() | {"subcomponent": "cluster_0"}))
+    assert str(part) == f"soc.{component}.cluster_0.be.lib-lef/1.0"
+    assert Ref(str(part)) == part
 
 
 @pytest.mark.parametrize(
     "query,pattern",
     [
-        (SearchQuery(component="cpu", subcomponent="alu"), "*.cpu_alu.*.*/*#*"),
-        (SearchQuery(subcomponent="alu"), "*.*_alu.*.*/*#*"),
+        (SearchQuery(component="cpu", subcomponent="alu"), "*.cpu.alu.*.*/*#*"),
+        (SearchQuery(subcomponent="alu"), "*.*.alu.*.*/*#*"),
         (SearchQuery(component="cpu"), "*.cpu*.*.*/*#*"),
         (SearchQuery(component="cpu", subcomponent=None), "*.cpu.*.*/*#*"),
         (SearchQuery(subcomponent=None), "*.*.*.*/*#*"),
-        (SearchQuery(component="cpu_alu"), None),
+        (SearchQuery(component="cpu_alu"), "*.cpu_alu*.*.*/*#*"),
         (SearchQuery(subcomponent=""), None),
         (SearchQuery(subcomponent="alu*"), None),
     ],
@@ -69,23 +71,27 @@ def test_search_patterns(query: SearchQuery, pattern: str | None) -> None:
     assert query._conan_pattern(all_revisions=True) == pattern
 
 
-def test_component_search_includes_parts_but_excludes_prefix_neighbours(catalog: Catalog) -> None:
-    base = Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0")
+@pytest.mark.parametrize("component", ["cpu", "cpu_core"])
+def test_component_search_includes_parts_but_excludes_prefix_neighbours(
+    catalog: Catalog, component: str
+) -> None:
+    base = Ref.from_fields("soc", component, "be", "lib-lef", "1.0")
     records = tuple(
         catalog.publish(LocalRecord(ref))
         for ref in (
             base,
             Ref.from_fields(**(base.to_dict() | {"subcomponent": "alu"})),
             Ref.from_fields(**(base.to_dict() | {"subcomponent": "cache"})),
-            Ref.from_fields(**(base.to_dict() | {"component": "cpu-extra"})),
+            Ref.from_fields(**(base.to_dict() | {"component": f"{component}-extra"})),
+            Ref.from_fields(**(base.to_dict() | {"component": f"{component}_alu"})),
         )
     )
     with patch.object(
         catalog._client, "download_recipe", wraps=catalog._client.download_recipe
     ) as download:
-        assert catalog.search(SearchQuery(component="cpu")) == records[:3]
+        assert catalog.search(SearchQuery(component=component)) == records[:3]
         assert download.call_count == 3
-    assert catalog.search(SearchQuery(component="cpu", subcomponent="alu")) == (records[1],)
+    assert catalog.search(SearchQuery(component=component, subcomponent="alu")) == (records[1],)
     assert catalog.search(SearchQuery(subcomponent="cache")) == (records[2],)
     assert tuple(
         record for record in records if SearchQuery(subcomponent="alu").matches(record)
@@ -93,11 +99,11 @@ def test_component_search_includes_parts_but_excludes_prefix_neighbours(catalog:
     with patch.object(
         catalog._client, "download_recipe", wraps=catalog._client.download_recipe
     ) as download:
-        assert catalog.search(SearchQuery(component="cpu", subcomponent=None)) == (records[0],)
+        assert catalog.search(SearchQuery(component=component, subcomponent=None)) == (records[0],)
         assert download.call_count == 1
     assert tuple(
         record for record in records if SearchQuery(subcomponent=None).matches(record)
-    ) == (records[0], records[3])
+    ) == (records[0], records[3], records[4])
 
 
 def test_graph_lockfile_and_batch_files_keep_parts_distinct(

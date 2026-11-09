@@ -31,15 +31,16 @@ class Ref:
 
         try:
             name, self._version = reference.split("#", 1)[0].split("/")
-            self._namespace, component, self._view, self._type = name.split(".")
-            self._component, separator, subcomponent = component.partition("_")
-            self._subcomponent = subcomponent if separator else None
+            self._namespace, self._component, *parts, self._view, self._type = name.split(".")
+            if len(parts) > 1:
+                raise ValueError("Expected four or five name fields")
+            self._subcomponent = parts[0] if parts else None
             self._revision = reference.partition("#")[2] or None
             if to_conan_reference(self) != reference:
                 raise ValueError("Noncanonical coordinates")
         except (ValueError, InvalidPackage) as error:
             raise InvalidPackage(
-                "Expected namespace.component[_subcomponent].view.type/version[#revision], "
+                "Expected namespace.component[.subcomponent].view.type/version[#revision], "
                 f"got {reference!r}"
             ) from error
 
@@ -58,15 +59,16 @@ class Ref:
         """Construct from separate coordinates using the same canonical text parser."""
         from .errors import InvalidPackage
 
-        if "_" in component:
-            raise InvalidPackage(
-                "Underscore separates component from subcomponent; use hyphens in component"
-            )
-        part = component if subcomponent is None else f"{component}_{subcomponent}"
-        reference = f"{namespace}.{part}.{view}.{type}/{version}"
+        reference = f"{namespace}.{component}"
+        if subcomponent is not None:
+            reference = f"{reference}.{subcomponent}"
+        reference = f"{reference}.{view}.{type}/{version}"
         if revision is not None:
             reference = f"{reference}#{revision}"
-        return cls(reference)
+        ref = cls(reference)
+        if ref._identity != (namespace, component, view, type, version, subcomponent, revision):
+            raise InvalidPackage("Reference separators must not occur within coordinate fields")
+        return ref
 
     @property
     def namespace(self) -> str:
@@ -124,7 +126,7 @@ class Ref:
         """The namespace, component and representation without a version."""
         component = self.component
         if self.subcomponent is not None:
-            component = f"{component}_{self.subcomponent}"
+            component = f"{component}.{self.subcomponent}"
         return f"{self.namespace}.{component}.{self.view}.{self.type}"
 
     def __str__(self) -> str:

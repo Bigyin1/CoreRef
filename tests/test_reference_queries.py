@@ -17,7 +17,7 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
     logical = Ref("soc.cpu.rtl.default/1.0")
     first = catalog.publish(LocalRecord(logical, {"generation": 1}))
     second = catalog.publish(LocalRecord(logical, {"generation": 2}))
-    part = catalog.publish(LocalRecord(Ref("soc.cpu_alu.be.lib-lef/1.0")))
+    part = catalog.publish(LocalRecord(Ref("soc.cpu.alu.be.lib-lef/1.0")))
     reader = Catalog(conan_server.configure(tmp_path / "reader"))
     with (
         patch.object(reader._client, "download_recipe", side_effect=AssertionError("Metadata")),
