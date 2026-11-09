@@ -17,7 +17,6 @@ from .records import InstalledRecord, LocalRecord, Record, Ref
 if TYPE_CHECKING:
     from .._internal.package import LocalPackage
     from .catalog import Catalog
-    from .workspace import Workspace
 
     _RefGraph = nx.DiGraph[Ref]
 else:
@@ -46,17 +45,15 @@ class Graph:
         *,
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
-        workspace: Workspace | None = None,
     ) -> None:
         self._catalog = catalog
         self._local: LocalPackage | None = None
-        directory = workspace.path.parent if workspace is not None else None
         if isinstance(record, Ref):
             if dependencies:
                 raise InvalidPackage("Published graph requirements come from its recipe")
-            self._package = catalog._package(record).resolved_graph(lockfile, directory)
+            self._package = catalog._package(record).resolved_graph(lockfile)
         else:
-            self._local = catalog._local_package(record, dependencies, lockfile, directory)
+            self._local = catalog._local_package(record, dependencies, lockfile)
             self._package = self._local.resolved
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result
@@ -141,21 +138,26 @@ class Graph:
         self._lockfile = self._package.create_lockfile(output)
         return self._lockfile
 
-    def get(self, refs: tuple[Ref, ...] | None = None) -> tuple[InstalledRecord, ...]:
-        """Fetch selected files, or all published nodes in dependency-first order when omitted."""
-        return self._get(refs, with_sources=False)
+    def get(
+        self,
+        refs: tuple[Ref, ...] | None = None,
+        *,
+        filters: SearchQuery | None = None,
+    ) -> tuple[InstalledRecord, ...]:
+        """Fetch selected files, or all registry/editable nodes in dependency-first order."""
+        return self._get(refs, filters, with_sources=False)
 
-    def get_with_sources(self, refs: tuple[Ref, ...] | None = None) -> tuple[InstalledRecord, ...]:
-        """Fetch files and sources; omitted refs select all published nodes, leaves first."""
-        return self._get(refs, with_sources=True)
-
-    @property
-    def editables(self) -> tuple[InstalledRecord, ...]:
-        """Editable package paths captured from the native Conan graph."""
-        return self._package.editables
+    def get_with_sources(
+        self,
+        refs: tuple[Ref, ...] | None = None,
+        *,
+        filters: SearchQuery | None = None,
+    ) -> tuple[InstalledRecord, ...]:
+        """Fetch files and sources; omitted refs select registry/editable nodes, leaves first."""
+        return self._get(refs, filters, with_sources=True)
 
     def _get(
-        self, refs: tuple[Ref, ...] | None, *, with_sources: bool
+        self, refs: tuple[Ref, ...] | None, filters: SearchQuery | None, *, with_sources: bool
     ) -> tuple[InstalledRecord, ...]:
         if refs is None:
             refs = tuple(
@@ -163,6 +165,8 @@ class Graph:
                 for record in self.ordered_records(self.record.ref)
                 if isinstance(record, Record)
             )
+        if filters is not None:
+            refs = tuple(ref for ref in refs if filters.matches(self.info(ref)))
         return self._package.get_with_sources(refs) if with_sources else self._package.get(refs)
 
     @property

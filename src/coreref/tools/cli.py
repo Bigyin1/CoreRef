@@ -19,7 +19,7 @@ from .deps import DepsFile
 ProjectDir = Annotated[Path, typer.Option(help="Project containing conanws.yml.")]
 Manifest = Annotated[Path, typer.Option("--file", "-f", help="Dependency YAML file.")]
 SourceDirectory = Annotated[
-    Path | None, typer.Option(help="Git copy parent directory; defaults beside the project.")
+    Path | None, typer.Option(help="Repository destination; defaults beside the project.")
 ]
 
 
@@ -36,26 +36,40 @@ class _WorkspaceCommands:
     def __init__(self, catalog_factory: Callable[[], Catalog]) -> None:
         self._catalog_factory = catalog_factory
 
-    def add(
-        self, ref: str, project_dir: ProjectDir = Path("."), directory: SourceDirectory = None
-    ) -> None:
-        """Obtain a Git copy and register it as editable; preserve existing local edits."""
+    def init(self, project_dir: ProjectDir = Path(".")) -> None:
+        """Initialize a native workspace."""
         with _command_errors():
-            catalog = self._catalog_factory()
-            workspace = Workspace(catalog, project_dir / "conanws.yml")
-            record = workspace.add(Ref(ref, catalog=catalog), directory=directory)
-            typer.echo(f"{record.ref}\t{record.source}")
+            Workspace(self._catalog_factory(), project_dir / "conanws.yml").init()
 
-    def remove(self, ref: str, project_dir: ProjectDir = Path(".")) -> None:
-        """Unregister a package, keeping its Git copy and generated files."""
+    def add(self, directory: Path, project_dir: ProjectDir = Path(".")) -> None:
+        """Register an existing package directory with Conan."""
+        with _command_errors():
+            Workspace(self._catalog_factory(), project_dir / "conanws.yml").add(directory)
+            typer.echo(directory.expanduser().resolve())
+
+    def open(
+        self,
+        ref: str,
+        project_dir: ProjectDir = Path("."),
+        directory: SourceDirectory = None,
+    ) -> None:
+        """Obtain a package repository and register it in the workspace."""
         with _command_errors():
             catalog = self._catalog_factory()
-            workspace = Workspace(catalog, project_dir / "conanws.yml")
-            workspace.remove(Ref(ref, catalog=catalog))
-            typer.echo(f"Removed {ref}")
+            path = Workspace(catalog, project_dir / "conanws.yml").open(
+                Ref(ref, catalog=catalog),
+                directory=directory,
+            )
+            typer.echo(path)
+
+    def remove(self, directory: Path, project_dir: ProjectDir = Path(".")) -> None:
+        """Unregister a directory while preserving its contents."""
+        with _command_errors():
+            Workspace(self._catalog_factory(), project_dir / "conanws.yml").remove(directory)
+            typer.echo(f"Removed {directory}")
 
     def list_members(self, project_dir: ProjectDir = Path(".")) -> None:
-        """List exact base revisions and paths of registered editable packages."""
+        """List package references and paths of registered editable packages."""
         with _command_errors():
             workspace = Workspace(self._catalog_factory(), project_dir / "conanws.yml")
             for ref, path in sorted(workspace.members.items()):
@@ -70,9 +84,11 @@ def create_workspace_app(*, catalog_factory: Callable[[], Catalog] = Catalog) ->
     """
     commands = _WorkspaceCommands(catalog_factory)
     app = typer.Typer(
-        no_args_is_help=True, add_completion=False, help="Manage editable Git dependencies."
+        no_args_is_help=True, add_completion=False, help="Manage editable dependencies."
     )
     app.command("add")(commands.add)
+    app.command("init")(commands.init)
+    app.command("open")(commands.open)
     app.command("remove")(commands.remove)
     app.command("list")(commands.list_members)
     return app

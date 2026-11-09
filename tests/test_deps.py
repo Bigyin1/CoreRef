@@ -171,17 +171,19 @@ def test_failed_lock_refresh_preserves_previous_file(catalog: Catalog, tmp_path:
 
 
 @pytest.mark.conan_remote
-def test_yaml_graph_uses_its_native_workspace_from_another_directory(
-    catalog: Catalog, scm_package: InstalledRecord, tmp_path: Path
+def test_yaml_graph_uses_native_workspace_from_current_directory(
+    catalog: Catalog, scm_package: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     document = DepsFile.create(
         catalog, Ref("soc.top.rtl.default/1.0", catalog=catalog), tmp_path / "project/deps.yaml"
     )
     document.add(scm_package.ref)
     document.save()
-    editable = Workspace(catalog, document.path.parent / "conanws.yml").add(scm_package.ref)
+    source = Workspace(catalog, document.path.parent / "conanws.yml").open(scm_package.ref)
+    monkeypatch.chdir(document.path.parent)
     graph = document.resolve()
-    assert graph.editables == (editable,)
+    editable = graph.get_with_sources()[0]
+    assert editable.is_editable and editable.source == source
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected install")):
         assert graph.get_with_sources() == (editable,)
 

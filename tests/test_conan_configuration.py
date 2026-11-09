@@ -69,7 +69,7 @@ def test_multiple_enabled_remotes_require_an_explicit_selection(tmp_path: Path) 
     connection = Catalog(home)
     connection._client.run("remote", "add", "first", "http://127.0.0.1:1")
     connection._client.run("remote", "add", "second", "http://127.0.0.1:2")
-    with pytest.raises(CatalogError, match="Multiple enabled Conan remotes"):
+    with pytest.raises(CatalogError, match="Multiple enabled registry remotes"):
         Catalog(home)
     selected = Catalog(home, remote="second")
     assert selected._client.remote == "second"
@@ -84,9 +84,9 @@ def test_publish_without_remote_fails_before_preparing_inputs(tmp_path: Path) ->
     with patch.object(
         catalog._client, "run", side_effect=AssertionError("Unexpected Conan command")
     ):
-        with pytest.raises(CatalogError, match="requires a configured Conan remote"):
+        with pytest.raises(CatalogError, match="requires a configured registry remote"):
             catalog.publish(record)
-        with pytest.raises(CatalogError, match="requires a configured Conan remote"):
+        with pytest.raises(CatalogError, match="requires a configured registry remote"):
             catalog._client.upload(str(record.ref))
     assert payload.calls == 0
     assert catalog.search(SearchQuery()) == ()

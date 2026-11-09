@@ -1,22 +1,18 @@
-"""Native Conan workspaces select local recipes and retain untracked developer files."""
+"""Native workspaces select working copies without SDK sidecars or path overlays."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import cast
 from unittest.mock import patch
 
 import pytest
-import yaml  # type: ignore[import-untyped]
-from dulwich import porcelain
-from dulwich.repo import Repo
 
-from coreref._internal.recipe import ConsumerRecipe, EditableRecipe
-from coreref._internal.types import NativeGraph
 from coreref.api.catalog import Catalog
-from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from coreref.api.errors import CatalogError, Conflict, InvalidPackage
 from coreref.api.graph import Graph
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.query import SearchQuery
+from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
 from coreref.api.workspace import Workspace
 
 pytestmark = pytest.mark.conan_remote
@@ -26,133 +22,87 @@ pytestmark = pytest.mark.conan_remote
 def rtl(catalog: Catalog, checkout: Path, git_origin: Path) -> InstalledRecord:
     assert git_origin.is_dir()
     return catalog.publish(
-        LocalRecord(
-            Ref("soc.cpu.rtl.default/1.0", catalog=catalog),
-            {"filelist": "rtl.f"},
-            source=checkout,
-        )
+        LocalRecord(Ref("soc.cpu.rtl.default/1.0", catalog=catalog), source=checkout)
     )
 
 
-def test_native_files_live_in_project_and_checkout_and_remain_untracked(
+def test_open_writes_only_recipe_and_preserves_work(
     catalog: Catalog, rtl: InstalledRecord, tmp_path: Path
 ) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    with Repo.init(project):
-        workspace = Workspace(catalog, project / "conanws.yml")
-        editable = workspace.add(rtl.ref.without_revision())
-        assert editable.source == tmp_path / "soc.cpu.rtl.default-1.0"
-        assert editable.source is not None
-        untracked = porcelain.status(editable.source).untracked
-        assert {b"conanfile.py", b"conandata.yml", b"record.json"}.issubset(untracked)
-        assert {b"conanws.yml", b"conanws.py"}.issubset(porcelain.status(project).untracked)
-    document = yaml.safe_load(workspace.path.read_text())
-    assert document["packages"] == [
-        {"ref": str(rtl.ref.without_revision()), "path": "../soc.cpu.rtl.default-1.0"}
-    ]
-    assert not (project / ".coreref").exists()
-    assert not (project / "workspace.yaml").exists()
-    assert not (catalog._client.home / "editable_packages.json").exists()
-    assert not tuple(catalog._client.home.rglob("cpu.sv"))
-    assert Workspace(catalog, workspace.path).members == {rtl.ref: editable.source}
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    source = workspace.open(rtl.ref)
+    assert workspace.members == {rtl.ref.without_revision(): source}
+    assert (source / "conanfile.py").is_file()
+    assert not (source / "record.json").exists()
+    assert not (source / "conandata.yml").exists()
+    text = (source / "conanfile.py").read_text()
+    assert "coreref_local" not in text and "coreref_revision" not in text
+    (source / "cpu.sv").write_text("local edits")
+    stamp = (source / "conanfile.py").stat().st_mtime_ns
+    with patch.object(catalog._client, "open_sources", side_effect=AssertionError("Clone")):
+        assert workspace.open(rtl.ref) == source
+    assert (source / "cpu.sv").read_text() == "local edits"
+    assert (source / "conanfile.py").stat().st_mtime_ns == stamp
 
 
-def test_native_graph_and_install_discover_workspace_from_project_cwd(
+def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    cached = rtl.ref.get_with_sources()
+    assert not cached.is_editable and cached.source is not None
+    assert cached.source.is_relative_to(catalog.cache_directory)
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    editable = workspace.add(rtl.ref)
-    assert editable.source is not None
-    (editable.source / "cpu.sv").write_text("local RTL edits")
+    source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
     graph = rtl.ref.without_revision().graph()
-    assert graph.editables == (editable,)
-    assert graph.record.ref == rtl.ref
-    with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected Conan I/O")):
-        assert graph.get_with_sources()[0].source == editable.source
-        assert graph.get() == graph.get_with_sources()
-        source = graph.get()[0].source
-        assert source is not None and (source / "cpu.sv").read_text() == "local RTL edits"
-    consumer = tmp_path / "consumer"
-    ConsumerRecipe((str(rtl.ref),)).write(consumer)
-    result = cast(
-        dict[str, object],
-        catalog._client.run(
-            "install", str(consumer), "--lockfile=", "--build=never", "--no-remote"
-        ),
+    installed = graph.get_with_sources()[0]
+    assert installed.is_editable and installed.source == source
+    assert not installed.source.is_relative_to(catalog.cache_directory)
+    assert rtl.ref.get_with_sources().source == source
+    restored = Record.from_json(json.dumps(installed.to_dict()), catalog=catalog)
+    assert isinstance(restored, InstalledRecord) and restored.is_editable
+    with pytest.raises(AttributeError):
+        installed.is_editable = False  # type: ignore[misc]
+    (source / "cpu.sv").write_text("working version")
+    ready_source = graph.get()[0].source
+    assert ready_source is not None and (ready_source / "cpu.sv").read_text() == "working version"
+    workspace.remove(source)
+    assert (source / "conanfile.py").is_file()
+    assert not rtl.ref.get_with_sources().is_editable
+    workspace.add(source)
+    assert rtl.ref.get().is_editable
+
+
+def test_mixed_graph_batches_only_cached_packages_and_supports_filters(
+    *,
+    catalog: Catalog,
+    rtl: InstalledRecord,
+    checkout: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = catalog.publish(
+        LocalRecord(Ref("soc.parent.rtl.default/1.0", catalog=catalog), source=checkout),
+        dependencies=(rtl.ref,),
     )
-    native = cast(NativeGraph, result["graph"])
-    package = native.root.conanfile.dependencies.host[str(rtl.ref.without_revision())]
-    assert any(node.recipe == "Editable" for node in native.nodes)
-    assert package.package_folder is not None
-    assert Path(package.package_folder).resolve() == editable.source
-    assert package.folders.source_folder is not None
-    assert Path(package.folders.source_folder).resolve() == editable.source
-
-
-def test_local_recipe_requirements_are_used_instead_of_published_graph(
-    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path
-) -> None:
-    extra = catalog.publish(LocalRecord(Ref("soc.extra.rtl.default/1.0", catalog=catalog)))
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    editable = workspace.add(rtl.ref)
-    assert editable.source is not None
-    data_path = editable.source / "conandata.yml"
-    data = yaml.safe_load(data_path.read_text())
-    data["requires"] = [str(extra.ref)]
-    data_path.write_text(yaml.safe_dump(data))
-    with patch.object(catalog._client, "download_recipe", side_effect=AssertionError("Download")):
-        graph = rtl.ref.without_revision().graph(workspace=workspace)
-    assert graph.requirements == (extra.ref,)
-    assert graph.dependencies(transitive=True)[0].ref == extra.ref
-    assert graph.editables[0].source == editable.source
-    assert rtl.ref.graph().requirements == ()
+    source = workspace.open(rtl.ref)
+    monkeypatch.chdir(workspace.path.parent)
+    graph = parent.ref.graph()
+    with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
+        selected = graph.get_with_sources(filters=SearchQuery(component="cpu"))
+        assert len(selected) == 1 and selected[0].source == source
+        assert selected[0].is_editable
+        assert not commands.call_args_list
+        ready = graph.get_with_sources()
+        assert sum(call.args[0] == "install" for call in commands.call_args_list) == 1
+    assert len(ready) == 2 and sum(record.is_editable for record in ready) == 1
+    with patch.object(catalog._client, "run", side_effect=AssertionError("Conan I/O")):
+        assert graph.get_with_sources() == ready
 
 
-def test_repeated_add_preserves_edits_metadata_and_base_revision(
-    catalog: Catalog, rtl: InstalledRecord, checkout: Path, tmp_path: Path
-) -> None:
-    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    first = workspace.add(rtl.ref.without_revision())
-    assert first.source is not None
-    (first.source / "cpu.sv").write_text("local modifications")
-    recipe = first.source / "conanfile.py"
-    stamp = recipe.stat().st_mtime_ns
-    second = catalog.publish(LocalRecord(rtl.ref.without_revision(), {"updated": True}, checkout))
-    with patch.object(catalog._client, "open_sources", side_effect=AssertionError("Clone")):
-        assert workspace.add(rtl.ref.without_revision()).ref == rtl.ref
-        assert recipe.stat().st_mtime_ns == stamp
-        assert (first.source / "cpu.sv").read_text() == "local modifications"
-        with pytest.raises(Conflict):
-            workspace.add(second.ref)
-    assert rtl.ref.without_revision().graph(workspace=workspace).record.ref == rtl.ref
-    assert rtl.ref.without_revision().graph().record.ref == second.ref
-    with pytest.raises(Conflict, match="base revision"):
-        second.ref.graph(workspace=workspace)
-
-
-def test_remove_through_native_conan_keeps_source_and_allows_readd(
-    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path
-) -> None:
-    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    first = workspace.add(rtl.ref)
-    assert first.source is not None
-    (first.source / "cpu.sv").write_text("uncommitted work")
-    catalog._client.run("workspace", "remove", str(first.source), workspace=workspace.path.parent)
-    assert workspace.members == {}
-    with pytest.raises(NotFound):
-        workspace.remove(rtl.ref)
-    with patch.object(catalog._client, "open_sources", side_effect=AssertionError("Clone")):
-        assert workspace.add(rtl.ref).source == first.source
-    workspace.remove(rtl.ref.without_revision())
-    assert workspace.members == {}
-    assert (first.source / "cpu.sv").read_text() == "uncommitted work"
-    assert (first.source / "conanfile.py").is_file()
-
-
-def test_editable_artifact_paths_may_not_exist_until_local_build(
-    catalog: Catalog, checkout: Path, tmp_path: Path
+def test_editable_artifact_paths_can_exist_only_after_local_build(
+    catalog: Catalog, checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     artifact = tmp_path / "original.lib"
     artifact.write_text("published library")
@@ -164,159 +114,95 @@ def test_editable_artifact_paths_may_not_exist_until_local_build(
         )
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    editable = workspace.add(record.ref)
-    assert editable.source is not None
-    path = editable.source / "artifacts/timing/cpu.lib"
-    assert editable.files == {"timing/cpu.lib": path}
+    source = workspace.open(record.ref)
+    monkeypatch.chdir(workspace.path.parent)
+    graph = record.ref.graph()
+    editable = graph.get()[0]
+    path = source / "artifacts/timing/cpu.lib"
+    assert editable.is_editable and editable.files == {"timing/cpu.lib": path}
     assert not path.exists()
-    graph = record.ref.graph(workspace=workspace)
-    assert graph.get()[0].files["timing/cpu.lib"] == path
-    assert graph.get_with_sources()[0].source == editable.source
+    assert graph.get_with_sources()[0].source == source
     path.parent.mkdir(parents=True)
     path.write_text("locally built library")
     assert graph.get()[0].files["timing/cpu.lib"].read_text() == "locally built library"
-    assert record.ref.get().files["timing/cpu.lib"].read_text() == "published library"
 
 
-def test_packages_without_scm_are_rejected_before_clone(catalog: Catalog, tmp_path: Path) -> None:
-    unsupported = catalog.publish(LocalRecord(Ref("soc.meta.data.default/1.0", catalog=catalog)))
-    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    with (
-        patch.object(catalog._client, "open_sources", side_effect=AssertionError("Clone")),
-        pytest.raises(InvalidPackage, match="SCM sources"),
-    ):
-        workspace.add(unsupported.ref)
-    assert not workspace.path.exists()
-
-
-def test_unrelated_destination_is_never_overwritten(
-    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path
+def test_workspace_consumer_can_save_and_reuse_native_lockfile(
+    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    destination = tmp_path / "soc.cpu.rtl.default-1.0"
-    destination.mkdir()
-    (destination / "user.txt").write_text("keep me")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    with pytest.raises(Conflict, match="destination already exists"):
-        workspace.add(rtl.ref)
-    assert (destination / "user.txt").read_text() == "keep me"
+    source = workspace.open(rtl.ref)
+    monkeypatch.chdir(workspace.path.parent)
+    local = LocalRecord(Ref("soc.top.rtl.default/1.0", catalog=catalog))
+    graph = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),))
+    lock = graph.create_lockfile(tmp_path / "project.lock")
+    locked = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),), lockfile=lock)
+    assert locked.get_with_sources()[0].source == source
+    assert locked.edges == graph.edges
+
+
+def test_open_without_repository_source_is_rejected(catalog: Catalog, tmp_path: Path) -> None:
+    record = catalog.publish(LocalRecord(Ref("soc.meta.data.default/1.0", catalog=catalog)))
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    with pytest.raises(InvalidPackage, match="no repository source"):
+        workspace.open(record.ref)
     assert not workspace.path.exists()
 
 
-def test_failed_git_open_does_not_register_partial_checkout(
+def test_failed_clone_exposes_sdk_error_and_preserves_original_cause(
     catalog: Catalog, rtl: InstalledRecord, git_origin: Path, tmp_path: Path
 ) -> None:
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     git_origin.rename(tmp_path / "offline.git")
-    with pytest.raises(CatalogError, match="could not open"):
-        workspace.add(rtl.ref)
+    with pytest.raises(CatalogError, match="Could not obtain repository sources") as error:
+        workspace.open(rtl.ref)
+    assert error.value.__cause__ is not None
+    assert "git clone" not in str(error.value)
     assert not workspace.path.exists()
-    assert not (tmp_path / "soc.cpu.rtl.default-1.0").exists()
-    assert not tuple(tmp_path.glob("coreref-editable-*"))
-    (tmp_path / "offline.git").rename(git_origin)
-    assert workspace.add(rtl.ref).source is not None
 
 
-def test_multiple_workspaces_move_with_relative_paths(
-    catalog: Catalog, rtl: InstalledRecord, checkout: Path, tmp_path: Path
+def test_malformed_workspace_is_reported_without_backend_text(
+    catalog: Catalog, tmp_path: Path
 ) -> None:
-    environment = tmp_path / "environment"
-    first = Workspace(catalog, environment / "first/conanws.yml")
-    original = first.add(rtl.ref)
-    updated = catalog.publish(LocalRecord(rtl.ref.without_revision(), {"updated": True}, checkout))
-    second = Workspace(catalog, environment / "second/conanws.yml")
-    other = second.add(updated.ref, directory=environment / "other-sources")
-    assert original.source != other.source
-    environment.rename(tmp_path / "moved")
-    restored = Workspace(catalog, tmp_path / "moved/first/conanws.yml").add(rtl.ref)
-    assert restored.source == tmp_path / "moved/soc.cpu.rtl.default-1.0"
-    assert restored.source is not None and (restored.source / "cpu.sv").is_file()
-
-
-def test_mixed_graph_installs_only_noneditable_sources_and_keeps_snapshot(
-    catalog: Catalog, rtl: InstalledRecord, checkout: Path, tmp_path: Path
-) -> None:
-    parent = catalog.publish(
-        LocalRecord(
-            Ref("soc.parent.rtl.default/1.0", catalog=catalog),
-            source=checkout,
-        ),
-        dependencies=(rtl.ref,),
-    )
-    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    editable = workspace.add(rtl.ref)
-    graph = parent.ref.graph(workspace=workspace)
-    with patch.object(catalog._client, "run", wraps=catalog._client.run) as run:
-        ready = graph.get_with_sources()
-        assert sum(call.args[0] == "install" for call in run.call_args_list) == 1
-        assert next(r for r in ready if r.ref == rtl.ref).source == editable.source
-        assert next(r for r in ready if r.ref == parent.ref).source is not None
-    workspace.remove(rtl.ref)
-    with patch.object(catalog._client, "run", side_effect=AssertionError("Conan I/O")):
-        assert graph.get_with_sources((rtl.ref,))[0].source == editable.source
-    assert not parent.ref.graph(workspace=workspace).editables
-
-
-def test_invalid_workspace_is_reported_by_conan(catalog: Catalog, tmp_path: Path) -> None:
     path = tmp_path / "conanws.yml"
     path.write_text("packages: [\n")
-    with pytest.raises(CatalogError, match="workspace"):
+    with pytest.raises(CatalogError, match="Could not read the workspace"):
         _ = Workspace(catalog, path).members
     with pytest.raises(InvalidPackage, match=r"conanws\.yml"):
         Workspace(catalog, tmp_path / "workspace.yaml")
 
 
-def test_native_workspace_graph_can_save_lock_and_publish_a_consumer(
+def test_a_cached_snapshot_does_not_silently_switch_to_new_editables(
+    *,
+    catalog: Catalog,
+    rtl: InstalledRecord,
+    checkout: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = catalog.publish(
+        LocalRecord(Ref("soc.parent.rtl.default/1.0", catalog=catalog), source=checkout),
+        dependencies=(rtl.ref,),
+    )
+    snapshot = parent.ref.graph()
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    source = workspace.open(rtl.ref)
+    monkeypatch.chdir(workspace.path.parent)
+    with pytest.raises(Conflict, match="Workspace changed"):
+        snapshot.get_with_sources()
+    ready = parent.ref.graph().get_with_sources(filters=SearchQuery(component="cpu"))
+    assert ready[0].is_editable and ready[0].source == source
+
+
+def test_open_does_not_adopt_an_unrelated_existing_directory(
     catalog: Catalog, rtl: InstalledRecord, tmp_path: Path
 ) -> None:
+    source = tmp_path / "existing"
+    source.mkdir()
+    (source / "user.txt").write_text("keep me")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    editable = workspace.add(rtl.ref)
-    local = LocalRecord(Ref("soc.top.rtl.default/1.0", catalog=catalog))
-    graph = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),), workspace=workspace)
-    lock = graph.create_lockfile(tmp_path / "project/conan.lock")
-    locked = Graph(catalog, local, dependencies=(rtl.ref,), lockfile=lock, workspace=workspace)
-    assert locked.get_with_sources()[0].source == editable.source
-    published = catalog.publish(locked)
-    assert published.ref.dependency_refs() == (rtl.ref,)
-
-
-def test_editable_install_uses_native_package_root_for_missing_artifacts(
-    catalog: Catalog, checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    artifact = tmp_path / "cpu.lib"
-    artifact.write_text("published")
-    record = catalog.publish(
-        LocalRecord(
-            Ref("soc.cpu.be.lib-lef/1.0", catalog=catalog),
-            source=checkout,
-            files={"cpu.lib": artifact},
-        )
-    )
-    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    editable = workspace.add(record.ref)
-    monkeypatch.chdir(workspace.path.parent)
-    installed = record.ref.get_with_sources()
-    assert installed.source == editable.source
-    assert installed.files == editable.files
-    assert not installed.files["cpu.lib"].exists()
-
-
-@pytest.mark.parametrize("error", [OSError, Conflict])
-def test_failed_recipe_preparation_cleans_only_new_checkout_and_can_retry(
-    catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, error: type[OSError] | type[Conflict]
-) -> None:
-    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    source = tmp_path / "soc.cpu.rtl.default-1.0"
-
-    def fail_recipe(recipe: EditableRecipe) -> None:
-        (recipe.source / "record.json").write_text("partial metadata")
-        raise error("injected recipe preparation failure")
-
-    with patch.object(EditableRecipe, "write", fail_recipe), pytest.raises(error):
-        workspace.add(rtl.ref)
-    assert not source.exists()
+    with pytest.raises(CatalogError, match="Could not obtain repository sources"):
+        workspace.open(rtl.ref, directory=source)
+    assert (source / "user.txt").read_text() == "keep me"
+    assert not (source / "conanfile.py").exists()
     assert not workspace.path.exists()
-    assert workspace.members == {}
-    editable = workspace.add(rtl.ref)
-    assert editable.source == source
-    assert (source / "cpu.sv").is_file()
-    assert workspace.members == {rtl.ref: source}

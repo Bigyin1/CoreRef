@@ -13,7 +13,6 @@ from ..api.catalog import Catalog
 from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.graph import Graph
 from ..api.records import JSON, LocalRecord, Ref
-from ..api.workspace import Workspace
 
 
 class DepsFile(BaseModel):
@@ -109,13 +108,11 @@ class DepsFile(BaseModel):
 
     def resolve(self, *, update: bool = False) -> Graph:
         """Resolve a snapshot; update ignores the old lock but never writes it."""
-        workspace = Workspace(self._catalog, self.path.parent / "conanws.yml")
         return Graph(
             self._catalog,
             self.record,
             dependencies=self.dependencies,
             lockfile=self.lockfile if self.lockfile.exists() and not update else None,
-            workspace=workspace if workspace.path.exists() else None,
         )
 
     def create_lockfile(self) -> Path:
