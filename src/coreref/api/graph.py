@@ -142,11 +142,11 @@ class Graph:
         return self._lockfile
 
     def get(self, refs: tuple[Ref, ...] | None = None) -> tuple[InstalledRecord, ...]:
-        """Fetch selected files, or all published nodes in dependency-first order when omitted."""
+        """Fetch selected files, or all registry/editable nodes in dependency-first order."""
         return self._get(refs, with_sources=False)
 
     def get_with_sources(self, refs: tuple[Ref, ...] | None = None) -> tuple[InstalledRecord, ...]:
-        """Fetch files and sources; omitted refs select all published nodes, leaves first."""
+        """Fetch files and sources; omitted refs select registry/editable nodes, leaves first."""
         return self._get(refs, with_sources=True)
 
     @property

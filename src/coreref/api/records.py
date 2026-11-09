@@ -198,7 +198,7 @@ class Ref:
         return self._catalog._package(self).get_with_sources()
 
     def graph(self, *, lockfile: Path | None = None, workspace: Workspace | None = None) -> Graph:
-        """Resolve this published root and its full tree without installing files."""
+        """Resolve a registry or workspace root and its full tree without installing files."""
         from .graph import Graph
 
         return Graph(self._catalog, self, lockfile=lockfile, workspace=workspace)

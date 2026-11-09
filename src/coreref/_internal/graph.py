@@ -49,7 +49,12 @@ class ResolvedConanGraph:
         )
 
     def _reference(self, package: NativePackage) -> str:
-        revision = (package.conan_data or {}).get("coreref_revision")
+        data = package.conan_data or {}
+        if "coreref_local" in data:
+            if package.ref.revision is not None:
+                raise Conflict("A local editable package has no recipe revision")
+            return package.ref.repr_notime()
+        revision = data.get("coreref_revision")
         if revision is None:
             return package.ref.repr_notime()
         if package.ref.revision is not None and package.ref.revision != revision:

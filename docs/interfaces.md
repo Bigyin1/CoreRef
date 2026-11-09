@@ -39,8 +39,9 @@ namespace.component[_subcomponent].view.type/version[#revision]
   читать отдельно от получения файлов и исходников; получить можно всё дерево или выбранные узлы.
 - **Фиксация выбора.** Проектный lockfile сохраняет версии/revisions для последующих
   разрешений. Уже созданный Graph использует свой снимок выбора при получении пакетов.
-- **Совместная разработка зависимостей.** Workspace получает выбранные SCM-зависимости
-  в рабочие Git-копии рядом с проектом. Graph с этим workspace использует локальные правки;
+- **Совместная разработка зависимостей.** Workspace получает SCM-зависимости
+  в рабочие Git-копии или подключает существующие проекты с deps.yml без Git и публикации.
+  Graph с этим workspace использует локальные правки;
   регистрации хранит Conan в conanws.yml. Локальные artifacts могут быть ещё не созданы.
 
 ## Связи классов
@@ -74,7 +75,7 @@ classDiagram
 | `ref.info()` | Метаданные `Record` |
 | `ref.get()` / `ref.get_with_sources()` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
 | `ref.dependency_refs(filters=None)` / `ref.dependencies(filters=None)` | Прямые требования как Ref / Record |
-| `ref.graph(*, lockfile=None, workspace=None)` | Полный граф опубликованного пакета |
+| `ref.graph(*, lockfile=None, workspace=None)` | Полный граф пакета из реестра или editable из workspace |
 
 `SearchQuery` задаёт точные AND-фильтры: `namespace`, `component`, `subcomponent`,
 `view`, `type`, `version`, `revision`. Значение `None` пропускает фильтр, кроме
@@ -115,13 +116,14 @@ Graph фиксирует выбранные revisions при разрешени�
 
 | Класс | Поля и назначение |
 |---|---|
-| `LocalRecord(ref, payload=None, source=None, files=...)` | Изменяемое описание проекта: Git-каталог и локальные файлы для упаковки |
-| `Record(ref, payload=None, *, file_names=(), has_source=False)` | Метаданные: Ref, JSON payload, имена файлов и наличие SCM |
+| `LocalRecord(ref, payload=None, source=None, files=...)` | Изменяемое описание проекта: исходники и локальные файлы |
+| `Record(ref, payload=None, *, file_names=(), has_source=False)` | Метаданные: Ref, JSON payload, имена файлов и наличие исходников |
 | `InstalledRecord(record, *, files=None, source=None)` | Метаданные и готовые пути к файлам/исходникам; обычно возвращается SDK |
 
 `files` сопоставляет имя файла внутри пакета с локальным `Path`; по умолчанию карта пуста.
-`LocalRecord.source` — рабочий Git-репозиторий; при публикации Conan фиксирует SCM-координаты.
-`InstalledRecord.source` — полученный checkout, либо `None`.
+При публикации `LocalRecord.source` — рабочий Git-репозиторий: Conan фиксирует SCM-координаты.
+При локальной регистрации source может быть обычной директорией.
+`InstalledRecord.source` — полученный checkout или локальные исходники, либо `None`.
 `sources_ready` показывает, получены ли исходники или пакет их не объявляет.
 `Record` и `InstalledRecord` доступны только для чтения, включая payload и карту файлов.
 Пути Conan cache используются для чтения; рабочие изменения выполняют в отдельной копии.
@@ -164,20 +166,32 @@ Conan, не разбирая JSON. Разрешение само по себе �
 
 `Workspace(catalog, path="conanws.yml")` использует нативный workspace Conan.
 Первый add вызывает workspace init: в корне появляются conanws.yml и conanws.py.
-Conan add/remove управляет записями, а в Git-копии пакета SDK один раз создаёт
-conanfile.py, conandata.yml и record.json. Файлы остаются untracked; SDK не меняет Git index
+Conan add/remove управляет записями, а в рабочей директории пакета SDK один раз создаёт
+conanfile.py, conandata.yml и record.json. В Git файлы остаются untracked; SDK не меняет index
 и правила игнорирования. Собственного workspace.yaml и скрытого реестра нет.
 
 `add(ref, *, directory=None)` получает SCM-копию (по умолчанию рядом с проектом)
 и возвращает InstalledRecord; повторный add сохраняет локальные правки.
+`add_local(directory)` подключает существующую директорию с deps.yml на месте.
+Git и публикация не требуются. SDK один раз создаёт минимальные служебные файлы,
+затем вызывает Conan workspace add. Повторное добавление сохраняет рецепт и исходники.
+После remove подготовленную директорию можно добавить снова.
+
+```python
+workspace.add_local("../cpu")
+```
+
 `remove(ref)` снимает регистрацию, сохраняя копию и созданные файлы.
 `members` читает карту Ref → Path через Conan API. Из корня проекта Conan сам находит
 workspace при разрешении Graph; `workspace=...` позволяет явно выбрать его из другой директории.
 Зависимости читаются из локальных editable-рецептов, включая локальные изменения.
-Revision у editable обозначает опубликованную основу, а не хеш текущих локальных правок.
+У SCM-копии revision обозначает опубликованную основу. У добавленного локального проекта
+revision отсутствует; явный RREV не может выбрать такой узел. Его метаданные и содержимое
+получают через Graph с этим workspace, например `ref.graph(workspace=workspace).get_with_sources()`.
+Lockfile фиксирует опубликованные зависимости; локальные editable остаются рабочими копиями.
 
-Поддерживаются SCM-пакеты, в том числе с упакованными файлами. У editable
-package_folder указывает на рабочую копию; `files` содержит пути внутри её artifacts/.
+У editable package_folder указывает на рабочую директорию. Для SCM-копий `files`
+содержит пути внутри artifacts/, для локальных проектов — пути из LocalRecord/DepsFile.
 Эти файлы могут отсутствовать до локальной сборки. Полученные из реестра пакеты
 по-прежнему проверяются на наличие всех объявленных файлов.
 
@@ -188,7 +202,7 @@ Conan-профили, remote и доступ к Git настраиваются �
 
 ## Готовые команды для CLI flow
 
-Дополнение `coreref[cli]` предоставляет группу Typer для workspace: `add`, `remove`,
+Дополнение `coreref[cli]` предоставляет группу Typer для workspace: `add`, `add-local`, `remove`,
 `list`. Её можно подключить к CLI любого flow без собственного разбора Ref и обработки
 ошибок workspace. Каталог создаётся только при выполнении команды; справка не обращается
 к Conan.
@@ -203,8 +217,19 @@ app.add_typer(create_workspace_app(), name="workspace")
 
 ```sh
 flow workspace add soc.cpu.rtl.default/1.0 --project-dir ./project
+flow workspace add-local ../existing-cpu --project-dir ./project
 flow workspace list --project-dir ./project
 flow workspace remove soc.cpu.rtl.default/1.0 --project-dir ./project
+```
+
+`add-local DIRECTORY` читает `DIRECTORY/deps.yml`: достаточно валидного YAML с `ref`.
+`dependencies`, `source`, `files` и `payload` необязательны; пути считаются от директории YAML.
+Рецепт создаётся в существующем проекте, без клонирования. Например:
+
+```yaml
+ref: soc.cpu.rtl.default/1.0
+dependencies:
+  - soc.util.rtl.default/1.0
 ```
 
 `add` принимает также `--directory` — родительскую директорию Git-копии. По умолчанию

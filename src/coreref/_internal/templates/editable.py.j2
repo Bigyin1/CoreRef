@@ -1,4 +1,4 @@
-{# Register an existing Git working copy as a Conan editable package. #}
+{# Register an existing local directory as a Conan editable package. #}
 from conan import ConanFile
 
 
@@ -11,6 +11,6 @@ class EditableRecord(ConanFile):
             self.requires(reference)
 
     def layout(self):
-        self.folders.source = "."
+        self.folders.source = {{ source | default(".") | pyrepr }}
         self.folders.build = "artifacts"
         self.cpp.source.srcdirs = ["."]

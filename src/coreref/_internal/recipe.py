@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -64,6 +65,30 @@ class LocalRecipe:
         if self.record.source is not None:
             (directory / "source-path.txt").write_text(str(self.record.source))
 
+    def write_editable(self, directory: Path) -> None:
+        """Prepare an existing directory once; keep already prepared recipe files."""
+        names = ("conanfile.py", "record.json", "conandata.yml")
+        if any((directory / name).exists() for name in names):
+            if not all((directory / name).is_file() for name in names):
+                raise Conflict(f"Editable recipe files already exist in {directory}")
+            return
+        local = {
+            "source": os.path.relpath(self.record.source or directory, directory),
+            "files": {
+                name: os.path.relpath(path, directory) for name, path in self.record.files.items()
+            },
+        }
+        template = _RECIPE_ENV.get_template("editable.py.j2")
+        recipe = template.render(
+            name=self.record.ref.package_name,
+            version=self.record.ref.version,
+            source=local["source"],
+        )
+        data = {"requires": list(self.requirements), "coreref_local": local}
+        (directory / "conanfile.py").write_text(recipe)
+        (directory / "record.json").write_text(self.record.to_json())
+        (directory / "conandata.yml").write_text(yaml.safe_dump(data))
+
     def copy_files(self, directory: Path) -> None:
         """Stage publication files and record their SHA-256 without exporting the bytes."""
         digests = {}
@@ -96,7 +121,9 @@ class StoredRecipe:
             data = self._read_data()
             self.data = data
             self.requirements = tuple(cast(Iterable[str], data.get("requires", ())))
-            self.record = self._read_record(expected, has_source=bool(data.get("scm")))
+            self.record = self._read_record(
+                expected, has_source=bool(data.get("scm")) or "coreref_local" in data
+            )
         except (
             OSError,
             ValueError,
@@ -140,7 +167,7 @@ class StoredRecipe:
 
     def installed(self, package: NativePackage, *, with_sources: bool) -> InstalledRecord:
         """Attach Conan cache or editable paths to the validated record."""
-        if "coreref_revision" in (package.conan_data or {}):
+        if {"coreref_revision", "coreref_local"}.intersection(package.conan_data or {}):
             if package.package_folder is None:
                 raise CatalogError("Conan did not provide the editable package directory")
             return EditableRecipe(self, Path(package.package_folder)).record
@@ -187,11 +214,14 @@ class EditableRecipe:
     def record(self) -> InstalledRecord:
         if not self.source.is_dir():
             raise InvalidPackage(f"Editable source directory is missing: {self.source}")
+        local = cast(Mapping[str, object], self.recipe.data.get("coreref_local", {}))
+        paths = cast(Mapping[str, str], local.get("files", {}))
         return InstalledRecord(
             self.recipe.record,
-            source=self.source,
+            source=(self.source / str(local.get("source", "."))).resolve(),
             files={
-                name: self.source / "artifacts" / name for name in self.recipe.record.file_names
+                name: (self.source / paths.get(name, f"artifacts/{name}")).resolve()
+                for name in self.recipe.record.file_names
             },
         )
 

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 class StoredPackage:
-    """A published Ref with recipes retained only for the current operation."""
+    """A package Ref with recipes retained only for the current operation."""
 
     def __init__(self, ref: Ref) -> None:
         to_conan_reference(ref)
@@ -49,6 +49,10 @@ class StoredPackage:
 
     def get_with_sources(self) -> InstalledRecord:
         return self._get(with_sources=True)
+
+    def editable(self, directory: Path) -> InstalledRecord:
+        """Read an already registered editable without resolving it on a server."""
+        return EditableRecipe(self._load(str(self.ref), directory=directory), directory).record
 
     def open(self, source: Path) -> InstalledRecord:
         """Prepare the editable recipe once, preserving an existing working copy."""
@@ -143,7 +147,11 @@ class StoredPackage:
         return self._resolved[ref]
 
     def _load(self, reference: str, *, directory: Path | None = None) -> StoredRecipe:
-        ref = self._resolve_ref(from_conan_reference(reference, catalog=self._catalog))
+        ref = from_conan_reference(reference, catalog=self._catalog)
+        if ref in self._recipes:
+            return self._recipes[ref]
+        if directory is None:
+            ref = self._resolve_ref(ref)
         if ref not in self._recipes:
             if directory is None:
                 directory = self._client.download_recipe(str(ref))

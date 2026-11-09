@@ -46,6 +46,13 @@ class _WorkspaceCommands:
             record = workspace.add(Ref(ref, catalog=catalog), directory=directory)
             typer.echo(f"{record.ref}\t{record.source}")
 
+    def add_local(self, directory: Path, project_dir: ProjectDir = Path(".")) -> None:
+        """Register an existing package containing deps.yml; Git is optional."""
+        with _command_errors():
+            catalog = self._catalog_factory()
+            ref = Workspace(catalog, project_dir / "conanws.yml").add_local(directory)
+            typer.echo(f"{ref}\t{directory.expanduser().resolve()}")
+
     def remove(self, ref: str, project_dir: ProjectDir = Path(".")) -> None:
         """Unregister a package, keeping its Git copy and generated files."""
         with _command_errors():
@@ -70,9 +77,10 @@ def create_workspace_app(*, catalog_factory: Callable[[], Catalog] = Catalog) ->
     """
     commands = _WorkspaceCommands(catalog_factory)
     app = typer.Typer(
-        no_args_is_help=True, add_completion=False, help="Manage editable Git dependencies."
+        no_args_is_help=True, add_completion=False, help="Manage editable dependencies."
     )
     app.command("add")(commands.add)
+    app.command("add-local")(commands.add_local)
     app.command("remove")(commands.remove)
     app.command("list")(commands.list_members)
     return app
