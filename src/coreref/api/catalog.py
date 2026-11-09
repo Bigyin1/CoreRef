@@ -21,6 +21,11 @@ class Catalog:
     ) -> None:
         self._client = ConanClient(Path(home) if home is not None else None, remote, timeout)
 
+    @property
+    def cache_directory(self) -> Path:
+        """The package storage directory selected by the configured client."""
+        return self._client.cache_directory
+
     def search(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Record, ...]:
         """Find latest matching revisions, or history when all_revisions is requested."""
         return tuple(
@@ -68,11 +73,8 @@ class Catalog:
         record: LocalRecord,
         dependencies: tuple[Ref, ...],
         lockfile: Path | None,
-        workspace: Path | None = None,
     ) -> LocalPackage:
-        return LocalPackage(
-            self, record, dependencies=dependencies, lockfile=lockfile, workspace=workspace
-        )
+        return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)
 
 
 __all__ = ["Catalog"]

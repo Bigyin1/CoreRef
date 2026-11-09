@@ -293,7 +293,7 @@ def test_command_os_error_is_not_not_found(
         raise OSError("API initialization failed")
 
     monkeypatch.setattr(client, "ConanAPI", fail)
-    with pytest.raises(CatalogError, match="API initialization failed"):
+    with pytest.raises(CatalogError, match="Could not inspect working packages"):
         Ref.from_fields(**record(catalog=conan_catalog).ref.to_dict(), catalog=conan_catalog).get()
 
 
@@ -393,7 +393,7 @@ def test_native_api_failure_is_a_catalog_error(
         raise ConanException("simulated API failure")
 
     monkeypatch.setattr(client, "ConanAPI", fail)
-    with pytest.raises(CatalogError, match="simulated API failure"):
+    with pytest.raises(CatalogError, match="Could not resolve dependencies"):
         resolve_published(conan_catalog, root.ref)
 
 
@@ -477,5 +477,5 @@ def test_invalid_default_cache_is_a_domain_error(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CONAN_HOME", "relative-path")
-    with pytest.raises(CatalogError, match="default home"):
+    with pytest.raises(CatalogError, match="client home"):
         Catalog()

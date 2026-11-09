@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Protocol, TypedDict, cast
 
 from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
@@ -58,10 +57,15 @@ class _Workspace(Protocol):
     def open(self, ref: str, remotes: list[_Remote], *, cwd: str, folder: str) -> str: ...
 
 
+class _Config(Protocol):
+    def get(self, name: str, default: str) -> str: ...
+
+
 class _API(Protocol):
     command: _Commands
     remotes: _Remotes
     workspace: _Workspace
+    config: _Config
 
     @property
     def home_folder(self) -> str: ...
@@ -83,9 +87,30 @@ class ConanClient:
             try:
                 self.home = Path(cast(_API, ConanAPI()).home_folder).resolve()
             except (ConanException, OSError) as error:
-                raise CatalogError(f"Conan could not resolve its default home: {error}") from error
+                raise CatalogError("Could not locate the client home directory") from error
         self.remote = self._configured_remote(remote)
         self.timeout = timeout
+
+    @property
+    def cache_directory(self) -> Path:
+        try:
+            storage = self._api().config.get(
+                "core.cache:storage_path", default=str(self.home / "p")
+            )
+            return Path(storage).expanduser().resolve()
+        except (ConanException, OSError) as error:
+            raise CatalogError("Could not locate package storage") from error
+
+    def editable(self, reference: str) -> NativePackage | None:
+        """Ask Conan whether the current workspace supplies this package."""
+        logical = reference.split("#", 1)[0]
+        try:
+            packages = self._api().workspace.packages() or {}
+            return next(
+                (entry["conanfile"] for ref, entry in packages.items() if str(ref) == logical), None
+            )
+        except (ConanException, OSError) as error:
+            raise CatalogError("Could not inspect working packages") from error
 
     @property
     def source_args(self) -> tuple[str, ...]:
@@ -96,21 +121,33 @@ class ConanClient:
         try:
             return self._execute(arguments, workspace=workspace)
         except GraphConflictError as exc:
-            raise Conflict(str(exc)) from exc
+            raise Conflict("Dependency requirements conflict") from exc
         except GraphLoopError as exc:
-            raise InvalidPackage(str(exc)) from exc
+            raise InvalidPackage("Dependency graph contains a cycle") from exc
         except ConanException as exc:
             raise self._command_error(arguments, exc) from exc
         except OSError as exc:
-            raise CatalogError(f"Conan command {arguments[:2]} failed: {exc}") from exc
+            raise self._command_error(arguments, exc) from exc
 
-    def _command_error(self, arguments: tuple[str, ...], error: ConanException) -> CatalogError:
+    def _command_error(self, arguments: tuple[str, ...], error: Exception) -> CatalogError:
         message = str(error)
         if "not in lockfile" in message:
             return InvalidPackage("Recipe dependency is absent from its lockfile")
         if "not found" in message.lower():
-            return NotFound(message)
-        return CatalogError(f"Conan command {arguments[:2]} failed: {message}")
+            return NotFound("A required package is unavailable")
+        operation = {
+            "graph": "resolve dependencies; check the package requirements and profile",
+            "install": "retrieve package contents",
+            "download": "retrieve package metadata",
+            "upload": "publish the package",
+            "list": "search the package registry",
+            "export-pkg": "prepare the package",
+            "export": "prepare package metadata",
+            "lock": "create the dependency lockfile",
+            "cache": "locate cached package data",
+            "workspace": "update the workspace",
+        }.get(arguments[0], "complete the requested package operation")
+        return CatalogError(f"Could not {operation}")
 
     def _api(self, workspace: Path | None = None) -> _API:
         conan = ConanAPI(cache_folder=str(self.home))
@@ -136,7 +173,7 @@ class ConanClient:
                 raise_on_errors=False,
             )
         except (NotFoundException, ConanReferenceDoesNotExistInDB) as exc:
-            raise NotFound(str(exc)) from exc
+            raise NotFound("A required package is unavailable") from exc
         if isinstance(result, Mapping):
             if "graph" in result:
                 self._check_graph(cast(NativeGraph, result["graph"]))
@@ -149,9 +186,9 @@ class ConanClient:
             graph.report_graph_error()
         except GraphMissingError as exc:
             if isinstance(exc.__context__, (NotFoundException, ConanReferenceDoesNotExistInDB)):
-                raise NotFound(str(exc)) from exc
+                raise NotFound("A required package is unavailable") from exc
             if "not found" in exc.missing_error.lower():
-                raise NotFound(str(exc)) from exc
+                raise NotFound("A required package is unavailable") from exc
             raise
 
     def index(self, pattern: str) -> dict[str, RecipeRevisions]:
@@ -167,7 +204,7 @@ class ConanClient:
         entries: dict[str, RecipeRevisions] = {}
         for group in groups.values():
             if "error" in group:
-                raise CatalogError(f"Conan index failed: {group['error']}")
+                raise CatalogError("Could not search the package registry")
             entries.update(
                 (key, value) for key, value in group.items() if isinstance(value, RecipeRevisions)
             )
@@ -202,7 +239,6 @@ class ConanClient:
         *,
         lockfile: Path | None = None,
         update: bool = False,
-        workspace: Path | None = None,
     ) -> NativeGraph:
         result = cast(
             Mapping[str, object],
@@ -216,13 +252,12 @@ class ConanClient:
                 str(lockfile) if lockfile is not None else "",
                 *(("--update",) if update else ()),
                 *self.source_args,
-                **({"workspace": workspace} if workspace is not None else {}),
             ),
         )
         graph = cast(NativeGraph, result["graph"])
         if not update and lockfile is None and self.remote and self._floating_requirements(graph):
             # Externally exported recipes can float below an otherwise pinned root.
-            return self.graph(directory, update=True, workspace=workspace)
+            return self.graph(directory, update=True)
         return graph
 
     def _floating_requirements(self, graph: NativeGraph) -> bool:
@@ -239,27 +274,21 @@ class ConanClient:
             conan = self._api()
             remotes = conan.remotes.list(self.remote) if self.remote is not None else []
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with TemporaryDirectory(
-                prefix="coreref-editable-", dir=destination.parent
-            ) as temporary:
-                checkout = Path(temporary) / "source"
-                conan.workspace.open(reference, remotes, cwd=temporary, folder=str(checkout))
-                checkout.rename(destination)
+            conan.workspace.open(
+                reference,
+                remotes,
+                cwd=str(destination.parent),
+                folder=str(destination),
+            )
         except (ConanException, OSError) as error:
-            raise CatalogError(f"Conan could not open {reference}: {error}") from error
+            raise CatalogError(f"Could not obtain repository sources for {reference}") from error
 
     def workspace_members(self, directory: Path) -> dict[str, Path]:
         try:
             packages = self._api(directory).workspace.packages() or {}
         except (ConanException, OSError) as error:
-            raise CatalogError(f"Conan could not read workspace {directory}: {error}") from error
-        members = {}
-        for ref, entry in packages.items():
-            data = entry["conanfile"].conan_data or {}
-            revision = data.get("coreref_revision")
-            reference = ref.repr_notime() if revision is None else f"{ref}#{revision}"
-            members[reference] = Path(entry["path"]).parent
-        return members
+            raise CatalogError("Could not read the workspace") from error
+        return {ref.repr_notime(): Path(entry["path"]).parent for ref, entry in packages.items()}
 
     def create_lockfile(self, directory: Path, *, seed: Path | None = None) -> None:
         self.run(
@@ -281,7 +310,7 @@ class ConanClient:
             lockfile = LockfileAPI.update_lockfile(None, graph, clean=True)
             LockfileAPI.save_lockfile(lockfile, str(output))
         except (ConanException, OSError) as error:
-            raise CatalogError(f"Conan could not save lockfile {output}: {error}") from error
+            raise CatalogError(f"Could not save dependency lockfile {output}") from error
         finally:
             ConanOutput.set_output_level(level)
 
@@ -326,9 +355,7 @@ class ConanClient:
         )
         return cast(NativeGraph, result["graph"])
 
-    def install_project(
-        self, directory: Path, sources: Mapping[str, bool], *, workspace: Path | None = None
-    ) -> NativeGraph:
+    def install_project(self, directory: Path, sources: Mapping[str, bool]) -> NativeGraph:
         """Install one pinned consumer graph, enabling SCM only for selected packages."""
         source_args = tuple(
             argument
@@ -349,14 +376,13 @@ class ConanClient:
                 "--output-folder",
                 str(directory / "out"),
                 *self.source_args,
-                **({"workspace": workspace} if workspace is not None else {}),
             ),
         )
         return cast(NativeGraph, result["graph"])
 
     def require_remote(self) -> str:
         if self.remote is None:
-            raise CatalogError("Publish requires a configured Conan remote")
+            raise CatalogError("Publish requires a configured registry remote")
         return self.remote
 
     def upload(self, reference: str) -> None:
@@ -368,8 +394,8 @@ class ConanClient:
         try:
             remotes = cast(_API, ConanAPI(cache_folder=str(self.home))).remotes.list()
         except (ConanException, OSError) as exc:
-            raise CatalogError(f"Conan could not read configured remotes: {exc}") from exc
+            raise CatalogError("Could not read registry configuration") from exc
         if len(remotes) > 1:
             names = ", ".join(remote.name for remote in remotes)
-            raise CatalogError(f"Multiple enabled Conan remotes ({names}); specify remote=...")
+            raise CatalogError(f"Multiple enabled registry remotes ({names}); specify remote=...")
         return remotes[0].name if remotes else None

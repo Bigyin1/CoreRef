@@ -57,14 +57,13 @@ Ruff ограничивает сложность: 6, аргументы: 5 (по
 Смежный проект `../hwcatalog_conan_exp` использует SDK в flow RTL/BE/DFT.
 При изменении публичного контракта обновлять его вызовы и примеры одновременно.
 
-Workspace использует Conan init/add/remove и нативное обнаружение conanws.yml/conanws.py.
-EditableRecipe записывает служебные файлы прямо в Git checkout. Workspace.add_local(directory)
-читает стандартный deps.yml через DepsFile и один раз готовит минимальный рецепт через
-LocalRecipe.write_editable; отдельного реестра и шаблона workspace нет. В локальном conandata.yml поле coreref_revision хранит базовый RREV
-для снимка Graph. Для неопубликованных локальных пакетов coreref_local хранит относительные
-пути исходников/файлов; revision не придумывается. Conan определяет editable-узлы,
-SDK читает их локальные метаданные и пути без поиска на remote.
-Локальные artifacts могут отсутствовать; проверка полноты скачанных пакетов сохраняется.
+Workspace делегирует init/add/remove и SCM open Conan. Только conanfile.py добавляется
+в директорию зависимости: локальный рецепт читает deps.yml либо содержит опубликованные
+метаданные. Свои sidecar-файлы, coreref_local/coreref_revision и ручное наложение путей
+не нужны. Graph/Ref не принимают workspace: Conan обнаруживает его из cwd.
+Editable-узлы определяются по нативному статусу; source/файлы читаются из нативного
+рецепта и layout. Локальные artifacts могут отсутствовать; проверка полноты скачанных
+пакетов сохраняется. InstalledRecord.is_editable показывает происхождение записи.
 
 DepsFile — адаптер deps.yaml, не обязательный формат flow. Install читает существующий
 lockfile, отдельный lock разрешает объявления заново. CLI не добавляет зависимости,
@@ -72,7 +71,7 @@ lockfile, отдельный lock разрешает объявления зан
 
 `tools/` — необязательная надстройка: стандартный YAML и готовый CLI. Основные операции
 API принимают LocalRecord и Ref; собственные форматы flow остаются возможны.
-Workspace.add_local — готовый путь для стандартного deps.yml: чтение делегируется DepsFile.
+Workspace.add(directory) — готовый путь для стандартного deps.yml: чтение делегируется DepsFile.
 
 ## Производительность SDK
 

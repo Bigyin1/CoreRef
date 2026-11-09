@@ -122,7 +122,6 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         "requirements",
         "networkx",
         "lockfile",
-        "editables",
     ],
 )
 def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: str) -> None:

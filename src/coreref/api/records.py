@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from .catalog import Catalog
     from .graph import Graph
     from .query import SearchQuery
-    from .workspace import Workspace
 
 
 JSON: TypeAlias = (
@@ -197,11 +196,11 @@ class Ref:
         """Get package files and its Git checkout when the recipe declares one."""
         return self._catalog._package(self).get_with_sources()
 
-    def graph(self, *, lockfile: Path | None = None, workspace: Workspace | None = None) -> Graph:
+    def graph(self, *, lockfile: Path | None = None) -> Graph:
         """Resolve a registry or workspace root and its full tree without installing files."""
         from .graph import Graph
 
-        return Graph(self._catalog, self, lockfile=lockfile, workspace=workspace)
+        return Graph(self._catalog, self, lockfile=lockfile)
 
     def dependencies(self, filters: SearchQuery | None = None) -> tuple[Record, ...]:
         """Read immediate dependencies, optionally filtered by their coordinates."""
@@ -327,6 +326,7 @@ class Record:
             record,
             source=Path(value["source"]) if value.get("source") else None,
             files={name: Path(path) for name, path in files.items()},
+            is_editable=value.get("is_editable", False),
         )
 
 
@@ -339,6 +339,7 @@ class InstalledRecord(Record):
         *,
         files: Mapping[str, Path] | None = None,
         source: Path | None = None,
+        is_editable: bool = False,
     ) -> None:
         # Metadata is already detached and immutable; reuse it without serializing again.
         self._ref = record.ref
@@ -347,6 +348,7 @@ class InstalledRecord(Record):
         self._has_source = record.has_source
         self._files = frozendict(files or {})
         self._source = source
+        self._is_editable = is_editable
         if set(self.file_names) != set(self.files):
             raise ValueError("Installed files must match the declared file names")
         if source is not None and not self.has_source:
@@ -361,6 +363,11 @@ class InstalledRecord(Record):
         return self._files
 
     @property
+    def is_editable(self) -> bool:
+        """Whether Conan selected a working directory instead of a cached package."""
+        return self._is_editable
+
+    @property
     def sources_ready(self) -> bool:
         """Whether sources are available or the package declares none."""
         return not self.has_source or self.source is not None
@@ -369,6 +376,7 @@ class InstalledRecord(Record):
         """Include paths only in installed inspection snapshots."""
         value = super().to_dict()
         value["files"] = {name: str(path) for name, path in self.files.items()}
+        value["is_editable"] = self.is_editable
         if self.source is not None:
             value["source"] = str(self.source)
         return value

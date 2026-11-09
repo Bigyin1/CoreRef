@@ -69,7 +69,7 @@ def test_dependencies_must_already_exist(catalog: Catalog) -> None:
         first = catalog.publish(local_record(first), dependencies=(second.ref,))
     second = catalog.publish(local_record(second))
     first = catalog.publish(local_record(first), dependencies=(second.ref,))
-    with pytest.raises(InvalidPackage, match="cycle/loop"):
+    with pytest.raises(InvalidPackage, match="contains a cycle"):
         catalog.publish(local_record(second), dependencies=(first.ref,))
     assert resolve_published(catalog, first.ref).edges == (Dependency(first.ref, second.ref),)
 

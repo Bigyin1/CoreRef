@@ -102,13 +102,15 @@ def test_pinned_source_round_trip_uses_conan_scm(checkout: Path, *, catalog: Cat
 def test_dirty_source_fails_before_publication(checkout: Path, *, catalog: Catalog) -> None:
     (checkout / "cpu.sv").write_text("uncommitted")
     catalog = Catalog(catalog._client.home)
-    with pytest.raises(CatalogError, match="dirty"):
+    with pytest.raises(CatalogError, match="Could not prepare the package") as error:
         catalog.publish(
             local_record(
                 Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", catalog=catalog)),
                 source=checkout,
             )
         )
+    assert error.value.__cause__ is not None
+    assert "dirty" in str(error.value.__cause__)
     assert not catalog.search(SearchQuery())
 
 
@@ -252,8 +254,9 @@ def test_conan_reports_missing_scm_coordinates_when_sources_are_requested(
     folder = catalog._package(record.ref).recipe().directory
     (folder / "conandata.yml").write_text(yaml.safe_dump({"scm": {"commit": "HEAD"}}))
     assert record.ref.get() == record
-    with pytest.raises(CatalogError, match="source"):
+    with pytest.raises(CatalogError, match="Could not retrieve package contents") as error:
         record.ref.get_with_sources()
+    assert error.value.__cause__ is not None
 
 
 def test_conan_reports_invalid_requires_during_resolution(catalog: Catalog, tmp_path: Path) -> None:

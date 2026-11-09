@@ -1,4 +1,4 @@
-"""Conan workspaces with Git checkouts and existing local packages."""
+"""Small wrappers around native workspace registration and repository opening."""
 
 from __future__ import annotations
 
@@ -6,18 +6,18 @@ from pathlib import Path
 
 from .._internal.recipe import LocalRecipe
 from .catalog import Catalog
-from .errors import Conflict, InvalidPackage, NotFound
-from .records import InstalledRecord, Ref
+from .errors import InvalidPackage
+from .records import LocalRecord, Ref
 
 
 class Workspace:
-    """Manage conanws.yml through Conan and editable recipes in local working directories."""
+    """Let Conan own workspace discovery, membership and editable selection."""
 
     def __init__(self, catalog: Catalog, path: str | Path = "conanws.yml") -> None:
         self._catalog = catalog
         self._path = Path(path).expanduser().resolve()
         if self._path.name != "conanws.yml":
-            raise InvalidPackage("A Conan workspace must be named conanws.yml")
+            raise InvalidPackage("A workspace must be named conanws.yml")
 
     @property
     def path(self) -> Path:
@@ -25,63 +25,60 @@ class Workspace:
 
     @property
     def members(self) -> dict[Ref, Path]:
-        """Read registered packages through Conan's workspace API."""
         if not self.path.exists():
             return {}
         return {
-            Ref(reference, catalog=self._catalog): source
-            for reference, source in self._catalog._client.workspace_members(
-                self.path.parent
-            ).items()
+            Ref(ref, catalog=self._catalog): path
+            for ref, path in self._catalog._client.workspace_members(self.path.parent).items()
         }
 
-    def add(self, ref: Ref, *, directory: str | Path | None = None) -> InstalledRecord:
-        """Open a Git copy once and register its generated recipe with Conan."""
-        members = self.members
-        chosen = next((r for r in members if r.without_revision() == ref.without_revision()), ref)
-        if ref.revision is not None and chosen != ref:
-            raise Conflict(f"Workspace uses {chosen}; requested {ref}")
-        if chosen in members:
-            return self._catalog._package(chosen).editable(members[chosen])
-        parent = Path(directory).expanduser().resolve() if directory else self.path.parent.parent
-        source = parent / f"{ref.package_name}-{ref.version}"
-        record = self._catalog._package(ref).open(source)
-        self._register(source)
-        return record
+    def init(self) -> None:
+        self._catalog._client.run("workspace", "init", str(self.path.parent))
 
-    def add_local(self, directory: str | Path) -> Ref:
-        """Add a directory containing deps.yml, preparing its Conan recipe once."""
+    def add(self, directory: str | Path) -> None:
+        """Register a directory; prepare only conanfile.py for a standard deps.yml project."""
         from ..tools.deps import DepsFile
 
         source = Path(directory).expanduser().resolve()
-        document = DepsFile(self._catalog, source / "deps.yml")
-        record = document.record
-        for ref, path in self.members.items():
-            if path == source:
-                if ref.without_revision() != record.ref:
-                    raise Conflict(f"Workspace uses {ref} at {source}")
-                return ref
-            if ref.without_revision() == record.ref:
-                raise Conflict(f"Workspace already uses {ref} at {path}")
-        LocalRecipe(record, tuple(str(ref) for ref in document.dependencies)).write_editable(source)
-        self._register(source)
-        return next(ref for ref, path in self.members.items() if path == source)
+        if not (source / "conanfile.py").exists():
+            document = DepsFile(self._catalog, source / "deps.yml")
+            LocalRecipe(
+                document.record, tuple(str(ref) for ref in document.dependencies)
+            ).write_editable(
+                source,
+                manifest="deps.yml",
+            )
+        self.init()
+        self._catalog._client.run("workspace", "add", str(source), workspace=self.path.parent)
 
-    def _register(self, directory: Path) -> None:
-        if not self.path.exists():
-            self._catalog._client.run("workspace", "init", str(self.path.parent))
-        self._catalog._client.run("workspace", "add", str(directory), workspace=self.path.parent)
+    def open(self, ref: Ref, *, directory: str | Path | None = None) -> Path:
+        """Obtain the repository through Conan, add one recipe, then register the directory."""
+        source = (
+            Path(directory).expanduser().resolve()
+            if directory
+            else (self.path.parent.parent / f"{ref.package_name}-{ref.version}")
+        )
+        if not (source / "conanfile.py").exists():
+            recipe = self._catalog._package(ref).recipe()
+            if not recipe.has_source:
+                raise InvalidPackage("The package has no repository source")
+            self._catalog._client.open_sources(recipe.reference, source)
+            record = LocalRecord(
+                recipe.record.ref.without_revision(),
+                recipe.record.payload,
+                source=source,
+                files={name: source / "artifacts" / name for name in recipe.record.file_names},
+            )
+            LocalRecipe(record, recipe.requirements).write_editable(source)
+        self.add(source)
+        return source
 
-    def remove(self, ref: Ref) -> None:
-        """Unregister through Conan, keeping the Git copy and its generated files."""
-        members = self.members
-        chosen = next((r for r in members if r.without_revision() == ref.without_revision()), ref)
-        if chosen not in members:
-            raise NotFound(f"Package is not editable in this workspace: {ref}")
-        if ref.revision is not None and chosen != ref:
-            raise Conflict(f"Workspace uses {chosen}; requested {ref}")
+    def remove(self, directory: str | Path) -> None:
         self._catalog._client.run(
-            "workspace", "remove", str(members[chosen]), workspace=self.path.parent
+            "workspace",
+            "remove",
+            str(Path(directory).expanduser().resolve()),
+            workspace=self.path.parent,
         )
 
 

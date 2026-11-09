@@ -33,7 +33,7 @@ def test_help_and_invalid_arguments_do_not_initialize_conan() -> None:
 
     assert runner.invoke(app, ["simulate"]).stdout == "simulation\n"
     assert runner.invoke(app, ["--help"]).exit_code == 0
-    for command in ([], ["add"], ["add-local"], ["remove"], ["list"]):
+    for command in ([], ["add"], ["open"], ["remove"], ["list"]):
         help_result = runner.invoke(app, ["workspace", *command, "--help"])
         assert help_result.exit_code == 0, help_result.output
     assert runner.invoke(app, ["workspace", "add"]).exit_code == 2
@@ -61,23 +61,23 @@ def test_cli_workspace_lifecycle_preserves_working_copy(
     assert not project.exists()
     result = runner.invoke(
         app,
-        ["workspace", "add", str(record.ref), *options, "--directory", str(destination)],
+        ["workspace", "open", str(record.ref), *options, "--directory", str(destination)],
     )
     assert result.exit_code == 0, result.output
-    source = destination / "soc.cpu.rtl.default-1.0"
-    assert f"{record.ref}\t{source}" in result.stdout
+    source = destination
+    assert str(source) in result.stdout
     (source / "cpu.sv").write_text("local work")
-    result = runner.invoke(app, ["workspace", "add", str(record.ref.without_revision()), *options])
+    result = runner.invoke(app, ["workspace", "add", str(source), *options])
     assert result.exit_code == 0, result.output
     result = runner.invoke(app, ["workspace", "list", *options])
-    assert result.exit_code == 0 and result.stdout == f"{record.ref}\t{source}\n"
-    result = runner.invoke(app, ["workspace", "remove", str(record.ref), *options])
+    assert result.exit_code == 0 and result.stdout == f"{record.ref.without_revision()}\t{source}\n"
+    result = runner.invoke(app, ["workspace", "remove", str(source), *options])
     assert result.exit_code == 0, result.output
     assert (source / "cpu.sv").read_text() == "local work"
     assert Workspace(catalog, project / "conanws.yml").members == {}
-    result = runner.invoke(app, ["workspace", "remove", str(record.ref), *options])
+    result = runner.invoke(app, ["workspace", "remove", str(source), *options])
     assert result.exit_code == 1
-    assert "not editable" in result.stderr
+    assert "Could not update the workspace" in result.stderr
 
 
 @pytest.mark.conan_remote
@@ -85,7 +85,7 @@ def test_cli_reports_invalid_ref_and_workspace_without_tracebacks(
     catalog: Catalog, tmp_path: Path
 ) -> None:
     app = create_workspace_app(catalog_factory=lambda: catalog)
-    invalid = runner.invoke(app, ["add", "not-a-ref", "--project-dir", str(tmp_path)])
+    invalid = runner.invoke(app, ["open", "not-a-ref", "--project-dir", str(tmp_path)])
     assert invalid.exit_code == 1
     assert "Error:" in invalid.stderr
     assert not (tmp_path / "conanws.yml").exists()
@@ -161,16 +161,16 @@ def test_cli_adds_an_existing_package_with_deps_yml(catalog: Catalog, tmp_path: 
     (package / "cpu.sv").write_text("uncommitted local source")
     project = tmp_path / "consumer"
     app = create_workspace_app(catalog_factory=lambda: catalog)
-    arguments = ["add-local", str(package), "--project-dir", str(project)]
+    arguments = ["add", str(package), "--project-dir", str(project)]
     for _ in range(2):
         result = runner.invoke(app, arguments)
         assert result.exit_code == 0, result.output
-        assert f"soc.cpu.rtl.default/1.0\t{package}" in result.stdout
+        assert str(package) in result.stdout
     assert not (package / ".git").exists()
     assert (package / "cpu.sv").read_text() == "uncommitted local source"
     ref = Ref("soc.cpu.rtl.default/1.0", catalog=catalog)
     assert Workspace(catalog, project / "conanws.yml").members == {ref: package}
-    result = runner.invoke(app, ["remove", str(ref), "--project-dir", str(project)])
+    result = runner.invoke(app, ["remove", str(package), "--project-dir", str(project)])
     assert result.exit_code == 0
     assert (package / "deps.yml").is_file()
 
@@ -188,7 +188,7 @@ def test_cli_rejects_missing_or_invalid_local_package(
         (package / "deps.yml").write_text(manifest)
     project = tmp_path / "consumer"
     app = create_workspace_app(catalog_factory=lambda: catalog)
-    result = runner.invoke(app, ["add-local", str(package), "--project-dir", str(project)])
+    result = runner.invoke(app, ["add", str(package), "--project-dir", str(project)])
     assert result.exit_code == 1
     assert "Error:" in result.stderr and "Traceback" not in result.output
     assert not (project / "conanws.yml").exists()

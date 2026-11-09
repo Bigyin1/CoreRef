@@ -41,7 +41,7 @@ namespace.component[_subcomponent].view.type/version[#revision]
   разрешений. Уже созданный Graph использует свой снимок выбора при получении пакетов.
 - **Совместная разработка зависимостей.** Workspace получает SCM-зависимости
   в рабочие Git-копии или подключает существующие проекты с deps.yml без Git и публикации.
-  Graph с этим workspace использует локальные правки;
+  Conan автоматически подставляет рабочие копии в Graph из текущей директории;
   регистрации хранит Conan в conanws.yml. Локальные artifacts могут быть ещё не созданы.
 
 ## Связи классов
@@ -75,7 +75,7 @@ classDiagram
 | `ref.info()` | Метаданные `Record` |
 | `ref.get()` / `ref.get_with_sources()` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
 | `ref.dependency_refs(filters=None)` / `ref.dependencies(filters=None)` | Прямые требования как Ref / Record |
-| `ref.graph(*, lockfile=None, workspace=None)` | Полный граф пакета из реестра или editable из workspace |
+| `ref.graph(*, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
 
 `SearchQuery` задаёт точные AND-фильтры: `namespace`, `component`, `subcomponent`,
 `view`, `type`, `version`, `revision`. Значение `None` пропускает фильтр, кроме
@@ -118,7 +118,7 @@ Graph фиксирует выбранные revisions при разрешени�
 |---|---|
 | `LocalRecord(ref, payload=None, source=None, files=...)` | Изменяемое описание проекта: исходники и локальные файлы |
 | `Record(ref, payload=None, *, file_names=(), has_source=False)` | Метаданные: Ref, JSON payload, имена файлов и наличие исходников |
-| `InstalledRecord(record, *, files=None, source=None)` | Метаданные и готовые пути к файлам/исходникам; обычно возвращается SDK |
+| `InstalledRecord(record, *, files=None, source=None, is_editable=False)` | Метаданные и готовые пути к файлам/исходникам; обычно возвращается SDK |
 
 `files` сопоставляет имя файла внутри пакета с локальным `Path`; по умолчанию карта пуста.
 При публикации `LocalRecord.source` — рабочий Git-репозиторий: Conan фиксирует SCM-координаты.
@@ -135,7 +135,7 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 
 ## Graph и Workspace
 
-`Graph(catalog, record, *, dependencies=(), lockfile=None, workspace=None)` сразу
+`Graph(catalog, record, *, dependencies=(), lockfile=None)` сразу
 разрешает локальный `LocalRecord` или опубликованный `Ref`. Публиковать локальный корень не требуется.
 Стандартный deps.yaml читает DepsFile; собственные форматы и дополнительные зависимости
 по-прежнему может определять приложение.
@@ -146,13 +146,14 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 | `info(ref)` | Метаданные выбранного узла без I/O |
 | `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
 | `ordered_refs(root, *, stop_at=())`, `ordered_records(...)` | Обход с корнем; у stop_at не обходятся зависимости, сами узлы включены |
-| `get(refs=None)`, `get_with_sources(refs=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
+| `get(refs=None, *, filters=None)`, `get_with_sources(refs=None, *, filters=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
 | `create_lockfile(path=None)`, `lockfile` | Сохранение выбора Conan и путь проектного lockfile |
 | `networkx` | Кэшируемая топология только для чтения; `.copy()` для изменений |
-| `editables` | Выбранные рабочие копии Workspace |
 
 Без refs получение охватывает все опубликованные узлы, зависимости первыми;
 локальный корень исключён. Явный `()` означает пустую выборку.
+`filters=SearchQuery(view="rtl")` выбирает узлы снимка без предварительного списка Ref
+и без дополнительного поиска на сервере.
 Полученные записи повторно используются в пределах Graph. Для всего дерева удобнее
 один вызов Graph, чем отдельный get для каждого Ref.
 
@@ -164,46 +165,53 @@ Conan, не разбирая JSON. Разрешение само по себе �
 без повторного разрешения зависимостей. Получение файлов использует уже разрешённый выбор.
 `catalog.publish(graph)` сохраняет зависимости снимка; переопределять их и lockfile нельзя.
 
-`Workspace(catalog, path="conanws.yml")` использует нативный workspace Conan.
-Первый add вызывает workspace init: в корне появляются conanws.yml и conanws.py.
-Conan add/remove управляет записями, а в рабочей директории пакета SDK один раз создаёт
-conanfile.py, conandata.yml и record.json. В Git файлы остаются untracked; SDK не меняет index
-и правила игнорирования. Собственного workspace.yaml и скрытого реестра нет.
+`Workspace(catalog, path="conanws.yml")` — небольшая обёртка над Conan init/add/remove.
+Conan создаёт conanws.yml/conanws.py и управляет составом workspace. SDK не ведёт свой
+реестр. Из текущей директории проекта Conan автоматически выбирает рабочие пакеты:
+передавать workspace в Graph или Ref не нужно.
 
-`add(ref, *, directory=None)` получает SCM-копию (по умолчанию рядом с проектом)
-и возвращает InstalledRecord; повторный add сохраняет локальные правки.
-`add_local(directory)` подключает существующую директорию с deps.yml на месте.
-Git и публикация не требуются. SDK один раз создаёт минимальные служебные файлы,
-затем вызывает Conan workspace add. Повторное добавление сохраняет рецепт и исходники.
-После remove подготовленную директорию можно добавить снова.
+| Операция | Назначение |
+|---|---|
+| `init()` | Создать нативный workspace |
+| `add(directory)` | Подключить директорию с conanfile.py либо deps.yml |
+| `open(ref, *, directory=None)` | Получить Git-копию через SCM Conan и подключить её; по умолчанию рядом с проектом |
+| `remove(directory)` | Убрать регистрацию, сохранив директорию и изменения |
+| `members` | Прочитать Ref и пути из Conan |
+
+Если в рабочей копии нет рецепта, SDK добавляет только **conanfile.py**. Для deps.yml
+рецепт читает текущие зависимости и пути из манифеста; для скачанной копии содержит
+метаданные опубликованного пакета. Существующий рецепт сохраняется. Дополнительные
+record.json/conandata.yml и собственные маркеры в рабочей директории не создаются.
+Сгенерированные файлы остаются untracked; SDK не меняет Git index или ignore.
+
+`InstalledRecord.is_editable` показывает выбор Conan. У editable source указывает
+в рабочую директорию, а files — на локальные пути (по умолчанию artifacts/); эти файлы
+могут появиться позднее после локальной сборки. Сравнивать package/source пути для
+определения editable не требуется. Revision editable-ссылок определяется Conan;
+это не гарантированная revision опубликованной версии рабочей копии.
 
 ```python
-workspace.add_local("../cpu")
+from coreref.api.workspace import Workspace
+
+workspace = Workspace(catalog)  # запускаем из корня проекта
+workspace.add("../cpu")  # существующая директория
+# workspace.open(rtl_ref)       # либо Git-копия опубликованной зависимости
+graph = rtl_ref.graph()  # Conan уже видит зарегистрированную директорию
+ready = graph.get_with_sources()
+local = [record for record in ready if record.is_editable]
 ```
 
-`remove(ref)` снимает регистрацию, сохраняя копию и созданные файлы.
-`members` читает карту Ref → Path через Conan API. Из корня проекта Conan сам находит
-workspace при разрешении Graph; `workspace=...` позволяет явно выбрать его из другой директории.
-Зависимости читаются из локальных editable-рецептов, включая локальные изменения.
-У SCM-копии revision обозначает опубликованную основу. У добавленного локального проекта
-revision отсутствует; явный RREV не может выбрать такой узел. Его метаданные и содержимое
-получают через Graph с этим workspace, например `ref.graph(workspace=workspace).get_with_sources()`.
-Lockfile фиксирует опубликованные зависимости; локальные editable остаются рабочими копиями.
-
-У editable package_folder указывает на рабочую директорию. Для SCM-копий `files`
-содержит пути внутри artifacts/, для локальных проектов — пути из LocalRecord/DepsFile.
-Эти файлы могут отсутствовать до локальной сборки. Полученные из реестра пакеты
-по-прежнему проверяются на наличие всех объявленных файлов.
-
+Изменение состава workspace требует нового Graph. Его метаданные — снимок,
+но файлы рабочей копии остаются изменяемыми. `Catalog.cache_directory` возвращает
+реальное хранилище пакетов, включая настройку core.cache:storage_path.
 Ошибки: `CatalogError` — общий сбой, `NotFound` — отсутствие пакета,
 `Conflict` — конфликт зависимостей, `InvalidPackage` — неверное описание/содержимое.
-Conan-профили, remote и доступ к Git настраиваются заранее. Publish требует сервер;
-чтение точных revisions из cache и локальные графы доступны без него.
+Ошибки Conan переводятся в сообщения SDK; исходное исключение доступно через `__cause__`.
+Профили, remote и доступ к Git настраиваются заранее. Publish требует сервер.
 
 ## Готовые команды для CLI flow
 
-Дополнение `coreref[cli]` предоставляет группу Typer для workspace: `add`, `add-local`, `remove`,
-`list`. Её можно подключить к CLI любого flow без собственного разбора Ref и обработки
+Дополнение `coreref[cli]` предоставляет группу Typer для workspace: `init`, `add`, `open`, `remove`, `list`. Её можно подключить к CLI любого flow без собственного разбора Ref и обработки
 ошибок workspace. Каталог создаётся только при выполнении команды; справка не обращается
 к Conan.
 
@@ -216,13 +224,13 @@ app.add_typer(create_workspace_app(), name="workspace")
 ```
 
 ```sh
-flow workspace add soc.cpu.rtl.default/1.0 --project-dir ./project
-flow workspace add-local ../existing-cpu --project-dir ./project
+flow workspace open soc.cpu.rtl.default/1.0 --project-dir ./project
+flow workspace add ../existing-cpu --project-dir ./project
 flow workspace list --project-dir ./project
-flow workspace remove soc.cpu.rtl.default/1.0 --project-dir ./project
+flow workspace remove ../existing-cpu --project-dir ./project
 ```
 
-`add-local DIRECTORY` читает `DIRECTORY/deps.yml`: достаточно валидного YAML с `ref`.
+`add DIRECTORY` читает `DIRECTORY/deps.yml`: достаточно валидного YAML с `ref`.
 `dependencies`, `source`, `files` и `payload` необязательны; пути считаются от директории YAML.
 Рецепт создаётся в существующем проекте, без клонирования. Например:
 
@@ -232,10 +240,10 @@ dependencies:
   - soc.util.rtl.default/1.0
 ```
 
-`add` принимает также `--directory` — родительскую директорию Git-копии. По умолчанию
+`open --directory` задаёт точную директорию Git-копии. По умолчанию
 она располагается рядом с проектом. Допускается точный Ref с `#revision`.
-`list` выводит базовые revisions и пути, `remove` сохраняет рабочую копию.
-Инициализация workspace происходит автоматически при первом успешном `add`.
+`list` выводит координаты и пути Conan, `remove` сохраняет рабочую копию.
+Инициализация workspace происходит автоматически при `add`/`open`.
 Пустой `list` ничего не создаёт.
 
 По умолчанию используются стандартные настройки Conan, включая `CONAN_HOME`.
@@ -273,7 +281,7 @@ SafeLoader: при повторении ключа сохраняется пос
 |---|---|
 | `create(catalog, ref, path="deps.yaml", *, source=None)` | Создать файл, отказавшись от перезаписи существующего |
 | `record`, `dependencies` | LocalRecord и прямые Ref для обычного SDK API |
-| `resolve(update=False)` | Новый Graph с существующим lockfile и workspace рядом с YAML |
+| `resolve(update=False)` | Новый Graph с существующим lockfile; Conan обнаруживает workspace по cwd |
 | `create_lockfile()` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
 | `add(ref)`, `remove(ref)`, `save()` | Изменить прямые зависимости и явно сохранить YAML |
 | `path`, `lockfile` | Пути YAML и одноимённого `.lock`, например model.yaml → model.lock |
@@ -319,6 +327,5 @@ app.add_typer(create_deps_app(), name="deps")
 пакеты программно, он формирует итоговый Graph и его lockfile своим кодом.
 `DepsFile.record` и `dependencies` для этого можно использовать независимо от `resolve`.
 
-Если подготовка рецепта нового editable завершилась ошибкой записи или конфликтом,
-свежий checkout удаляется и add можно повторить. Уже существующие рабочие копии
-не очищаются; для неполных служебных файлов возвращается ошибка.
+Ошибка клонирования или регистрации возвращается как ошибка SDK с исходной причиной.
+SDK не удаляет рабочие директории при сбое: неполную копию можно проверить и убрать вручную.

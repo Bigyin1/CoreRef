@@ -47,6 +47,9 @@ class NativeDependencies(Protocol):
 
 class NativeFolders(Protocol):
     @property
+    def source(self) -> str | None: ...
+
+    @property
     def source_folder(self) -> str | None: ...
 
 

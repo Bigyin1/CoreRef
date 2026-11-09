@@ -1,4 +1,4 @@
-{# Register an existing local directory as a Conan editable package. #}
+{# Expose an editable package through Conan alone; no generated metadata sidecars. #}
 from conan import ConanFile
 
 
@@ -6,11 +6,28 @@ class EditableRecord(ConanFile):
     name = {{ name | pyrepr }}
     version = {{ version | pyrepr }}
 
+    def init(self):
+{% if manifest %}
+        import os
+        from pathlib import Path
+        import yaml
+        data = yaml.safe_load((Path(self.recipe_folder) / {{ manifest | pyrepr }}).read_text())
+        self.conan_data = {
+            "requires": data.get("dependencies", []),
+            "record": {"format": {{ format }}, "ref": data["ref"],
+                       "payload": data.get("payload"), "files": list(data.get("files", {}))},
+            "source": os.path.expanduser(data.get("source") or "."),
+            "files": data.get("files", {}),
+        }
+{% else %}
+        self.conan_data = {{ data | pyrepr }}
+{% endif %}
+
     def requirements(self):
-        for reference in self.conan_data.get("requires", []):
+        for reference in self.conan_data["requires"]:
             self.requires(reference)
 
     def layout(self):
-        self.folders.source = {{ source | default(".") | pyrepr }}
+        self.folders.source = self.conan_data["source"]
         self.folders.build = "artifacts"
         self.cpp.source.srcdirs = ["."]

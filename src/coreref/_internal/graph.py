@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from functools import cached_property
 from pathlib import Path
 
-from ..api.errors import Conflict, InvalidPackage
+from ..api.errors import InvalidPackage
 from ..api.graph import Dependency
 from ..api.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
@@ -25,41 +25,31 @@ class ResolvedConanGraph:
 
     @cached_property
     def references(self) -> tuple[str, ...]:
-        return tuple(self._reference(package) for package in self._packages)
+        return tuple(package.ref.repr_notime() for package in self._packages)
 
     @property
     def direct_references(self) -> tuple[str, ...]:
         return tuple(
-            self._reference(package)
+            package.ref.repr_notime()
             for package in self.native.root.conanfile.dependencies.direct_host.values()
         )
 
+    def package_ref(self, ref: Ref) -> Ref:
+        return Ref(self.package(ref).ref.repr_notime(), catalog=ref._catalog)
+
     def package(self, ref: Ref) -> NativePackage:
         package = self.native.root.conanfile.dependencies.host[str(ref.without_revision())]
-        if ref.revision is not None and self._reference(package) != str(ref):
+        if ref.revision is not None and package.ref.repr_notime() != str(ref):
             raise InvalidPackage(f"Conan selected a different revision for {ref}")
         return package
 
     @cached_property
     def editable_references(self) -> frozenset[str]:
         return frozenset(
-            self._reference(node.conanfile)
+            node.conanfile.ref.repr_notime()
             for node in self.native.nodes
             if node.recipe == "Editable"
         )
-
-    def _reference(self, package: NativePackage) -> str:
-        data = package.conan_data or {}
-        if "coreref_local" in data:
-            if package.ref.revision is not None:
-                raise Conflict("A local editable package has no recipe revision")
-            return package.ref.repr_notime()
-        revision = data.get("coreref_revision")
-        if revision is None:
-            return package.ref.repr_notime()
-        if package.ref.revision is not None and package.ref.revision != revision:
-            raise Conflict(f"Editable base revision differs from {package.ref.repr_notime()}")
-        return f"{package.ref}#{revision}"
 
     def recipe_directory(self, ref: Ref) -> Path:
         """Return the recipe folder already loaded for this exact graph node."""
