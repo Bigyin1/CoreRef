@@ -1,5 +1,7 @@
 """Explicit Conan setup for disposable examples and tests, outside the SDK."""
 
+from __future__ import annotations
+
 import platform
 from pathlib import Path
 

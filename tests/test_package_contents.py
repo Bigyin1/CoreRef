@@ -1,5 +1,7 @@
 """Metadata reads do not fetch binaries; installed records expose verified paths."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 from pathlib import Path
@@ -60,11 +62,16 @@ def test_metadata_operations_leave_artifacts_on_the_server(
         assert type(next(item for item in graph.records if item.ref == ref)) is Record
 
 
+@pytest.mark.parametrize(
+    "contents",
+    [b"", b"contents that belong only to the package", b"x" * (2 * 1024 * 1024 + 1)],
+    ids=["empty", "small", "multiple-chunks"],
+)
 def test_exported_metadata_has_digests_and_no_artifact_bytes(
-    catalog: Catalog, tmp_path: Path
+    catalog: Catalog, tmp_path: Path, contents: bytes
 ) -> None:
     artifact = tmp_path / "artifact.bin"
-    artifact.write_bytes(b"contents that belong only to the package")
+    artifact.write_bytes(contents)
     ref = Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0", catalog=catalog)
     first = catalog.publish(LocalRecord(ref, files={"result.bin": artifact}))
     folder = catalog._package(first.ref).recipe().directory

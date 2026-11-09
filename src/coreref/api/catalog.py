@@ -1,5 +1,7 @@
 """Public catalog API over Conan package operations."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from .._internal.client import ConanClient

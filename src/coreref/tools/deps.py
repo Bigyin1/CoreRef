@@ -1,5 +1,7 @@
 """Optional standard YAML input for a local package and its direct dependencies."""
 
+from __future__ import annotations
+
 from copy import deepcopy
 from pathlib import Path
 from typing import cast

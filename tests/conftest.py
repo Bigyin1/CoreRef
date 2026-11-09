@@ -1,5 +1,7 @@
 """Real Conan instances and Git fixtures use owned temporary directories."""
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path

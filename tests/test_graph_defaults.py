@@ -1,5 +1,7 @@
 """Whole-tree operations use a fixed graph, with dependency-first default retrieval."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import patch
 

@@ -1,5 +1,7 @@
 """Whole-tree and incremental materialization, including the same Graph repeated."""
 
+from __future__ import annotations
+
 from functools import partial
 
 import pytest

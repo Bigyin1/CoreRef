@@ -1,5 +1,7 @@
 """Each operation detaches mutable project inputs before calling Conan."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest

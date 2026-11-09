@@ -1,5 +1,7 @@
 """Conan workspaces with editable Git dependencies beside the project."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from .catalog import Catalog

@@ -1,5 +1,7 @@
 """Operations on one local package or one published package reference."""
 
+from __future__ import annotations
+
 import json
 import shutil
 from dataclasses import replace
@@ -66,7 +68,7 @@ class StoredPackage:
         self._client.open_sources(recipe.reference, source)
         try:
             editable.write()
-        except OSError, Conflict:
+        except (OSError, Conflict):
             # Only this call's fresh checkout is owned here; existing copies return above.
             shutil.rmtree(source)
             raise

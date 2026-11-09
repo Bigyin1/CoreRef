@@ -1,5 +1,7 @@
 """Direct package publication, stored artifacts and Conan SCM capture."""
 
+from __future__ import annotations
+
 import json
 import shutil
 from pathlib import Path

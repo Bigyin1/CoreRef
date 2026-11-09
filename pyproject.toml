@@ -7,15 +7,17 @@ name = "coreref"
 version = "0.1.0"
 description = "Hardware component representations and dependencies on Conan"
 readme = "README.md"
-requires-python = ">=3.15"
+requires-python = ">=3.10"
 dependencies = [
  "conan>=2.34,<2.35",
  "jinja2>=3.1.6,<4",
  "pyyaml>=6,<7",
  "pydantic>=2.14,<3",
- "networkx>=3.7,<4",
+ "networkx>=3.4,<4",
  "frozendict>=2.4.7,<3",
- "edify>=1.1.2,<2",
+ "edify>=0.3,<1; python_version < '3.11'",
+ "edify>=1.1.2,<2; python_version >= '3.11'",
+ "typing-extensions>=4.12,<5",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +41,7 @@ packages = ["src/coreref"]
 
 [tool.ruff]
 required-version = ">=0.17.2,<0.18"
-target-version = "py315"
+target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
@@ -68,11 +70,16 @@ max-statements = 40
 "tests/**" = ["S101", "PLR2004"]
 
 [tool.mypy]
-python_version = "3.15"
+python_version = "3.10"
 # pytest-benchmark exposes a typed fixture with an untyped pedantic method.
 untyped_calls_exclude = ["pytest_benchmark"]
 strict = true
 files = ["src", "tests"]
+
+# Edify 0.3 (Python 3.10) has no typing metadata; 1.x remains typed.
+[[tool.mypy.overrides]]
+module = ["edify", "edify.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

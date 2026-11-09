@@ -4,6 +4,8 @@ Conan ships no typing metadata. Untyped imports and runtime casts are confined
 to this adapter and the protocols describing its actual return objects.
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory

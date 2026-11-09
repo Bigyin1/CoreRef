@@ -1,5 +1,7 @@
 """Validation and projection of a native Conan graph, without package I/O."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from functools import cached_property
 from pathlib import Path
@@ -9,7 +11,7 @@ from ..api.graph import Dependency
 from ..api.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
 
-type GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[Dependency, ...]]
+GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[Dependency, ...]]
 
 
 class ResolvedConanGraph:

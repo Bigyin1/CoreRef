@@ -1,5 +1,7 @@
 """References carry operation context without changing stored package identity."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import Iterator
 from dataclasses import is_dataclass

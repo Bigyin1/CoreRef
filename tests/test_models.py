@@ -1,9 +1,11 @@
 """One reference and record, with opaque consumer-defined content."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 
 import pytest
 
@@ -124,8 +126,11 @@ def test_reference_construction_rejects_noncanonical_fields(
         Ref.from_fields(*coordinates, catalog=catalog)
 
 
-class CustomKind(StrEnum):
+class CustomKind(str, Enum):
     REPORT = "vendor-report"
+
+    def __str__(self) -> str:
+        return str.__str__(self)
 
 
 @pytest.mark.parametrize("kind", ["artifact", "execution", CustomKind.REPORT, "custom"])

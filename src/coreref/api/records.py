@@ -1,10 +1,12 @@
 """Exact references and records with consumer-owned JSON payloads."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, TypeAlias, runtime_checkable
 
 from frozendict import deepfreeze, frozendict
 
@@ -15,7 +17,9 @@ if TYPE_CHECKING:
     from .workspace import Workspace
 
 
-type JSON = bool | int | float | str | Mapping[str, JSON] | list[JSON] | tuple[JSON, ...] | None
+JSON: TypeAlias = (
+    bool | int | float | str | Mapping[str, "JSON"] | list["JSON"] | tuple["JSON", ...] | None
+)
 
 
 @runtime_checkable

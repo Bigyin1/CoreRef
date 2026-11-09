@@ -1,8 +1,10 @@
 """Compare coordinate-only and metadata search over bounded namespaces."""
 
+from __future__ import annotations
+
 from collections.abc import Callable, Iterator
 from functools import partial
-from operator import call
+from operator import methodcaller
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
@@ -13,6 +15,7 @@ from examples.local_server import local_server
 from tests.performance.support import Dataset, Registry
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]
+_CALL = methodcaller("__call__")
 
 
 @pytest.fixture(scope="module", params=[10, 100])
@@ -58,7 +61,7 @@ def test_search(
         packages=size, matches=1 if narrow else size, metadata=metadata, cache="cold"
     )
     records = benchmark.pedantic(
-        call,
+        _CALL,
         setup=search_setup(registry, query, metadata=metadata),
         rounds=3,
     )

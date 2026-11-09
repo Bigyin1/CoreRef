@@ -1,5 +1,7 @@
 """Recipe resolution reuses Conan's cache and filters before reading metadata."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import patch
 

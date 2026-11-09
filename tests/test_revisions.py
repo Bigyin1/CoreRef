@@ -1,5 +1,7 @@
 """Recipe revisions survive public operations and project snapshots."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 

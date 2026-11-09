@@ -1,5 +1,7 @@
 """Project graphs own opaque Conan lockfiles outside published packages."""
 
+from __future__ import annotations
+
 from dataclasses import replace
 from pathlib import Path
 

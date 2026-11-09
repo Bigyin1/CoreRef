@@ -1,5 +1,7 @@
 """The stored envelope is typed; resources and metadata are opaque JSON."""
 
+from __future__ import annotations
+
 import json
 
 import pytest

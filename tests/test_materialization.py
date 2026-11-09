@@ -1,5 +1,7 @@
 """Local inputs and registry snapshots expose different operations and paths."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest

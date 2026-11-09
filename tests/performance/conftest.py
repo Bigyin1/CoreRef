@@ -1,5 +1,7 @@
 """A private registry shared only by the opt-in benchmark suite."""
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from importlib.metadata import version
 

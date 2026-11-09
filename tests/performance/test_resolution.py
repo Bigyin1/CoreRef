@@ -1,7 +1,9 @@
 """Resolve differently shaped graphs with cold recipes, warm recipes, and locks."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
-from operator import call
+from operator import methodcaller
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from coreref.api.graph import Graph
 from tests.performance.support import Dataset, Registry, Shape
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]
+_CALL = methodcaller("__call__")
 
 
 def resolution_setup(
@@ -44,7 +47,7 @@ def test_resolve(
     dataset = registry.dataset(shape, size)
     benchmark.extra_info.update(nodes=size, shape=shape, cache=state)
     graph = benchmark.pedantic(
-        call,
+        _CALL,
         setup=resolution_setup(registry, dataset, state, None),
         rounds=3,
     )
@@ -62,7 +65,7 @@ def test_locked_resolve(
     lock = dataset.resolve(registry.reader()).create_lockfile(tmp_path / "project.lock")
     benchmark.extra_info.update(nodes=32, cache=state, lockfile=True)
     graph = benchmark.pedantic(
-        call,
+        _CALL,
         setup=resolution_setup(registry, dataset, state, lock),
         rounds=3,
     )

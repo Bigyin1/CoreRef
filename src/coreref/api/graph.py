@@ -1,5 +1,7 @@
 """Resolved local and published packages, dependency ordering and lockfiles."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
@@ -17,7 +19,7 @@ if TYPE_CHECKING:
     from .catalog import Catalog
     from .workspace import Workspace
 
-    type _RefGraph = nx.DiGraph[Ref]
+    _RefGraph = nx.DiGraph[Ref]
 else:
     _RefGraph = nx.DiGraph
 
