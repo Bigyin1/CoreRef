@@ -18,7 +18,7 @@ from coreref.api.errors import CatalogError, Conflict, InvalidPackage
 from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
 from coreref.api.records import InstalledRecord, LocalRecord, Ref
-from examples.local_server import LocalServer
+from coreref.testing import LocalServer
 
 pytestmark = pytest.mark.conan_remote
 

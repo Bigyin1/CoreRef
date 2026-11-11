@@ -19,7 +19,7 @@ from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
 from coreref.api.records import Record, Ref
-from examples.conan_config import configured_home
+from coreref.testing import configured_home
 from tests.helpers import local_record, resolve_published
 
 pytestmark = pytest.mark.conan

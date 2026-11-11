@@ -18,7 +18,7 @@ NetworkX выбирается resolver по поддерживаемой вер�
 
 Тесты используют отдельные Conan home и собственные серверы со случайными портами
 и учётными данными. Пользовательские cache, remotes и credentials не меняются.
-Настройка изолирована в `examples/conan_config.py` и `examples/local_server.py`;
+Переиспользуемые хелперы поставляются в `coreref.testing` (extra `[testing]`);
 SDK предполагает готовую конфигурацию Conan. Docker не требуется.
 CI проверяет обе группы тестов с общим порогом покрытия 95%.
 
@@ -126,3 +126,48 @@ uv run --frozen pytest tests/performance -m performance --benchmark-compare
 Не использовать `--benchmark-only`, если нужны и проверки числа операций:
 они намеренно не используют fixture `benchmark`. Для быстрой проверки корректности
 всей группы без повторных измерений подходит `--benchmark-disable`.
+
+## Хелперы для тестирования зависимых flow
+
+Установите `coreref[testing]`. Модуль не зависит от pytest; директории и время жизни
+ресурсов задаёт вызывающий код. `local_server()` запускает собственный Conan server
+и останавливает его при выходе, в том числе после ошибки. Логи и данные остаются
+в переданной директории. `server.configure(home, local_sources=True)` готовит
+изолированный Conan home с профилем и авторизацией; `configured_home(home)` —
+cache без публичных remotes. Окружение процесса и пользовательский cache не меняются.
+
+```python
+from coreref.api.graph import Graph
+from coreref.api.records import LocalRecord, Ref
+from coreref.testing import Sandbox, local_server
+
+
+def test_flow(tmp_path, monkeypatch):
+    with local_server(tmp_path / "server") as server:
+        sandbox = Sandbox(server, tmp_path / "fixtures")
+        publisher = sandbox.catalog()
+        cpu = sandbox.package(
+            Ref("soc.cpu.rtl.default/1.0"),
+            sources={"cpu.sv": "module cpu; endmodule\n"},
+            files={"config.json": "{}"},
+        )
+        # Обычный SDK задаёт payload, связи, lockfile и публикацию.
+        cpu.payload = {"flow": "example"}
+        published = publisher.publish(cpu)
+        reader = sandbox.catalog()  # Независимый cache, тот же сервер.
+        assert reader.get_with_sources(published.ref).files["config.json"].exists()
+
+        workspace = sandbox.workspace(reader)
+        workspace.add(cpu.source, record=cpu)
+        monkeypatch.chdir(workspace.path.parent)
+        graph = Graph(reader, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(cpu.ref,))
+        assert graph.get_with_sources()[0].is_editable
+```
+
+`Sandbox.package()` создаёт новый набор входов при каждом вызове: `sources` —
+небольшой Git-репозиторий с коммитом, `files` — упаковываемые файлы; значения —
+строки или bytes. Сложные графы собираются обычными `publish(dependencies=...)`.
+Для собственных фикстур доступен `git_repository(directory, files)`.
+Workspace использует стандартное обнаружение Conan по текущей директории;
+хелперы не переключают её автоматически. Эти средства предназначены для локальных
+тестов, а не для настройки рабочего Conan-клиента или производственного реестра.

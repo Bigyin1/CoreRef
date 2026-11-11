@@ -11,7 +11,7 @@ from pytest_benchmark.fixture import BenchmarkFixture
 
 from coreref.api.query import SearchQuery
 from coreref.api.records import Record, Ref
-from examples.local_server import local_server
+from coreref.testing import local_server
 from tests.performance.support import Dataset, Registry
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]

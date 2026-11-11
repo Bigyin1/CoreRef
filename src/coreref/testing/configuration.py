@@ -1,4 +1,4 @@
-"""Explicit Conan setup for disposable examples and tests, outside the SDK."""
+"""Explicit Conan setup for disposable examples and tests, without modifying user configuration."""
 
 from __future__ import annotations
 

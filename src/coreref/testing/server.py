@@ -1,7 +1,7 @@
 """Owned local Conan server for development examples and integration tests.
 
-All server state and credentials belong to a temporary directory; this module
-is used only by development examples and tests.
+All server state and credentials belong to the caller-provided directory.
+Install ``coreref[testing]`` to provide the server executable.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from urllib.request import urlopen
 from conan.api.conan_api import ConanAPI  # type: ignore[import-untyped]
 from conan.cli.cli import Cli  # type: ignore[import-untyped]
 
-from examples.conan_config import configured_home
+from .configuration import configured_home
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ def local_server(root: Path) -> Iterator[LocalServer]:
 def _start_server(root: Path) -> Iterator[LocalServer]:
     executable = Path(sys.executable).parent / "conan_server"
     if not executable.is_file():
-        raise RuntimeError("Install development dependencies with uv sync --frozen")
+        raise RuntimeError("Install coreref[testing] to run a local Conan server")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]

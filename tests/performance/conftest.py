@@ -8,7 +8,7 @@ from importlib.metadata import version
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from examples.local_server import local_server
+from coreref.testing import local_server
 from tests.performance.support import Registry
 
 

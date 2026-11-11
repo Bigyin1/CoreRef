@@ -10,7 +10,7 @@ from conan.errors import ConanException  # type: ignore[import-untyped]
 
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage, NotFound
-from examples.conan_config import configured_home
+from coreref.testing import configured_home
 
 
 @pytest.mark.parametrize(
