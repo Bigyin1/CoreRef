@@ -13,7 +13,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
 from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Record, Ref
-from examples.local_server import LocalServer
+from coreref.testing import LocalServer
 
 
 def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Catalog) -> None:

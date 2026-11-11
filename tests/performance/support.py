@@ -13,7 +13,7 @@ from dulwich import porcelain
 from coreref.api.catalog import Catalog
 from coreref.api.graph import Graph
 from coreref.api.records import InstalledRecord, LocalRecord, Ref
-from examples.local_server import LocalServer
+from coreref.testing import LocalServer
 
 Shape = Literal["chain", "wide", "shared"]
 Content = Literal["metadata", "files", "scm", "mixed"]

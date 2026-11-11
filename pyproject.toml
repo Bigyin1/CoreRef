@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cli = ["typer>=0.24,<1"]
+testing = ["conan-server>=2.34,<2.35", "dulwich>=1.2.18,<2"]
 
 [dependency-groups]
 dev = [

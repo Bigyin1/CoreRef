@@ -14,7 +14,7 @@ from coreref.api.errors import CatalogError
 from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Record, Ref
-from examples.conan_config import configured_home
+from coreref.testing import configured_home
 from tests.helpers import local_record
 from tests.test_models import UserPayload
 

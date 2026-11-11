@@ -9,7 +9,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Ref
-from examples.local_server import local_server
+from coreref.testing import local_server
 
 
 def main() -> None:

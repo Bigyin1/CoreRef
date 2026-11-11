@@ -18,7 +18,7 @@ NetworkX выбирается resolver по поддерживаемой вер�
 
 Тесты используют отдельные Conan home и собственные серверы со случайными портами
 и учётными данными. Пользовательские cache, remotes и credentials не меняются.
-Настройка изолирована в `examples/conan_config.py` и `examples/local_server.py`;
+Переиспользуемые хелперы поставляются в `coreref.testing` (extra `[testing]`);
 SDK предполагает готовую конфигурацию Conan. Docker не требуется.
 CI проверяет обе группы тестов с общим порогом покрытия 95%.
 
@@ -126,3 +126,97 @@ uv run --frozen pytest tests/performance -m performance --benchmark-compare
 Не использовать `--benchmark-only`, если нужны и проверки числа операций:
 они намеренно не используют fixture `benchmark`. Для быстрой проверки корректности
 всей группы без повторных измерений подходит `--benchmark-disable`.
+
+## Хелперы для тестирования зависимых flow
+
+Установите `coreref[testing]`. Основной вход — `with environment(root) as sandbox`:
+он сам запускает сервер и объединяет создание Conan-клиентов, Git-репозиториев,
+пакетов и workspace под одной директорией. Модуль не зависит от pytest; директории и время жизни
+ресурсов задаёт вызывающий код. `local_server()` запускает собственный Conan server
+и останавливает его при выходе, в том числе после ошибки. Логи и данные остаются
+в переданной директории. `server.configure(home, local_sources=True)` готовит
+изолированный Conan home с профилем и авторизацией; `configured_home(home)` —
+cache без публичных remotes. Окружение процесса и пользовательский cache не меняются.
+
+```python
+from coreref.api.graph import Graph
+from coreref.api.records import LocalRecord, Ref
+from coreref.testing import environment
+
+
+def test_flow(tmp_path, monkeypatch):
+    with environment(tmp_path) as sandbox:
+        publisher = sandbox.catalog()
+        cpu = sandbox.package(
+            Ref("soc.cpu.rtl.default/1.0"),
+            sources={"cpu.sv": "module cpu; endmodule\n"},
+            files={"config.json": "{}"},
+        )
+        # Обычный SDK задаёт payload, связи, lockfile и публикацию.
+        cpu.payload = {"flow": "example"}
+        published = publisher.publish(cpu)
+        reader = sandbox.catalog()  # Независимый cache, тот же сервер.
+        assert reader.get_with_sources(published.ref).files["config.json"].exists()
+
+        workspace = sandbox.workspace(reader)
+        workspace.add(cpu.source, record=cpu)
+        monkeypatch.chdir(workspace.path.parent)
+        graph = Graph(reader, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(cpu.ref,))
+        assert graph.get_with_sources()[0].is_editable
+```
+
+`Sandbox.package()` создаёт новый набор входов при каждом вызове: `sources` —
+Git-checkout с коммитом и отдельным bare upstream (`origin`), `files` — упаковываемые файлы; значения —
+строки или bytes. Сложные графы собираются обычными `publish(dependencies=...)`.
+Для собственных фикстур доступны `git_repository(directory, files)` и
+`git_upstream(checkout, directory)`: второй создаёт bare origin для готового checkout.
+Изменения можно коммитить и отправлять туда обычным Git или Dulwich.
+Workspace использует стандартное обнаружение Conan по текущей директории;
+хелперы не переключают её автоматически. Эти средства предназначены для локальных
+тестов, а не для настройки рабочего Conan-клиента или производственного реестра.
+
+### Набор связанных пакетов
+
+`environment()` создаёт `Sandbox`, который объединяет сервер, Git-upstreams и несколько независимых клиентов.
+Иерархию задают обычные зависимости SDK; workspace нужен для локальной разработки
+выбранных узлов, а не для хранения опубликованного графа.
+
+```mermaid
+graph TD
+    top --> cpu
+    top --> io
+    cpu --> util
+    io --> util
+```
+
+```python
+def test_package_graph(tmp_path):
+    with environment(tmp_path) as sandbox:
+        publisher = sandbox.catalog()
+        links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
+        records = {
+            name: sandbox.package(
+                Ref(f"soc.{name}.rtl.default/1.0"),
+                sources={f"{name}.sv": f"module {name}; endmodule\n"},
+            )
+            for name in links
+        }
+        # Порядок публикации вычисляется автоматически по связям.
+        published = sandbox.publish(publisher, records, dependencies=links)
+
+        # Чистый клиент скачивает рецепты с Conan server, исходники — из Git origins.
+        graph = Graph(sandbox.catalog(), published["top"].ref)
+        assert len(graph.get_with_sources()) == 4
+```
+
+Ключи `records` — произвольные короткие имена, не Conan Ref. Через них `dependencies`
+задаёт связи. У записей могут быть любые Ref, payload, исходники и файлы.
+`Sandbox.publish()` проверяет неизвестные имена и циклы до первой публикации,
+затем возвращает опубликованные записи по тем же именам. Порядок входных записей
+не важен. При ошибке самого Conan уже опубликованные пакеты остаются на сервере.
+
+Git-upstreams — локальные bare-репозитории на файловой системе, без отдельного
+Git-сервиса. Рабочие checkout можно удалить после публикации: получение исходников
+по-прежнему работает из upstream. Для проверки editable-сценариев можно добавить
+несколько checkout в один `Sandbox.workspace()`, передав их зависимости в
+`Workspace.add(..., dependencies=...)`; остальные узлы будут получены с Conan server.

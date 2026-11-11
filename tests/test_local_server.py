@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from examples import local_server as servers
+from coreref.testing import server as servers
 
 
 def test_real_bind_collision_is_retried_and_both_children_are_stopped(

@@ -347,6 +347,10 @@ dependencies = [
 cli = [
     { name = "typer" },
 ]
+testing = [
+    { name = "conan-server" },
+    { name = "dulwich" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -364,6 +368,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "conan", specifier = ">=2.34,<2.35" },
+    { name = "conan-server", marker = "extra == 'testing'", specifier = ">=2.34,<2.35" },
+    { name = "dulwich", marker = "extra == 'testing'", specifier = ">=1.2.18,<2" },
     { name = "edify", marker = "python_full_version < '3.11'", specifier = ">=0.3,<1" },
     { name = "edify", marker = "python_full_version >= '3.11'", specifier = ">=1.1.2,<2" },
     { name = "frozendict", specifier = ">=2.4.7,<3" },
@@ -374,7 +380,7 @@ requires-dist = [
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.24,<1" },
     { name = "typing-extensions", specifier = ">=4.12,<5" },
 ]
-provides-extras = ["cli"]
+provides-extras = ["cli", "testing"]
 
 [package.metadata.requires-dev]
 dev = [
