@@ -129,7 +129,9 @@ uv run --frozen pytest tests/performance -m performance --benchmark-compare
 
 ## Хелперы для тестирования зависимых flow
 
-Установите `coreref[testing]`. Модуль не зависит от pytest; директории и время жизни
+Установите `coreref[testing]`. Основной вход — `with environment(root) as sandbox`:
+он сам запускает сервер и объединяет создание Conan-клиентов, Git-репозиториев,
+пакетов и workspace под одной директорией. Модуль не зависит от pytest; директории и время жизни
 ресурсов задаёт вызывающий код. `local_server()` запускает собственный Conan server
 и останавливает его при выходе, в том числе после ошибки. Логи и данные остаются
 в переданной директории. `server.configure(home, local_sources=True)` готовит
@@ -139,12 +141,11 @@ cache без публичных remotes. Окружение процесса и 
 ```python
 from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Ref
-from coreref.testing import Sandbox, local_server
+from coreref.testing import environment
 
 
 def test_flow(tmp_path, monkeypatch):
-    with local_server(tmp_path / "server") as server:
-        sandbox = Sandbox(server, tmp_path / "fixtures")
+    with environment(tmp_path) as sandbox:
         publisher = sandbox.catalog()
         cpu = sandbox.package(
             Ref("soc.cpu.rtl.default/1.0"),
@@ -165,9 +166,57 @@ def test_flow(tmp_path, monkeypatch):
 ```
 
 `Sandbox.package()` создаёт новый набор входов при каждом вызове: `sources` —
-небольшой Git-репозиторий с коммитом, `files` — упаковываемые файлы; значения —
+Git-checkout с коммитом и отдельным bare upstream (`origin`), `files` — упаковываемые файлы; значения —
 строки или bytes. Сложные графы собираются обычными `publish(dependencies=...)`.
-Для собственных фикстур доступен `git_repository(directory, files)`.
+Для собственных фикстур доступны `git_repository(directory, files)` и
+`git_upstream(checkout, directory)`: второй создаёт bare origin для готового checkout.
+Изменения можно коммитить и отправлять туда обычным Git или Dulwich.
 Workspace использует стандартное обнаружение Conan по текущей директории;
 хелперы не переключают её автоматически. Эти средства предназначены для локальных
 тестов, а не для настройки рабочего Conan-клиента или производственного реестра.
+
+### Набор связанных пакетов
+
+`environment()` создаёт `Sandbox`, который объединяет сервер, Git-upstreams и несколько независимых клиентов.
+Иерархию задают обычные зависимости SDK; workspace нужен для локальной разработки
+выбранных узлов, а не для хранения опубликованного графа.
+
+```mermaid
+graph TD
+    top --> cpu
+    top --> io
+    cpu --> util
+    io --> util
+```
+
+```python
+def test_package_graph(tmp_path):
+    with environment(tmp_path) as sandbox:
+        publisher = sandbox.catalog()
+        links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
+        records = {
+            name: sandbox.package(
+                Ref(f"soc.{name}.rtl.default/1.0"),
+                sources={f"{name}.sv": f"module {name}; endmodule\n"},
+            )
+            for name in links
+        }
+        # Порядок публикации вычисляется автоматически по связям.
+        published = sandbox.publish(publisher, records, dependencies=links)
+
+        # Чистый клиент скачивает рецепты с Conan server, исходники — из Git origins.
+        graph = Graph(sandbox.catalog(), published["top"].ref)
+        assert len(graph.get_with_sources()) == 4
+```
+
+Ключи `records` — произвольные короткие имена, не Conan Ref. Через них `dependencies`
+задаёт связи. У записей могут быть любые Ref, payload, исходники и файлы.
+`Sandbox.publish()` проверяет неизвестные имена и циклы до первой публикации,
+затем возвращает опубликованные записи по тем же именам. Порядок входных записей
+не важен. При ошибке самого Conan уже опубликованные пакеты остаются на сервере.
+
+Git-upstreams — локальные bare-репозитории на файловой системе, без отдельного
+Git-сервиса. Рабочие checkout можно удалить после публикации: получение исходников
+по-прежнему работает из upstream. Для проверки editable-сценариев можно добавить
+несколько checkout в один `Sandbox.workspace()`, передав их зависимости в
+`Workspace.add(..., dependencies=...)`; остальные узлы будут получены с Conan server.

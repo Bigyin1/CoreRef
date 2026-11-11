@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from io import BytesIO
 from pathlib import Path
 
 import pytest
-from dulwich import porcelain
-from dulwich.refs import Ref as GitRef
-from dulwich.repo import Repo
 
 from coreref.api.catalog import Catalog
-from coreref.testing import LocalServer, git_repository, local_server
+from coreref.testing import LocalServer, git_repository, git_upstream, local_server
 
 
 @pytest.fixture
@@ -34,17 +30,7 @@ def checkout(tmp_path: Path) -> Path:
 @pytest.fixture
 def git_origin(checkout: Path, tmp_path: Path) -> Path:
     """A separate authoritative Git remote, standing in for GitLab in local tests."""
-    remote = tmp_path / "gitlab-origin.git"
-    with porcelain.clone(str(checkout), remote, bare=True, errstream=BytesIO()):
-        pass
-    with Repo(checkout) as repo:
-        config = repo.get_config()
-        config.set((b"remote", b"origin"), b"url", str(remote).encode())
-        config.write_to_path()
-        branches, _ = repo.refs.follow(GitRef(b"HEAD"))
-        branch = branches[-1].removeprefix(b"refs/heads/")
-        repo.refs[GitRef(b"refs/remotes/origin/" + branch)] = repo.head()
-    return remote
+    return git_upstream(checkout, tmp_path / "gitlab-origin.git")
 
 
 @pytest.fixture(autouse=True)
