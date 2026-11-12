@@ -31,8 +31,8 @@ class LocalServer:
     password: str = field(repr=False)
     remote: str = "catalog-test"
 
-    def configure(self, home: Path, *, local_sources: bool = False) -> Path:
-        """Configure one owned test cache, without changing ambient CONAN_HOME."""
+    def configure(self, home: Path, *, local_sources: bool = True) -> Path:
+        """Configure an owned cache; local Git URLs are allowed by default for tests."""
         configured_home(home)
         if local_sources:
             # Only this private test server accepts SCM URLs of temporary Git repos.

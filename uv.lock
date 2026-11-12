@@ -350,6 +350,7 @@ cli = [
 testing = [
     { name = "conan-server" },
     { name = "dulwich" },
+    { name = "pytest" },
 ]
 
 [package.dev-dependencies]
@@ -376,6 +377,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6,<4" },
     { name = "networkx", specifier = ">=3.4,<4" },
     { name = "pydantic", specifier = ">=2.14,<3" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.4,<10" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.24,<1" },
     { name = "typing-extensions", specifier = ">=4.12,<5" },

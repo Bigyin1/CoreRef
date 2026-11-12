@@ -220,3 +220,54 @@ Git-сервиса. Рабочие checkout можно удалить после
 по-прежнему работает из upstream. Для проверки editable-сценариев можно добавить
 несколько checkout в один `Sandbox.workspace()`, передав их зависимости в
 `Workspace.add(..., dependencies=...)`; остальные узлы будут получены с Conan server.
+
+### Consumer-проекты и инкрементальные сценарии
+
+```python
+with environment(tmp_path / "infra", namespace="soc") as env:
+    catalog = env.catalog()
+    cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
+    published = env.publish(catalog, cpu)
+
+    # Обычный DepsFile: можно менять зависимости через add/remove/save.
+    project = env.project(catalog, env.ref("top"), path=tmp_path / "top/deps.yml")
+    project.add(published.ref.without_revision())
+    project.save()
+
+    # Workspace находится над проектом; Conan обнаружит его из top/.
+    workspace = env.workspace(catalog, directory=tmp_path)
+    workspace.add(cpu.source, record=cpu)
+```
+
+`package(ref, source=existing_directory)` использует готовые исходники без изменения
+их Git-состояния; `sources={...}` создаёт новые. Публикация одного `LocalRecord`
+принимает `dependencies=(published.ref, ...)`. В публикации набора значения
+`dependencies` могут смешивать короткие имена и уже опубликованные `Ref`.
+`ref(component, version="1.0", view="rtl", type="default")` использует namespace окружения.
+`project(..., dependencies=(...))` сразу записывает зависимости; параметр `path`
+позволяет выбрать собственное имя YAML и расположение проекта.
+
+Git-хелперы поддерживают `FixtureFile(content, mode=0o755)` для исполняемых файлов.
+`git_repository(directory, files)` принимает существующую директорию без Git;
+`reuse=True` добавляет коммит в уже существующий репозиторий, сохраняя историю.
+`git_commit(directory, files, message="Update", author="Flow <flow@example.invalid>", push=True)`
+создаёт следующий коммит и отправляет его в origin. Reset не выполняется.
+Тестовый профиль определяется через Conan `profiles.detect()`; существующий профиль
+сохраняется. `LocalServer.configure()` по умолчанию разрешает локальные Git URL;
+для явного запрета передайте `local_sources=False` в новом cache.
+
+### Подключение к pytest
+
+В `conftest.py` зависимого проекта достаточно указать:
+
+```python
+pytest_plugins = ["coreref.testing.pytest_plugin"]
+```
+
+Плагин предоставляет function-scoped фикстуры `coreref_environment`, `coreref_server`,
+`coreref_catalog`, `coreref_project` (последний создаёт `tmp_path/deps.yml`). Они используют
+один сервер на тест, отдельный cache и автоматически освобождают сервер после ошибки.
+Тесты с этими фикстурами получают маркер `coreref`: их можно выбрать через `pytest -m coreref`.
+Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
+директории, выбранной тестом через `monkeypatch.chdir()`. Установка `coreref[testing]`
+включает pytest; сам `environment()` по-прежнему можно использовать без плагина.

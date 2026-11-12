@@ -4,73 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from io import BytesIO
 from itertools import count
 from pathlib import Path
+from typing import overload
 
 import networkx as nx
-from dulwich import porcelain
-from dulwich.refs import Ref as GitRef
-from dulwich.repo import Repo
 
 from ..api.catalog import Catalog
 from ..api.records import InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
+from ..tools.deps import DepsFile
+from .git import FixtureFile, git_repository, git_upstream, write_files
 from .server import LocalServer, local_server
-
-
-def _write_files(directory: Path, files: Mapping[str, str | bytes]) -> dict[str, Path]:
-    paths = {}
-    for name, content in files.items():
-        path = directory / name
-        if not path.resolve().is_relative_to(directory.resolve()):
-            raise ValueError(f"Fixture file must stay inside its directory: {name}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content.encode() if isinstance(content, str) else content)
-        paths[name] = path
-    return paths
-
-
-def git_repository(directory: Path, files: Mapping[str, str | bytes]) -> Path:
-    """Create a new committed Git repository suitable for Conan SCM tests.
-
-    The destination must not exist. Local SCM URLs require a test home configured
-    with ``local_sources=True``. No user Git identity or signing settings are used.
-    """
-    directory = directory.resolve()
-    directory.mkdir(parents=True)
-    with porcelain.init(directory) as repo:
-        repo.refs.set_symbolic_ref(GitRef(b"HEAD"), GitRef(b"refs/heads/main"))
-        _write_files(directory, files)
-        porcelain.add(directory, paths=list(files))
-        porcelain.commit(
-            directory,
-            message=b"Test sources",
-            author=b"Test <test@example.invalid>",
-            committer=b"Test <test@example.invalid>",
-            sign=False,
-        )
-    return directory
-
-
-def git_upstream(checkout: Path, directory: Path) -> Path:
-    """Create a bare origin for an existing checkout, including tracking refs.
-
-    The destination must not exist. Tests can commit and push subsequent changes
-    with Dulwich or Git, just as they would with a remote repository.
-    """
-    directory = directory.resolve()
-    directory.mkdir(parents=True)
-    with porcelain.clone(str(checkout), directory, bare=True, errstream=BytesIO()):
-        pass
-    with Repo(checkout) as repo:
-        config = repo.get_config()
-        config.set((b"remote", b"origin"), b"url", str(directory).encode())
-        config.write_to_path()
-        branches, _ = repo.refs.follow(GitRef(b"HEAD"))
-        branch = branches[-1].removeprefix(b"refs/heads/")
-        repo.refs[GitRef(b"refs/remotes/origin/" + branch)] = repo.head()
-    return directory
 
 
 class Sandbox:
@@ -80,41 +25,95 @@ class Sandbox:
     this helper never changes cwd, environment variables or the user's Conan home.
     """
 
-    def __init__(self, server: LocalServer, root: Path) -> None:
+    def __init__(self, server: LocalServer, root: Path, *, namespace: str = "test") -> None:
         self.server = server
         self.root = root.resolve()
+        self.namespace = namespace
         self._sequence = count()
 
     def catalog(self) -> Catalog:
         """Return a fresh isolated client authenticated against the shared server."""
         home = self.root / f"client-{next(self._sequence)}"
-        return Catalog(self.server.configure(home, local_sources=True))
+        return Catalog(self.server.configure(home))
 
     def package(
         self,
         ref: Ref,
         *,
-        sources: Mapping[str, str | bytes] | None = None,
-        files: Mapping[str, str | bytes] | None = None,
+        source: Path | None = None,
+        sources: Mapping[str, str | bytes | FixtureFile] | None = None,
+        files: Mapping[str, str | bytes | FixtureFile] | None = None,
     ) -> LocalRecord:
         """Prepare one local record; publish it with normal SDK dependencies/payload.
 
-        ``sources`` creates a checkout with a committed bare origin; ``files`` creates packaged
-        artifacts. Repeated calls use different directories, including for one Ref.
+        ``source`` wraps an existing directory without modifying its Git state.
+        ``sources`` generates a checkout with a bare origin; ``files`` creates artifacts.
+        Repeated generated inputs use separate directories, including for one Ref.
         """
         directory = self.root / f"package-{next(self._sequence)}"
-        source = git_repository(directory / "source", sources) if sources is not None else None
+        if source is not None and sources is not None:
+            raise ValueError("Use source for an existing directory or sources for generated files")
         if source is not None:
+            source = source.resolve()
+            if not source.is_dir():
+                raise FileNotFoundError(source)
+        if sources is not None:
+            source = git_repository(directory / "source", sources)
             git_upstream(source, directory / "upstream.git")
-        paths = _write_files(directory / "artifacts", files or {})
+        paths = write_files(directory / "artifacts", files or {})
         return LocalRecord(ref, source=source, files=paths)
 
+    def ref(
+        self,
+        component: str,
+        version: str = "1.0",
+        *,
+        view: str = "rtl",
+        type: str = "default",
+    ) -> Ref:
+        """Build fixture coordinates in this sandbox's namespace."""
+        return Ref.from_fields(self.namespace, component, view, type, version)
+
+    @overload
+    def publish(
+        self,
+        catalog: Catalog,
+        records: LocalRecord,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+    ) -> InstalledRecord: ...
+
+    @overload
     def publish(
         self,
         catalog: Catalog,
         records: Mapping[str, LocalRecord],
         *,
-        dependencies: Mapping[str, tuple[str, ...]],
+        dependencies: Mapping[str, tuple[str | Ref, ...]],
+    ) -> dict[str, InstalledRecord]: ...
+
+    def publish(
+        self,
+        catalog: Catalog,
+        records: LocalRecord | Mapping[str, LocalRecord],
+        *,
+        dependencies: tuple[Ref, ...] | Mapping[str, tuple[str | Ref, ...]] = (),
+    ) -> InstalledRecord | dict[str, InstalledRecord]:
+        """Publish one record, or a named set with aliases and previously published Refs."""
+        if isinstance(records, LocalRecord):
+            if not isinstance(dependencies, tuple):
+                raise TypeError("A single package requires a tuple of Refs")
+            return catalog.publish(records, dependencies=dependencies)
+        if isinstance(dependencies, tuple):
+            raise TypeError("A package set requires a dependency mapping")
+        return self._publish_set(catalog, records, dependencies=dependencies)
+
+    def _publish_set(
+        self,
+        catalog: Catalog,
+        records: Mapping[str, LocalRecord],
+        *,
+        dependencies: Mapping[str, tuple[str | Ref, ...]],
     ) -> dict[str, InstalledRecord]:
         """Publish a named package set, ordering dependencies automatically.
 
@@ -126,7 +125,7 @@ class Sandbox:
         graph.add_nodes_from(records)
         graph.add_nodes_from(dependencies)
         for name, requirements in dependencies.items():
-            graph.add_edges_from((dependency, name) for dependency in requirements)
+            graph.add_edges_from((dep, name) for dep in requirements if isinstance(dep, str))
         unknown = set(graph) - records.keys()
         if unknown:
             raise ValueError(f"Unknown fixture packages: {', '.join(sorted(unknown))}")
@@ -136,24 +135,44 @@ class Sandbox:
             raise ValueError("Fixture package dependencies contain a cycle") from error
         published: dict[str, InstalledRecord] = {}
         for name in order:
-            refs = tuple(published[dep].ref for dep in dependencies.get(name, ()))
+            refs = tuple(
+                published[dep].ref if isinstance(dep, str) else dep
+                for dep in dependencies.get(name, ())
+            )
             published[name] = catalog.publish(records[name], dependencies=refs)
         return published
 
-    def workspace(self, catalog: Catalog) -> Workspace:
+    def project(
+        self,
+        catalog: Catalog,
+        ref: Ref,
+        *,
+        path: Path | None = None,
+        dependencies: tuple[Ref, ...] = (),
+    ) -> DepsFile:
+        """Create a consumer deps document; add/save/resolve it through DepsFile."""
+        path = path or self.root / f"project-{next(self._sequence)}" / "deps.yml"
+        document = DepsFile.create(catalog, ref, path, source=".")
+        for dependency in dependencies:
+            document.add(dependency)
+        document.save()
+        return document
+
+    def workspace(self, catalog: Catalog, *, directory: Path | None = None) -> Workspace:
         """Initialize a native workspace; add records with Workspace.add().
 
         Resolve graphs from the workspace directory to enable Conan discovery.
-        Tests can use monkeypatch.chdir(workspace.path.parent) for that scope.
+        Set directory to the project directory or an ancestor for normal discovery.
+        Tests can use monkeypatch.chdir(project.path.parent) for that scope.
         """
-        directory = self.root / f"workspace-{next(self._sequence)}"
+        directory = directory or self.root / f"workspace-{next(self._sequence)}"
         workspace = Workspace(catalog, directory / "conanws.yml")
         workspace.init()
         return workspace
 
 
 @contextmanager
-def environment(root: Path) -> Iterator[Sandbox]:
+def environment(root: Path, *, namespace: str = "test") -> Iterator[Sandbox]:
     """Own a complete local package system for a flow test.
 
     Start/stop the Conan server, and provide builders for its isolated clients,
@@ -162,4 +181,4 @@ def environment(root: Path) -> Iterator[Sandbox]:
     """
     root = root.resolve()
     with local_server(root / "server") as server:
-        yield Sandbox(server, root / "fixtures")
+        yield Sandbox(server, root / "fixtures", namespace=namespace)
