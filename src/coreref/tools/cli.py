@@ -42,7 +42,7 @@ class _WorkspaceCommands:
             Workspace(self._catalog_factory(), project_dir / "conanws.yml").init()
 
     def add(self, directory: Path, project_dir: ProjectDir = Path(".")) -> None:
-        """Register an existing package directory with Conan."""
+        """Register a directory, preparing a missing recipe from deps.yaml or deps.yml."""
         with _command_errors():
             catalog = self._catalog_factory()
             source = directory.expanduser().resolve()
@@ -50,7 +50,10 @@ class _WorkspaceCommands:
             if (source / "conanfile.py").exists():
                 workspace.add(source)
             else:
-                DepsFile(catalog, source / "deps.yml").add_to_workspace(workspace)
+                manifest = source / "deps.yaml"
+                if not manifest.exists() and (source / "deps.yml").exists():
+                    manifest = source / "deps.yml"
+                DepsFile(catalog, manifest).add_to_workspace(workspace)
             typer.echo(source)
 
     def open(
