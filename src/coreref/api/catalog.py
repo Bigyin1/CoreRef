@@ -33,8 +33,6 @@ class Catalog:
     def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
         """Find exact coordinates without downloading recipes or reading payloads."""
         pattern = query._conan_pattern(all_revisions=all_revisions)
-        if pattern is None:
-            return ()
         refs = []
         for reference, revisions in self._client.index(pattern).items():
             for revision in revisions.revisions:

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing_extensions import Self
 
 from .._internal.references import NAME_PART, REVISION, VERSION
+from .errors import InvalidPackage
 from .records import LocalRecord, Record, Ref
 
 
@@ -43,14 +44,14 @@ class SearchQuery:
             revision=revision,
         )
 
-    def _conan_pattern(self, *, all_revisions: bool = False) -> str | None:
-        """Narrow the Conan search; matches_ref applies exact filters to the results."""
+    def __post_init__(self) -> None:
         patterns = {"version": VERSION, "revision": REVISION}
-        if any(
-            value is not None and not patterns.get(field, NAME_PART).fullmatch(value)
-            for field, value in self._criteria().items()
-        ):
-            return None
+        for name, value in self._criteria().items():
+            if value is not None and not patterns.get(name, NAME_PART).fullmatch(value):
+                raise InvalidPackage(f"Invalid search field {name}: {value!r}")
+
+    def _conan_pattern(self, *, all_revisions: bool = False) -> str:
+        """Narrow the Conan search; matches_ref applies exact filters to the results."""
         fields = (self.namespace, self._component_pattern, self.view, self.type)
         name = ".".join(value if value is not None else "*" for value in fields)
         revision = self.revision or ("*" if all_revisions else "latest")

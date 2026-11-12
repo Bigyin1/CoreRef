@@ -37,7 +37,7 @@ def coreref_server(coreref_environment: Sandbox) -> LocalServer:
 
 @pytest.fixture
 def coreref_catalog(coreref_environment: Sandbox) -> Catalog:
-    return coreref_environment.catalog()
+    return coreref_environment.new_catalog()
 
 
 @pytest.fixture

@@ -146,7 +146,7 @@ from coreref.testing import environment
 
 def test_flow(tmp_path, monkeypatch):
     with environment(tmp_path) as sandbox:
-        publisher = sandbox.catalog()
+        publisher = sandbox.new_catalog()
         cpu = sandbox.package(
             Ref("soc.cpu.rtl.default/1.0"),
             sources={"cpu.sv": "module cpu; endmodule\n"},
@@ -155,7 +155,7 @@ def test_flow(tmp_path, monkeypatch):
         # Обычный SDK задаёт payload, связи, lockfile и публикацию.
         cpu.payload = {"flow": "example"}
         published = publisher.publish(cpu)
-        reader = sandbox.catalog()  # Независимый cache, тот же сервер.
+        reader = sandbox.new_catalog()  # Независимый cache, тот же сервер.
         assert reader.get_with_sources(published.ref).files["config.json"].exists()
 
         workspace = sandbox.workspace(reader)
@@ -192,7 +192,7 @@ graph TD
 ```python
 def test_package_graph(tmp_path):
     with environment(tmp_path) as sandbox:
-        publisher = sandbox.catalog()
+        publisher = sandbox.new_catalog()
         links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
         records = {
             name: sandbox.package(
@@ -202,16 +202,16 @@ def test_package_graph(tmp_path):
             for name in links
         }
         # Порядок публикации вычисляется автоматически по связям.
-        published = sandbox.publish(publisher, records, dependencies=links)
+        published = sandbox.publish_set(publisher, records, dependencies=links)
 
         # Чистый клиент скачивает рецепты с Conan server, исходники — из Git origins.
-        graph = Graph(sandbox.catalog(), published["top"].ref)
+        graph = Graph(sandbox.new_catalog(), published["top"].ref)
         assert len(graph.get_with_sources()) == 4
 ```
 
 Ключи `records` — произвольные короткие имена, не Conan Ref. Через них `dependencies`
 задаёт связи. У записей могут быть любые Ref, payload, исходники и файлы.
-`Sandbox.publish()` проверяет неизвестные имена и циклы до первой публикации,
+`Sandbox.publish_set()` проверяет неизвестные имена и циклы до первой публикации,
 затем возвращает опубликованные записи по тем же именам. Порядок входных записей
 не важен. При ошибке самого Conan уже опубликованные пакеты остаются на сервере.
 
@@ -225,9 +225,9 @@ Git-сервиса. Рабочие checkout можно удалить после
 
 ```python
 with environment(tmp_path / "infra", namespace="soc") as env:
-    catalog = env.catalog()
+    catalog = env.new_catalog()
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
-    published = env.publish(catalog, cpu)
+    published = catalog.publish(cpu)
 
     # Обычный DepsFile: можно менять зависимости через add/remove/save.
     project = env.project(catalog, env.ref("top"), path=tmp_path / "top/deps.yml")
@@ -240,7 +240,7 @@ with environment(tmp_path / "infra", namespace="soc") as env:
 ```
 
 `package(ref, source=existing_directory)` использует готовые исходники без изменения
-их Git-состояния; `sources={...}` создаёт новые. Публикация одного `LocalRecord`
+их Git-состояния; `sources={...}` создаёт новые. Обычный `Catalog.publish()` для одного `LocalRecord`
 принимает `dependencies=(published.ref, ...)`. В публикации набора значения
 `dependencies` могут смешивать короткие имена и уже опубликованные `Ref`.
 `ref(component, version="1.0", view="rtl", type="default")` использует namespace окружения.
@@ -305,12 +305,12 @@ from coreref.tools.deps import DepsFile
 def test_soc(tmp_path):
     source = Path(__file__).with_name("test_projects")
     with environment(tmp_path, projects=source, repositories=("stdlib", "cpu")) as env:
-        catalog = env.catalog()
+        catalog = env.new_catalog()
         # Flow сам читает манифесты и выполняет нужные команды.
         for name in ("stdlib", "cpu"):
             project = DepsFile(catalog, env.projects / name / "deps.yml")
             catalog.publish(project.record, dependencies=project.dependencies)
-        soc = DepsFile(env.catalog(), env.projects / "soc/deps.yml")
+        soc = DepsFile(env.new_catalog(), env.projects / "soc/deps.yml")
         assert len(soc.resolve().get_with_sources()) == 2
 ```
 
@@ -335,3 +335,9 @@ Workspace создаётся над рабочими проектами чере
 Inline-создание через `env.package(..., sources={...}, files={...})` и `env.project()`
 также доступно. Оба способа можно смешивать в одном окружении: загрузить базовые
 проекты из директории, создать дополнительный пакет в коде и связать их обычными Ref.
+
+`env.new_catalog()` всегда создаёт новый независимый cache; сохраните возвращённый
+каталог в переменную для повторного использования. `env.publish_set(catalog, records,
+dependencies=...)` публикует только именованные наборы. Одиночные записи, включая
+инкрементальные обновления и зависимости на ранее опубликованные пакеты, публикуются
+обычным `catalog.publish(record, dependencies=(...))`.

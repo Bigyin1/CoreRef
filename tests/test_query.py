@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
 from coreref.api.query import SearchQuery
 from coreref.api.records import Record, Ref
 from tests.helpers import local_record, release, resolve_published, run
@@ -22,15 +23,10 @@ from tests.helpers import local_record, release, resolve_published, run
         SearchQuery(namespace="demo-ip"),
         SearchQuery(namespace="flow"),
         SearchQuery(namespace="missing"),
-        SearchQuery(namespace=""),
         SearchQuery(component="rtl", version="v1", view="release", namespace="demo-ip"),
         SearchQuery(component="rtl", namespace="flow"),
         SearchQuery(component="rtl", version="v1", view="run"),
         SearchQuery(view="unknown"),
-        SearchQuery(view=""),
-        SearchQuery(version="V1"),
-        SearchQuery(component=""),
-        SearchQuery(component="' OR true //"),
     ],
 )
 def test_query_matching_and_catalog_search_agree(catalog: Catalog, query: SearchQuery) -> None:
@@ -122,9 +118,29 @@ def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catal
             "soc.cpu*.be.lib-lef/*#*",
         ),
         (SearchQuery(version="1.0"), "*.*.*.*/1.0#*"),
-        (SearchQuery(component="cpu*"), None),
-        (SearchQuery(version="[>=1.0]"), None),
     ],
 )
-def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str | None) -> None:
+def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str) -> None:
     assert query._conan_pattern(all_revisions=True) == pattern
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("namespace", ""),
+        ("namespace", "with/slash"),
+        ("view", "RTL"),
+        ("view", ""),
+        ("component", "cpu*"),
+        ("component", "' OR true //"),
+        ("type", "?"),
+        ("version", "[>=1.0]"),
+        ("version", "V1"),
+        ("subcomponent", ""),
+        ("subcomponent", "alu*"),
+        ("revision", "*"),
+    ],
+)
+def test_invalid_search_fields_raise_domain_errors(field: str, value: str) -> None:
+    with pytest.raises(InvalidPackage, match=field):
+        SearchQuery(**{field: value})

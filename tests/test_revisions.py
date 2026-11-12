@@ -62,7 +62,8 @@ def test_query_builds_revision_patterns_directly() -> None:
     exact = SearchQuery(revision="a" * 32)
     assert exact._conan_pattern() == exact._conan_pattern(all_revisions=True)
     assert exact._conan_pattern() == f"*.*.*.*/*#{'a' * 32}"
-    assert SearchQuery(revision="*")._conan_pattern() is None
+    with pytest.raises(InvalidPackage, match="revision"):
+        SearchQuery(revision="*")
 
 
 @pytest.mark.parametrize("operation", ["publish", "graph"])
@@ -101,7 +102,7 @@ def test_lockfile_and_graph_keep_old_files_after_new_revision(
         Graph(catalog, root, dependencies=(second.ref,), lockfile=lock)
     with pytest.raises(InvalidPackage, match="Revision"):
         graph.get((second.ref,))
-    with pytest.raises(ValueError, match="Revision"):
+    with pytest.raises(InvalidPackage, match="Revision"):
         graph.ordered_refs(second.ref)
 
 

@@ -13,7 +13,7 @@ def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_ser
     env = coreref_environment
     assert coreref_server is env.server
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"})
-    published = env.publish(coreref_catalog, cpu)
+    published = coreref_catalog.publish(cpu)
     coreref_project.add(published.ref.without_revision())
     coreref_project.save()
     assert coreref_project.resolve().get_with_sources()[0].source is not None

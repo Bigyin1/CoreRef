@@ -63,11 +63,9 @@ def test_underscores_are_literal_component_characters(component: str) -> None:
         (SearchQuery(component="cpu", subcomponent=None), "*.cpu.*.*/*#*"),
         (SearchQuery(subcomponent=None), "*.*.*.*/*#*"),
         (SearchQuery(component="cpu_alu"), "*.cpu_alu*.*.*/*#*"),
-        (SearchQuery(subcomponent=""), None),
-        (SearchQuery(subcomponent="alu*"), None),
     ],
 )
-def test_search_patterns(query: SearchQuery, pattern: str | None) -> None:
+def test_search_patterns(query: SearchQuery, pattern: str) -> None:
     assert query._conan_pattern(all_revisions=True) == pattern
 
 
