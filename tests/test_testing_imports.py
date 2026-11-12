@@ -29,9 +29,13 @@ configured_home(root / "offline")
 with local_server(root / "server") as server:
     assert isinstance(server, LocalServer)
     server.configure(root / "reader")
-    Sandbox(server, root / "fixtures").package(
-        Ref("test.meta.rtl.default/1.0")
-    )
+    sandbox = Sandbox(server, root / "fixtures")
+    sandbox.package(Ref("test.meta.rtl.default/1.0"))
+    template = root / "test_projects"
+    template.mkdir()
+    (template / "custom.txt").write_text("flow data")
+    sandbox.load_projects(template)
+    assert (sandbox.projects / "custom.txt").read_text() == "flow data"
 assert not any(name == "dulwich" or name.startswith("dulwich.") for name in sys.modules)
 """
     result = subprocess.run(  # noqa: S603 - fixed script with the current Python interpreter

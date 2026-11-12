@@ -33,14 +33,15 @@ def write_files(directory: Path, files: Mapping[str, str | bytes | FixtureFile])
 
 def git_repository(
     directory: Path,
-    files: Mapping[str, str | bytes | FixtureFile],
+    files: Mapping[str, str | bytes | FixtureFile] | None = None,
     *,
     reuse: bool = False,
 ) -> Path:
     """Initialize an existing directory, or explicitly reuse its Git history.
 
     An existing repository is preserved unless reuse=True; reuse adds a commit,
-    never resets or deletes history. Only supplied files are staged.
+    never resets or deletes history. With files=None, stage the existing tree,
+    respecting .gitignore; otherwise stage only supplied files.
     """
     # Load the optional Git library only when a Git operation is requested.
     from dulwich import porcelain
@@ -60,17 +61,18 @@ def git_repository(
 
 def git_commit(
     directory: Path,
-    files: Mapping[str, str | bytes | FixtureFile],
+    files: Mapping[str, str | bytes | FixtureFile] | None = None,
     *,
     message: str = "Test changes",
     author: str = "Test <test@example.invalid>",
     push: bool = False,
 ) -> str:
-    """Write/stage changes, commit with explicit identity, optionally push to origin."""
+    """Commit supplied changes, or the existing tree when files=None; optionally push."""
     from dulwich import porcelain
 
-    write_files(directory, files)
-    porcelain.add(directory, paths=list(files))
+    if files is not None:
+        write_files(directory, files)
+    porcelain.add(directory, paths=list(files) if files is not None else None)
     revision = porcelain.commit(
         directory,
         message=message.encode(),

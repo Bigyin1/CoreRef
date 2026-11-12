@@ -6,6 +6,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from itertools import count
 from pathlib import Path
+from shutil import copytree, ignore_patterns
 from typing import overload
 
 import networkx as nx
@@ -29,6 +30,7 @@ class Sandbox:
         self.server = server
         self.root = root.resolve()
         self.namespace = namespace
+        self.projects = self.root / "projects"
         self._sequence = count()
 
     def catalog(self) -> Catalog:
@@ -142,6 +144,35 @@ class Sandbox:
             published[name] = catalog.publish(records[name], dependencies=refs)
         return published
 
+    def load_projects(self, source: Path, *, repositories: tuple[str, ...] = ()) -> Path:
+        """Copy an ordinary project tree and prepare selected Git checkouts/origins.
+
+        Return self.projects. Names are relative project directories in the copied
+        tree. Manifests are left to the flow; no packages are published implicitly.
+        Existing destinations are preserved, and source .git metadata is not copied.
+        """
+        source = source.resolve()
+        if self.projects.is_relative_to(source):
+            raise ValueError("Project destination must not be inside the source tree")
+        for name in repositories:
+            project = source / name
+            if Path(name).is_absolute() or not project.resolve().is_relative_to(source):
+                raise ValueError(f"Repository must be inside the project tree: {name}")
+            if not project.is_dir():
+                raise FileNotFoundError(project)
+        copytree(source, self.projects, symlinks=True, ignore=ignore_patterns(".git"))
+        self._prepare_repositories(repositories)
+        return self.projects
+
+    def _prepare_repositories(self, names: tuple[str, ...]) -> None:
+        projects = tuple(self.projects / name for name in names)
+        if any(not path.resolve().is_relative_to(self.projects) for path in projects):
+            raise ValueError("Repository symlinks must stay inside the copied project tree")
+        for project in projects:
+            git_repository(project)
+            origin = self.root / "upstreams" / f"{next(self._sequence)}-{project.name}.git"
+            git_upstream(project, origin)
+
     def project(
         self,
         catalog: Catalog,
@@ -172,13 +203,25 @@ class Sandbox:
 
 
 @contextmanager
-def environment(root: Path, *, namespace: str = "test") -> Iterator[Sandbox]:
+def environment(
+    root: Path,
+    *,
+    namespace: str = "test",
+    projects: Path | None = None,
+    repositories: tuple[str, ...] = (),
+) -> Iterator[Sandbox]:
     """Own a complete local package system for a flow test.
 
     Start/stop the Conan server, and provide builders for its isolated clients,
-    Git-backed packages and editable workspaces. The caller supplies a disposable
-    directory and owns its cleanup; logs and repositories remain there on exit.
+    Git-backed packages and editable workspaces. Optional projects is a normal
+    directory tree, copied to sandbox.projects; repositories selects its Git roots.
+    The caller owns directory cleanup; logs and repositories remain there on exit.
     """
+    if projects is None and repositories:
+        raise ValueError("Repository names require a project tree")
     root = root.resolve()
     with local_server(root / "server") as server:
-        yield Sandbox(server, root / "fixtures", namespace=namespace)
+        sandbox = Sandbox(server, root / "fixtures", namespace=namespace)
+        if projects is not None:
+            sandbox.load_projects(projects, repositories=repositories)
+        yield sandbox

@@ -271,3 +271,66 @@ pytest_plugins = ["coreref.testing.pytest_plugin"]
 Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
 директории, выбранной тестом через `monkeypatch.chdir()`. Установка `coreref[testing]`
 включает pytest; сам `environment()` по-прежнему можно использовать без плагина.
+
+### Обычные проекты рядом с тестом
+
+Для больших сценариев можно хранить проекты обычными директориями вместо словарей
+с содержимым файлов внутри теста. Пример в этом репозитории:
+
+```text
+tests/
+├── test_testing_projects.py
+└── test_projects/
+    ├── soc/                    # Локальный consumer: soc → cpu → stdlib
+    │   ├── deps.yml
+    │   └── rtl/soc.sv
+    ├── cpu/
+    │   ├── deps.yml
+    │   ├── rtl/cpu.sv
+    │   └── scripts/run.sh
+    ├── stdlib/
+    │   ├── deps.yml
+    │   └── rtl/stdlib.sv
+    └── physical/               # Проект со своим JSON-форматом и файлами без SCM
+        ├── project.json
+        └── artifacts/cpu.lib
+```
+
+```python
+from pathlib import Path
+from coreref.testing import environment
+from coreref.tools.deps import DepsFile
+
+
+def test_soc(tmp_path):
+    source = Path(__file__).with_name("test_projects")
+    with environment(tmp_path, projects=source, repositories=("stdlib", "cpu")) as env:
+        catalog = env.catalog()
+        # Flow сам читает манифесты и выполняет нужные команды.
+        for name in ("stdlib", "cpu"):
+            project = DepsFile(catalog, env.projects / name / "deps.yml")
+            catalog.publish(project.record, dependencies=project.dependencies)
+        soc = DepsFile(env.catalog(), env.projects / "soc/deps.yml")
+        assert len(soc.resolve().get_with_sources()) == 2
+```
+
+`projects` указывает на исходное дерево; `env.projects` — отдельная рабочая копия
+с теми же именами директорий. Выбранные `repositories` получают новый Git-коммит
+из существующих файлов и отдельный bare origin. Остальные директории остаются
+обычными проектами без Git. Копирование сохраняет executable-биты и symlinks;
+Git-метаданные исходных репозиториев не переносятся, `.gitignore` учитывается при
+создании коммита. Исходное дерево не изменяется, существующая рабочая копия не
+перезаписывается. Манифесты могут иметь любой формат: helper их не разбирает
+и автоматически не публикует пакеты.
+
+В pytest можно воспользоваться тем же методом на готовой фикстуре:
+`coreref_environment.load_projects(source, repositories=("stdlib", "cpu"))`.
+Workspace создаётся над рабочими проектами через
+`env.workspace(catalog, directory=env.projects)`. Команды flow запускаются из
+`env.projects / "soc"`, чтобы Conan обнаруживал этот workspace.
+Для коммита уже изменённых на диске файлов доступен `git_commit(checkout, push=True)`;
+он учитывает `.gitignore`, не требует повторять содержимое файлов в Python.
+
+Inline-создание через `env.package(..., sources={...}, files={...})` и `env.project()`
+также доступно. Оба способа можно смешивать в одном окружении: загрузить базовые
+проекты из директории, создать дополнительный пакет в коде и связать их обычными Ref.

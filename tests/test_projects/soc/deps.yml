@@ -1,0 +1,4 @@
+ref: demo.soc.rtl.default/1.0
+source: .
+dependencies:
+  - demo.cpu.rtl.default/1.0
