@@ -11,7 +11,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
 from coreref.api.records import InstalledRecord, LocalRecord, Ref
 from coreref.api.workspace import Workspace
-from coreref.tools.deps import DepsFile
+from coreref.tools.manifest import ManifestFile
 
 
 @pytest.fixture
@@ -22,15 +22,15 @@ def file_catalog(tmp_path: Path) -> Catalog:
 def test_yaml_paths_payload_and_explicit_dependency_edits(
     file_catalog: Catalog, tmp_path: Path
 ) -> None:
-    path = tmp_path / "project/deps.yaml"
+    path = tmp_path / "project/manifest.yml"
     path.parent.mkdir()
     path.write_text(
-        "ref: soc.top.rtl.default/1.0\nsource: .\n"
+        "ref: soc.top.rtl.default/1.0\n"
         "files: {spec.json: build/spec.json}\npayload: {sources: [top.sv]}\n"
         "dependencies: [soc.cpu.rtl.default/1.0#old]\n"
     )
-    document = DepsFile(file_catalog, path)
-    assert document.record.source == path.parent
+    document = ManifestFile(file_catalog, path)
+    assert document.record.source is None
     assert document.record.files == {"spec.json": path.parent / "build/spec.json"}
     record = document.record
     assert isinstance(record.payload, dict)
@@ -41,7 +41,7 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
     assert document.dependencies == (Ref("soc.cpu.rtl.default/2.0#new"),)
     assert "1.0#old" in path.read_text()
     document.save()
-    restored = DepsFile(file_catalog, path)
+    restored = ManifestFile(file_catalog, path)
     assert restored.dependencies == document.dependencies
     assert restored.record.payload == document.record.payload
     with pytest.raises(Conflict):
@@ -52,8 +52,8 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
         restored.add(restored.record.ref)
     restored.remove(Ref("soc.cpu.rtl.default/2.0"))
     restored.save()
-    assert DepsFile(file_catalog, path).dependencies == ()
-    assert restored.lockfile == path.parent / "deps.lock"
+    assert ManifestFile(file_catalog, path).dependencies == ()
+    assert restored.lockfile == path.parent / "manifest.lock"
 
 
 @pytest.mark.parametrize(
@@ -80,13 +80,13 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(
 def test_invalid_yaml_is_rejected_without_remote_access(
     file_catalog: Catalog, tmp_path: Path, text: str
 ) -> None:
-    path = tmp_path / "deps.yaml"
+    path = tmp_path / "manifest.yml"
     path.write_text(text)
     with (
         patch.object(file_catalog._client, "run", side_effect=AssertionError("Unexpected command")),
         pytest.raises(InvalidPackage),
     ):
-        DepsFile(file_catalog, path)
+        ManifestFile(file_catalog, path)
     assert path.read_text() == text
 
 
@@ -94,17 +94,17 @@ def test_create_preserves_existing_files_and_supports_independent_manifests(
     file_catalog: Catalog, tmp_path: Path
 ) -> None:
     ref = Ref("demo.block.analysis.model/1.0")
-    first = DepsFile.create(file_catalog, ref, tmp_path / "config/model.yaml", source="../source")
-    second = DepsFile.create(file_catalog, ref, tmp_path / "config/report.yml")
-    assert first.record.source == tmp_path / "source"
+    first = ManifestFile.create(file_catalog, ref, tmp_path / "config/model.yaml")
+    second = ManifestFile.create(file_catalog, ref, tmp_path / "config/report.yml")
+    assert first.record.source is None
     assert second.record.source is None
     assert first.lockfile != second.lockfile
     original = first.path.read_bytes()
     with pytest.raises(Conflict, match="already exists"):
-        DepsFile.create(file_catalog, ref, first.path)
+        ManifestFile.create(file_catalog, ref, first.path)
     assert first.path.read_bytes() == original
     with pytest.raises(InvalidPackage, match="revision"):
-        DepsFile.create(file_catalog, Ref(f"{ref}#fixed"), tmp_path / "bad.yaml")
+        ManifestFile.create(file_catalog, Ref(f"{ref}#fixed"), tmp_path / "bad.yaml")
     assert not (tmp_path / "bad.yaml").exists()
 
 
@@ -127,8 +127,8 @@ def test_full_tree_is_batched_and_lock_refresh_is_explicit(
         LocalRecord(Ref("soc.parent.rtl.default/1.0")),
         dependencies=(scm_package.ref, leaf.ref),
     )
-    document = DepsFile.create(
-        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "project/deps.yaml"
+    document = ManifestFile.create(
+        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "project/manifest.yml"
     )
     document.add(parent.ref.without_revision())
     document.save()
@@ -154,7 +154,9 @@ def test_full_tree_is_batched_and_lock_refresh_is_explicit(
 
 @pytest.mark.conan_remote
 def test_failed_lock_refresh_preserves_previous_file(catalog: Catalog, tmp_path: Path) -> None:
-    document = DepsFile.create(catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "deps.yaml")
+    document = ManifestFile.create(
+        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "manifest.yml"
+    )
     document.create_lockfile()
     original = document.lockfile.read_bytes()
     document.add(Ref("soc.absent.rtl.default/1.0"))
@@ -168,8 +170,8 @@ def test_failed_lock_refresh_preserves_previous_file(catalog: Catalog, tmp_path:
 def test_yaml_graph_uses_native_workspace_from_current_directory(
     catalog: Catalog, scm_package: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = DepsFile.create(
-        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "project/deps.yaml"
+    document = ManifestFile.create(
+        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "project/manifest.yml"
     )
     document.add(scm_package.ref)
     document.save()
@@ -189,11 +191,11 @@ def test_invalid_extension_never_creates_or_overwrites_a_manifest(
     path = tmp_path / name
     ref = Ref("soc.top.rtl.default/1.0")
     with pytest.raises(InvalidPackage, match="extension"):
-        DepsFile.create(file_catalog, ref, path)
+        ManifestFile.create(file_catalog, ref, path)
     assert not path.exists()
     path.write_text(f"ref: {ref}\n")
     with pytest.raises(InvalidPackage, match="extension"):
-        DepsFile(file_catalog, path)
+        ManifestFile(file_catalog, path)
     assert path.read_text() == f"ref: {ref}\n"
 
 
@@ -201,7 +203,9 @@ def test_invalid_extension_never_creates_or_overwrites_a_manifest(
 def test_lockfile_alias_to_manifest_is_rejected_before_conan(
     file_catalog: Catalog, tmp_path: Path, link: str
 ) -> None:
-    document = DepsFile.create(file_catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "deps.yaml")
+    document = ManifestFile.create(
+        file_catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "manifest.yml"
+    )
     original = document.path.read_bytes()
     path = document.lockfile
     if link == "symlink":
@@ -215,19 +219,57 @@ def test_lockfile_alias_to_manifest_is_rejected_before_conan(
         document.create_lockfile()
     assert document.path.read_bytes() == original
     with pytest.raises(InvalidPackage, match="different files"):
-        DepsFile(file_catalog, document.path)
+        ManifestFile(file_catalog, document.path)
 
 
 def test_yaml_duplicate_keys_use_standard_loader_behavior(
     file_catalog: Catalog, tmp_path: Path
 ) -> None:
-    path = tmp_path / "deps.yaml"
+    path = tmp_path / "manifest.yml"
     path.write_text(
         "ref: soc.top.rtl.default/1.0\n"
         "dependencies: [soc.first.rtl.default/1.0]\n"
         "dependencies: [soc.second.rtl.default/1.0]\n"
         "payload: {value: 1, value: 2}\n"
     )
-    document = DepsFile(file_catalog, path)
+    document = ManifestFile(file_catalog, path)
     assert document.dependencies == (Ref("soc.second.rtl.default/1.0"),)
     assert document.record.payload == {"value": 2}
+
+
+@pytest.mark.parametrize("source", [".", "rtl", "true", "null"])
+def test_source_is_not_a_manifest_field(file_catalog: Catalog, tmp_path: Path, source: str) -> None:
+    path = tmp_path / "manifest.yml"
+    path.write_text(f"ref: soc.cpu.rtl.default/1.0\nsource: {source}\n")
+    with pytest.raises(InvalidPackage, match="source"):
+        ManifestFile(file_catalog, path)
+
+
+@pytest.mark.parametrize("view", ["rtl", "be"])
+def test_scm_is_explicit_flow_policy_for_every_view(
+    file_catalog: Catalog,
+    tmp_path: Path,
+    view: str,
+) -> None:
+    manifest = ManifestFile.create(
+        file_catalog, Ref(f"soc.cpu.{view}.default/1.0"), tmp_path / view / "manifest.yml"
+    )
+    record = manifest.record
+    assert record.source is None
+    record.source = manifest.path.parent
+    assert manifest.record.source is None
+    assert "source" not in manifest.model_dump()
+    manifest.save()
+    assert "source:" not in manifest.path.read_text()
+
+
+def test_default_name_and_lockfile_are_manifest(
+    file_catalog: Catalog,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    manifest = ManifestFile.create(file_catalog, Ref("soc.cpu.rtl.default/1.0"))
+    assert manifest.path == tmp_path / "manifest.yml"
+    assert manifest.lockfile == tmp_path / "manifest.lock"
+    assert ManifestFile(file_catalog).record.ref == manifest.record.ref

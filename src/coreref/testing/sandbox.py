@@ -12,7 +12,7 @@ import networkx as nx
 from ..api.catalog import Catalog
 from ..api.records import InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
-from ..tools.deps import DepsFile
+from ..tools.manifest import ManifestFile
 from .catalog import _RecordingCatalog
 from .git import FixtureFile, git_repository, git_upstream, write_files
 from .projects import copy_projects
@@ -173,10 +173,10 @@ class Sandbox:
         *,
         path: Path | None = None,
         dependencies: tuple[Ref, ...] = (),
-    ) -> DepsFile:
-        """Create a consumer deps document; add/save/resolve it through DepsFile."""
-        path = path or self.root / f"project-{next(self._sequence)}" / "deps.yml"
-        document = DepsFile.create(catalog, ref, path, source=".")
+    ) -> ManifestFile:
+        """Create a consumer manifest; add/save/resolve it through ManifestFile."""
+        path = path or self.root / f"project-{next(self._sequence)}" / "manifest.yml"
+        document = ManifestFile.create(catalog, ref, path)
         for dependency in dependencies:
             document.add(dependency)
         document.save()

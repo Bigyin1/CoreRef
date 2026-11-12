@@ -108,9 +108,9 @@ def test_yaml_commands_initialize_edit_lock_and_install(
     assert git_origin.is_dir()
     package = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
     app = create_deps_app(catalog_factory=lambda: catalog)
-    path = tmp_path / "project/deps.yaml"
+    path = tmp_path / "project/manifest.yml"
     options = ["--file", str(path)]
-    result = runner.invoke(app, ["init", "soc.top.rtl.default/1.0", "--source", ".", *options])
+    result = runner.invoke(app, ["init", "soc.top.rtl.default/1.0", *options])
     assert result.exit_code == 0, result.output
     original = path.read_bytes()
     result = runner.invoke(app, ["init", "soc.other.rtl.default/1.0", *options])
@@ -153,7 +153,7 @@ def test_yaml_lock_command_rejects_an_input_named_like_a_lockfile(tmp_path: Path
 def test_cli_adds_an_existing_package_with_deps_yml(catalog: Catalog, tmp_path: Path) -> None:
     package = tmp_path / "existing package"
     package.mkdir()
-    (package / "deps.yml").write_text("ref: soc.cpu.rtl.default/1.0\n")
+    (package / "manifest.yml").write_text("ref: soc.cpu.rtl.default/1.0\n")
     (package / "cpu.sv").write_text("uncommitted local source")
     project = tmp_path / "consumer"
     app = create_workspace_app(catalog_factory=lambda: catalog)
@@ -168,7 +168,7 @@ def test_cli_adds_an_existing_package_with_deps_yml(catalog: Catalog, tmp_path: 
     assert Workspace(catalog, project / "conanws.yml").members == {ref: package}
     result = runner.invoke(app, ["remove", str(package), "--project-dir", str(project)])
     assert result.exit_code == 0
-    assert (package / "deps.yml").is_file()
+    assert (package / "manifest.yml").is_file()
 
 
 @pytest.mark.conan_remote
@@ -181,7 +181,7 @@ def test_cli_rejects_missing_or_invalid_local_package(
     package = tmp_path / "package"
     package.mkdir()
     if manifest is not None:
-        (package / "deps.yml").write_text(manifest)
+        (package / "manifest.yml").write_text(manifest)
     project = tmp_path / "consumer"
     app = create_workspace_app(catalog_factory=lambda: catalog)
     result = runner.invoke(app, ["add", str(package), "--project-dir", str(project)])

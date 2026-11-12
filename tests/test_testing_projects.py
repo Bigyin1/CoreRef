@@ -10,7 +10,7 @@ from dulwich.repo import Repo
 
 from coreref.api.records import LocalRecord, Ref
 from coreref.testing import LocalServer, Sandbox, environment, git_repository
-from coreref.tools.deps import DepsFile
+from coreref.tools.manifest import ManifestFile
 
 PROJECTS = Path(__file__).with_name("test_projects")
 pytestmark = pytest.mark.conan_remote
@@ -21,10 +21,12 @@ def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
         publisher = env.new_catalog()
         published = {}
         for name in ("stdlib", "cpu"):
-            project = DepsFile(publisher, env.projects / name / "deps.yml")
-            published[name] = publisher.publish(project.record, dependencies=project.dependencies)
+            project = ManifestFile(publisher, env.projects / name / "manifest.yml")
+            record = project.record
+            record.source = project.path.parent  # SCM is a policy of this example RTL flow.
+            published[name] = publisher.publish(record, dependencies=project.dependencies)
         reader = env.new_catalog()
-        soc = DepsFile(reader, env.projects / "soc/deps.yml")
+        soc = ManifestFile(reader, env.projects / "soc/manifest.yml")
         graph = soc.resolve()
         records = {record.ref.component: record for record in graph.get_with_sources()}
         assert set(records) == {"cpu", "stdlib"}
@@ -56,9 +58,9 @@ def test_project_copy_preserves_custom_manifest_and_can_be_editable(
     assert env.new_catalog().get(published.ref).files["timing"].read_text() == "library(cpu) {}\n"
     workspace = env.workspace(catalog, directory=projects)
     for name in ("stdlib", "cpu"):
-        DepsFile(catalog, projects / name / "deps.yml").add_to_workspace(workspace)
+        ManifestFile(catalog, projects / name / "manifest.yml").add_to_workspace(workspace)
     monkeypatch.chdir(projects / "soc")
-    records = DepsFile(catalog, projects / "soc/deps.yml").resolve().get_with_sources()
+    records = ManifestFile(catalog, projects / "soc/manifest.yml").resolve().get_with_sources()
     assert all(record.is_editable for record in records)
     assert {record.source for record in records} == {projects / "stdlib", projects / "cpu"}
     assert not (projects / "stdlib/.git").exists()
@@ -92,7 +94,7 @@ def test_git_repository_can_commit_a_directory_without_inline_file_definitions(
         assert isinstance(commit, Commit)
         tree = repo[commit.tree]
         assert isinstance(tree, Tree)
-        assert b"deps.yml" in tree
+        assert b"manifest.yml" in tree
         assert b"scratch" not in tree
 
 
@@ -158,8 +160,10 @@ def test_absolute_repository_symlink_cannot_initialize_the_source_directory(
 def test_inline_packages_and_projects_can_extend_a_directory_fixture(tmp_path: Path) -> None:
     with environment(tmp_path, projects=PROJECTS, repositories=("stdlib",)) as env:
         catalog = env.new_catalog()
-        stdlib = DepsFile(catalog, env.projects / "stdlib/deps.yml")
-        dependency = catalog.publish(stdlib.record)
+        stdlib = ManifestFile(catalog, env.projects / "stdlib/manifest.yml")
+        record = stdlib.record
+        record.source = stdlib.path.parent
+        dependency = catalog.publish(record)
         generated = env.package(
             env.ref("generated"),
             sources={"generated.sv": "module generated; endmodule\n"},

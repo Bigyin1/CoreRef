@@ -8,7 +8,6 @@ class EditableRecord(ConanFile):
 
     def init(self):
 {% if manifest %}
-        import os
         from pathlib import Path
         import yaml
         data = yaml.safe_load((Path(self.recipe_folder) / {{ manifest | pyrepr }}).read_text())
@@ -16,7 +15,7 @@ class EditableRecord(ConanFile):
             "requires": data.get("dependencies", []),
             "record": {"format": {{ format }}, "ref": data["ref"],
                        "payload": data.get("payload"), "files": list(data.get("files", {}))},
-            "source": os.path.expanduser(data.get("source") or "."),
+            "source": ".",
             "files": data.get("files", {}),
         }
 {% else %}
