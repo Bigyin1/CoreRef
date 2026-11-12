@@ -6,8 +6,6 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from itertools import count
 from pathlib import Path
-from shutil import copytree, ignore_patterns
-from typing import overload
 
 import networkx as nx
 
@@ -16,6 +14,7 @@ from ..api.records import InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
 from ..tools.deps import DepsFile
 from .git import FixtureFile, git_repository, git_upstream, write_files
+from .projects import copy_projects
 from .server import LocalServer, local_server
 
 
@@ -33,7 +32,7 @@ class Sandbox:
         self.projects = self.root / "projects"
         self._sequence = count()
 
-    def catalog(self) -> Catalog:
+    def new_catalog(self) -> Catalog:
         """Return a fresh isolated client authenticated against the shared server."""
         home = self.root / f"client-{next(self._sequence)}"
         return Catalog(self.server.configure(home))
@@ -76,41 +75,7 @@ class Sandbox:
         """Build fixture coordinates in this sandbox's namespace."""
         return Ref.from_fields(self.namespace, component, view, type, version)
 
-    @overload
-    def publish(
-        self,
-        catalog: Catalog,
-        records: LocalRecord,
-        *,
-        dependencies: tuple[Ref, ...] = (),
-    ) -> InstalledRecord: ...
-
-    @overload
-    def publish(
-        self,
-        catalog: Catalog,
-        records: Mapping[str, LocalRecord],
-        *,
-        dependencies: Mapping[str, tuple[str | Ref, ...]],
-    ) -> dict[str, InstalledRecord]: ...
-
-    def publish(
-        self,
-        catalog: Catalog,
-        records: LocalRecord | Mapping[str, LocalRecord],
-        *,
-        dependencies: tuple[Ref, ...] | Mapping[str, tuple[str | Ref, ...]] = (),
-    ) -> InstalledRecord | dict[str, InstalledRecord]:
-        """Publish one record, or a named set with aliases and previously published Refs."""
-        if isinstance(records, LocalRecord):
-            if not isinstance(dependencies, tuple):
-                raise TypeError("A single package requires a tuple of Refs")
-            return catalog.publish(records, dependencies=dependencies)
-        if isinstance(dependencies, tuple):
-            raise TypeError("A package set requires a dependency mapping")
-        return self._publish_set(catalog, records, dependencies=dependencies)
-
-    def _publish_set(
+    def publish_set(
         self,
         catalog: Catalog,
         records: Mapping[str, LocalRecord],
@@ -160,7 +125,7 @@ class Sandbox:
                 raise ValueError(f"Repository must be inside the project tree: {name}")
             if not project.is_dir():
                 raise FileNotFoundError(project)
-        copytree(source, self.projects, symlinks=True, ignore=ignore_patterns(".git"))
+        copy_projects(source, self.projects)
         self._prepare_repositories(repositories)
         return self.projects
 

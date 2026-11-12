@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Ref
 from coreref.testing import LocalServer
@@ -33,7 +36,8 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
         assert reader.search_refs(SearchQuery(revision=first.ref.revision)) == (first.ref,)
         assert reader.search_refs(SearchQuery(component="absent")) == ()
         commands.reset_mock()
-        assert reader.search_refs(SearchQuery(component="cpu*")) == ()
+        with pytest.raises(InvalidPackage):
+            SearchQuery(component="cpu*")
         commands.assert_not_called()
     assert reader.search_refs(SearchQuery()) == tuple(
         record.ref for record in reader.search(SearchQuery())

@@ -25,21 +25,21 @@ def test_existing_source_incremental_publish_and_executable_update(
     tmp_path: Path,
 ) -> None:
     env = Sandbox(conan_server, tmp_path / "fixtures", namespace="flow")
-    catalog = env.catalog()
-    util = env.publish(catalog, env.package(env.ref("util")))
+    catalog = env.new_catalog()
+    util = catalog.publish(env.package(env.ref("util")))
     initial = env.package(env.ref("cpu"), sources={"run.sh": FixtureFile("first", 0o755)})
     assert initial.source is not None
     record = env.package(env.ref("cpu"), source=initial.source)
-    first = env.publish(catalog, record, dependencies=(util.ref,))
+    first = catalog.publish(record, dependencies=(util.ref,))
     git_commit(
         initial.source,
         {"run.sh": FixtureFile("second", 0o755)},
         push=True,
         author="Flow <flow@example.invalid>",
     )
-    second = env.publish(catalog, record, dependencies=(util.ref,))
+    second = catalog.publish(record, dependencies=(util.ref,))
     assert first.ref != second.ref
-    reader = env.catalog()
+    reader = env.new_catalog()
     for published, content in ((first, "first"), (second, "second")):
         installed = reader.get_with_sources(published.ref)
         assert installed.source is not None
@@ -56,11 +56,11 @@ def test_package_sets_accept_previously_published_refs(
     tmp_path: Path,
 ) -> None:
     env = Sandbox(conan_server, tmp_path)
-    catalog = env.catalog()
-    util = env.publish(catalog, env.package(env.ref("util")))
+    catalog = env.new_catalog()
+    util = catalog.publish(env.package(env.ref("util")))
     records = {name: env.package(env.ref(name)) for name in ("cpu", "top")}
-    result = env.publish(catalog, records, dependencies={"cpu": (util.ref,), "top": ("cpu",)})
-    project = env.project(env.catalog(), env.ref("consumer"), dependencies=(result["top"].ref,))
+    result = env.publish_set(catalog, records, dependencies={"cpu": (util.ref,), "top": ("cpu",)})
+    project = env.project(env.new_catalog(), env.ref("consumer"), dependencies=(result["top"].ref,))
     assert {r.ref.component for r in project.resolve().records} == {
         "consumer",
         "top",
@@ -75,9 +75,9 @@ def test_consumer_deps_edit_lock_and_workspace_next_to_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     env = Sandbox(conan_server, tmp_path / "fixtures")
-    catalog = env.catalog()
+    catalog = env.new_catalog()
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"})
-    published = env.publish(catalog, cpu)
+    published = catalog.publish(cpu)
     project = env.project(catalog, env.ref("top"), path=tmp_path / "project/deps.yml")
     project.add(published.ref.without_revision())
     project.save()

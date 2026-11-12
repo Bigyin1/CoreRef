@@ -18,12 +18,12 @@ pytestmark = pytest.mark.conan_remote
 
 def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
     with environment(tmp_path / "infra", projects=PROJECTS, repositories=("stdlib", "cpu")) as env:
-        publisher = env.catalog()
+        publisher = env.new_catalog()
         published = {}
         for name in ("stdlib", "cpu"):
             project = DepsFile(publisher, env.projects / name / "deps.yml")
             published[name] = publisher.publish(project.record, dependencies=project.dependencies)
-        reader = env.catalog()
+        reader = env.new_catalog()
         soc = DepsFile(reader, env.projects / "soc/deps.yml")
         graph = soc.resolve()
         records = {record.ref.component: record for record in graph.get_with_sources()}
@@ -36,7 +36,7 @@ def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
         assert not (PROJECTS / "cpu/.git").exists()
         # The server records SCM pointing at independent bare origins.
         shutil.rmtree(env.projects / "cpu")
-        assert env.catalog().get_with_sources(published["cpu"].ref).source is not None
+        assert env.new_catalog().get_with_sources(published["cpu"].ref).source is not None
 
 
 def test_project_copy_preserves_custom_manifest_and_can_be_editable(
@@ -46,14 +46,14 @@ def test_project_copy_preserves_custom_manifest_and_can_be_editable(
 ) -> None:
     env = Sandbox(conan_server, tmp_path / "infra")
     projects = env.load_projects(PROJECTS)
-    catalog = env.catalog()
+    catalog = env.new_catalog()
     manifest = json.loads((projects / "physical/project.json").read_text())
     record = LocalRecord(
         Ref(manifest["ref"]),
         files={name: projects / "physical" / path for name, path in manifest["files"].items()},
     )
-    published = env.publish(catalog, record)
-    assert env.catalog().get(published.ref).files["timing"].read_text() == "library(cpu) {}\n"
+    published = catalog.publish(record)
+    assert env.new_catalog().get(published.ref).files["timing"].read_text() == "library(cpu) {}\n"
     workspace = env.workspace(catalog, directory=projects)
     for name in ("stdlib", "cpu"):
         DepsFile(catalog, projects / name / "deps.yml").add_to_workspace(workspace)
@@ -150,23 +150,25 @@ def test_absolute_repository_symlink_cannot_initialize_the_source_directory(
     (source / "cpu").mkdir(parents=True)
     (source / "alias").symlink_to(source / "cpu", target_is_directory=True)
     env = Sandbox(conan_server, tmp_path / "infra")
-    with pytest.raises(ValueError, match="symlinks must stay inside"):
-        env.load_projects(source, repositories=("alias",))
+    copied = env.load_projects(source, repositories=("alias",))
+    assert (copied / "cpu/.git").exists()
     assert not (source / "cpu/.git").exists()
 
 
 def test_inline_packages_and_projects_can_extend_a_directory_fixture(tmp_path: Path) -> None:
     with environment(tmp_path, projects=PROJECTS, repositories=("stdlib",)) as env:
-        catalog = env.catalog()
+        catalog = env.new_catalog()
         stdlib = DepsFile(catalog, env.projects / "stdlib/deps.yml")
-        dependency = env.publish(catalog, stdlib.record)
+        dependency = catalog.publish(stdlib.record)
         generated = env.package(
             env.ref("generated"),
             sources={"generated.sv": "module generated; endmodule\n"},
             files={"report.txt": "inline result"},
         )
-        published = env.publish(catalog, generated, dependencies=(dependency.ref,))
-        consumer = env.project(env.catalog(), env.ref("inline-soc"), dependencies=(published.ref,))
+        published = catalog.publish(generated, dependencies=(dependency.ref,))
+        consumer = env.project(
+            env.new_catalog(), env.ref("inline-soc"), dependencies=(published.ref,)
+        )
         installed = consumer.resolve().get_with_sources()
         assert {record.ref.component for record in installed} == {"generated", "stdlib"}
         result = next(record for record in installed if record.ref == published.ref)

@@ -292,9 +292,9 @@ class LocalPackage:
     ) -> None:
         self._catalog = catalog
         self._client = catalog._client
+        self.lockfile = lockfile.expanduser().absolute() if lockfile is not None else None
         self.record = self._snapshot(record)
         self.dependencies = self._references(dependencies)
-        self.lockfile = lockfile
 
     @cached_property
     def graph(self) -> ResolvedConanGraph:
@@ -337,11 +337,14 @@ class LocalPackage:
             raise InvalidPackage("A local package root must not specify a revision")
         to_conan_reference(record.ref)
         source = record.source.expanduser().absolute() if record.source is not None else None
+        files = frozendict(
+            (name, path.expanduser().absolute()) for name, path in record.files.items()
+        )
         return LocalRecord(
             record.ref,
             deepfreeze(json.loads(record.to_json())["payload"]),
             source,
-            frozendict(record.files),
+            files,
         )
 
     def _references(self, dependencies: tuple[Ref, ...]) -> tuple[Ref, ...]:

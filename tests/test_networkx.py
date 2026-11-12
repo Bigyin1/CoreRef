@@ -6,6 +6,7 @@ import networkx as nx
 import pytest
 
 from coreref.api.catalog import Catalog
+from coreref.api.errors import InvalidPackage
 from coreref.api.graph import Graph
 from tests.helpers import graph_json, local_record, release
 
@@ -92,12 +93,12 @@ def test_ordering_rejects_unknown_roots_and_hidden_stops(*, catalog: Catalog) ->
     middle = catalog.publish(local_record(middle), dependencies=(leaf.ref,))
     snapshot = Graph(catalog, local_record(root), dependencies=(middle.ref,))
     absent = release("absent").ref
-    with pytest.raises(ValueError, match="Unknown"):
+    with pytest.raises(InvalidPackage, match="Unknown"):
         snapshot.ordered_refs(absent)
     for stops in ((root.ref,), (absent,)):
-        with pytest.raises(ValueError, match=r"Stop references|Unknown reference"):
+        with pytest.raises(InvalidPackage, match=r"Stop references|Unknown reference"):
             snapshot.ordered_refs(root.ref, stop_at=stops)
-    with pytest.raises(ValueError, match="hidden or unreachable"):
+    with pytest.raises(InvalidPackage, match="hidden or unreachable"):
         snapshot.ordered_refs(root.ref, stop_at=(middle.ref, leaf.ref))
-    with pytest.raises(ValueError, match="hidden or unreachable"):
+    with pytest.raises(InvalidPackage, match="hidden or unreachable"):
         snapshot.ordered_refs(middle.ref, stop_at=(root.ref,))

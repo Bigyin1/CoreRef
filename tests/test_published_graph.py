@@ -99,7 +99,7 @@ def test_published_graph_and_lock_keep_the_root_revision(catalog: Catalog, tmp_p
     assert Graph(catalog, first.ref).get((first.ref,))[0].files["report"].read_text() == "first"
     with pytest.raises(InvalidPackage, match="Revision is not part"):
         graph.get((second.ref,))
-    with pytest.raises(ValueError, match="Revision is not part"):
+    with pytest.raises(InvalidPackage, match="Revision is not part"):
         graph.ordered_refs(second.ref)
     with pytest.raises(InvalidPackage):
         Graph(catalog, second.ref, lockfile=lock)

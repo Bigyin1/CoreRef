@@ -41,3 +41,20 @@ def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog)
         assert isinstance(snapshot, LocalRecord)
         snapshot.payload = {"edited": True}
         assert graph.info(local.ref).payload == {"root": True}
+
+
+def test_unknown_refs_use_one_error_contract_without_conan_io(catalog: Catalog) -> None:
+    graph = Graph(catalog, LocalRecord(Ref("test.root.rtl.default/1.0")))
+    missing = Ref("test.missing.rtl.default/1.0")
+    operations = (
+        lambda: graph.info(missing),
+        lambda: graph.dependencies(missing),
+        lambda: graph.ordered_refs(missing),
+        lambda: graph.ordered_records(missing),
+        lambda: graph.get((missing,)),
+        lambda: graph.get_with_sources((missing,)),
+    )
+    with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected I/O")):
+        for operation in operations:
+            with pytest.raises(InvalidPackage, match="Unknown reference"):
+                operation()

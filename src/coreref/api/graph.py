@@ -38,6 +38,7 @@ class Graph:
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
+        lockfile = lockfile.expanduser().absolute() if lockfile is not None else None
         self._catalog = catalog
         self._local: LocalPackage | None = None
         if isinstance(record, Ref):
@@ -173,11 +174,8 @@ class Graph:
 
     def ordered_refs(self, root: Ref, *, stop_at: tuple[Ref, ...] = ()) -> tuple[Ref, ...]:
         """Order reachable dependencies first, treating stop_at references as leaves."""
-        try:
-            root = self._package.resolve_ref(root)
-            stops = tuple(self._package.resolve_ref(ref) for ref in stop_at)
-        except InvalidPackage as error:
-            raise ValueError(str(error)) from error
+        root = self._package.resolve_ref(root)
+        stops = tuple(self._package.resolve_ref(ref) for ref in stop_at)
         key = (root, tuple(sorted(set(stops))))
         if key not in self._orders:
             self._orders[key] = self._order(root, key[1])
@@ -199,16 +197,16 @@ class Graph:
 
     def _order(self, root: Ref, stop_at: tuple[Ref, ...]) -> tuple[Ref, ...]:
         if root not in self.networkx:
-            raise ValueError("Unknown dependency graph root")
+            raise InvalidPackage("Unknown dependency graph root")
         stops = frozenset(stop_at)
         if root in stops or not stops.issubset(self.networkx):
-            raise ValueError("Stop references must be dependencies of the root")
+            raise InvalidPackage("Stop references must be dependencies of the root")
         graph = nx.subgraph_view(
             self.networkx, filter_edge=lambda source, _target: source not in stops
         )
         reachable = {root, *nx.descendants(graph, root)}
         if not stops.issubset(reachable):
-            raise ValueError("A stop reference is hidden or unreachable from the root")
+            raise InvalidPackage("A stop reference is hidden or unreachable from the root")
         return tuple(
             nx.lexicographical_topological_sort(graph.subgraph(reachable).reverse(copy=False))
         )

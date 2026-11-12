@@ -124,9 +124,11 @@ def test_conan_round_trip_search_and_project_lockfile(
         SearchQuery(component="cpu", view="rtl", namespace="soc"),
     ):
         assert catalog.search(query) == (stored,)
-    assert not catalog.search(SearchQuery(namespace="with/slash"))
+    with pytest.raises(InvalidPackage):
+        SearchQuery(namespace="with/slash")
     assert not catalog.search(SearchQuery(component="missing"))
-    assert not catalog.search(SearchQuery(component=""))
+    with pytest.raises(InvalidPackage):
+        SearchQuery(component="")
     expected = resolve_published(catalog, be.ref)
     assert tuple(sorted(expected.networkx.edges)) == ((be.ref, rtl.ref),)
     assert len(expected.networkx) == 2
