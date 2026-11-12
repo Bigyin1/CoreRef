@@ -1,0 +1,4 @@
+ref: demo.cpu.rtl.default/1.0
+source: .
+dependencies:
+  - demo.stdlib.rtl.default/1.0

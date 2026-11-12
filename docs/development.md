@@ -220,3 +220,117 @@ Git-сервиса. Рабочие checkout можно удалить после
 по-прежнему работает из upstream. Для проверки editable-сценариев можно добавить
 несколько checkout в один `Sandbox.workspace()`, передав их зависимости в
 `Workspace.add(..., dependencies=...)`; остальные узлы будут получены с Conan server.
+
+### Consumer-проекты и инкрементальные сценарии
+
+```python
+with environment(tmp_path / "infra", namespace="soc") as env:
+    catalog = env.catalog()
+    cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
+    published = env.publish(catalog, cpu)
+
+    # Обычный DepsFile: можно менять зависимости через add/remove/save.
+    project = env.project(catalog, env.ref("top"), path=tmp_path / "top/deps.yml")
+    project.add(published.ref.without_revision())
+    project.save()
+
+    # Workspace находится над проектом; Conan обнаружит его из top/.
+    workspace = env.workspace(catalog, directory=tmp_path)
+    workspace.add(cpu.source, record=cpu)
+```
+
+`package(ref, source=existing_directory)` использует готовые исходники без изменения
+их Git-состояния; `sources={...}` создаёт новые. Публикация одного `LocalRecord`
+принимает `dependencies=(published.ref, ...)`. В публикации набора значения
+`dependencies` могут смешивать короткие имена и уже опубликованные `Ref`.
+`ref(component, version="1.0", view="rtl", type="default")` использует namespace окружения.
+`project(..., dependencies=(...))` сразу записывает зависимости; параметр `path`
+позволяет выбрать собственное имя YAML и расположение проекта.
+
+Git-хелперы поддерживают `FixtureFile(content, mode=0o755)` для исполняемых файлов.
+`git_repository(directory, files)` принимает существующую директорию без Git;
+`reuse=True` добавляет коммит в уже существующий репозиторий, сохраняя историю.
+`git_commit(directory, files, message="Update", author="Flow <flow@example.invalid>", push=True)`
+создаёт следующий коммит и отправляет его в origin. Reset не выполняется.
+Тестовый профиль определяется через Conan `profiles.detect()`; существующий профиль
+сохраняется. `LocalServer.configure()` по умолчанию разрешает локальные Git URL;
+для явного запрета передайте `local_sources=False` в новом cache.
+
+### Подключение к pytest
+
+В `conftest.py` зависимого проекта достаточно указать:
+
+```python
+pytest_plugins = ["coreref.testing.pytest_plugin"]
+```
+
+Плагин предоставляет function-scoped фикстуры `coreref_environment`, `coreref_server`,
+`coreref_catalog`, `coreref_project` (последний создаёт `tmp_path/deps.yml`). Они используют
+один сервер на тест, отдельный cache и автоматически освобождают сервер после ошибки.
+Тесты с этими фикстурами получают маркер `coreref`: их можно выбрать через `pytest -m coreref`.
+Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
+директории, выбранной тестом через `monkeypatch.chdir()`. Установка `coreref[testing]`
+включает pytest; сам `environment()` по-прежнему можно использовать без плагина.
+
+### Обычные проекты рядом с тестом
+
+Для больших сценариев можно хранить проекты обычными директориями вместо словарей
+с содержимым файлов внутри теста. Пример в этом репозитории:
+
+```text
+tests/
+├── test_testing_projects.py
+└── test_projects/
+    ├── soc/                    # Локальный consumer: soc → cpu → stdlib
+    │   ├── deps.yml
+    │   └── rtl/soc.sv
+    ├── cpu/
+    │   ├── deps.yml
+    │   ├── rtl/cpu.sv
+    │   └── scripts/run.sh
+    ├── stdlib/
+    │   ├── deps.yml
+    │   └── rtl/stdlib.sv
+    └── physical/               # Проект со своим JSON-форматом и файлами без SCM
+        ├── project.json
+        └── artifacts/cpu.lib
+```
+
+```python
+from pathlib import Path
+from coreref.testing import environment
+from coreref.tools.deps import DepsFile
+
+
+def test_soc(tmp_path):
+    source = Path(__file__).with_name("test_projects")
+    with environment(tmp_path, projects=source, repositories=("stdlib", "cpu")) as env:
+        catalog = env.catalog()
+        # Flow сам читает манифесты и выполняет нужные команды.
+        for name in ("stdlib", "cpu"):
+            project = DepsFile(catalog, env.projects / name / "deps.yml")
+            catalog.publish(project.record, dependencies=project.dependencies)
+        soc = DepsFile(env.catalog(), env.projects / "soc/deps.yml")
+        assert len(soc.resolve().get_with_sources()) == 2
+```
+
+`projects` указывает на исходное дерево; `env.projects` — отдельная рабочая копия
+с теми же именами директорий. Выбранные `repositories` получают новый Git-коммит
+из существующих файлов и отдельный bare origin. Остальные директории остаются
+обычными проектами без Git. Копирование сохраняет executable-биты и symlinks;
+Git-метаданные исходных репозиториев не переносятся, `.gitignore` учитывается при
+создании коммита. Исходное дерево не изменяется, существующая рабочая копия не
+перезаписывается. Манифесты могут иметь любой формат: helper их не разбирает
+и автоматически не публикует пакеты.
+
+В pytest можно воспользоваться тем же методом на готовой фикстуре:
+`coreref_environment.load_projects(source, repositories=("stdlib", "cpu"))`.
+Workspace создаётся над рабочими проектами через
+`env.workspace(catalog, directory=env.projects)`. Команды flow запускаются из
+`env.projects / "soc"`, чтобы Conan обнаруживал этот workspace.
+Для коммита уже изменённых на диске файлов доступен `git_commit(checkout, push=True)`;
+он учитывает `.gitignore`, не требует повторять содержимое файлов в Python.
+
+Inline-создание через `env.package(..., sources={...}, files={...})` и `env.project()`
+также доступно. Оба способа можно смешивать в одном окружении: загрузить базовые
+проекты из директории, создать дополнительный пакет в коде и связать их обычными Ref.
