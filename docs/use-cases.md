@@ -8,7 +8,7 @@ Ref описывает **какой компонент и в каком пред
 `soc.cpu`, выбирая `view="be"` и `type="lib-lef"`. Их версия независима от версии RTL;
 происхождение проверяется по точным зависимостям. Смысл всех полей описан в [API](interfaces.md).
 
-В примере используется рекомендуемый deps.yaml через DepsFile. Это необязательный
+В примере используется рекомендуемый manifest.yml через ManifestFile. Это необязательный
 адаптер: приложение может читать свой формат и передавать LocalRecord и Ref напрямую.
 Часть зависимостей может приходить из файла, часть — из поиска других представлений или правил flow. SDK скрывает
 рецепты Conan и предоставляет публикацию, поиск, граф и получение файлов/SCM в Python.
@@ -17,7 +17,7 @@ Graph строится и для неопубликованного локаль
 в репозитории или workspace проекта для повторения выбора версий и revisions.
 Для работы над зависимостью используют `workspace.open(ref)` или
 `workspace.add(directory, record=local_record, dependencies=refs)`. Формат проекта читает flow;
-для стандартного YAML есть `DepsFile.add_to_workspace(workspace)`.
+для стандартного YAML есть `ManifestFile.add_to_workspace(workspace)`.
 Conan сам выбирает рабочие копии из workspace текущего проекта; Graph не требует
 особых параметров. SDK добавляет в рабочую копию только conanfile.py, если его ещё нет.
 `InstalledRecord.is_editable` отличает такую запись от кэшовой. Локальные files могут
@@ -28,7 +28,7 @@ Conan сам выбирает рабочие копии из workspace теку�
 
 ## RTL-проект: зависимости и исходники
 
-Вариант использования вместо Bender: приложение читает deps.yaml,
+Вариант использования вместо Bender: приложение читает manifest.yml,
 SDK разрешает дерево и получает исходники, приложение собирает список RTL-файлов.
 Поле payload.sources в этом примере — соглашение приложения.
 Все RTL-зависимости уже опубликованы с таким списком и SCM-исходниками.
@@ -42,13 +42,12 @@ flowchart TD
 ```
 
 Стрелка направлена от потребителя к зависимости. Здесь common — пример общей
-транзитивной зависимости CPU и GPIO: в deps.yaml корня достаточно указать эти два блока,
+транзитивной зависимости CPU и GPIO: в manifest.yml корня достаточно указать эти два блока,
 а common попадёт в разрешённый граф и список исходников один раз.
 
 ```yaml
-# deps.yaml в корне Git-проекта
+# manifest.yml в корне Git-проекта
 ref: soc.top.rtl.default/1.0
-source: .
 payload:
   sources: [rtl/top.sv]
 dependencies:
@@ -60,14 +59,22 @@ dependencies:
 from pathlib import Path
 
 from coreref.api.catalog import Catalog
-from coreref.tools.deps import DepsFile
+from coreref.tools.manifest import ManifestFile
 from coreref.api.graph import Graph
 from coreref.api.records import InstalledRecord, LocalRecord
 
 
 def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
-    """Прочитать YAML и учесть существующий deps.lock, не изменяя его."""
-    return DepsFile(catalog, root / "deps.yaml").resolve()
+    """Прочитать YAML и учесть существующий manifest.lock, не изменяя его."""
+    manifest = ManifestFile(catalog, root / "manifest.yml")
+    record = manifest.record
+    record.source = manifest.path.parent  # Все RTL-пакеты этого flow имеют SCM.
+    return Graph(
+        catalog,
+        record,
+        dependencies=manifest.dependencies,
+        lockfile=manifest.lockfile if manifest.lockfile.exists() else None,
+    )
 
 
 def collect_rtl_sources(graph: Graph) -> list[Path]:
@@ -91,7 +98,7 @@ sources = collect_rtl_sources(graph)
 `sources` содержит пути в порядке «зависимости перед потребителем».
 Локальный top остаётся в рабочем дереве, зависимости получаются одной пакетной операцией.
 Существующий lockfile используется при разрешении и остаётся без изменений.
-Чтобы явно сохранить выбор, вызывают `graph.create_lockfile(Path.cwd() / "deps.lock")`;
+Чтобы явно сохранить выбор, вызывают `graph.create_lockfile(Path.cwd() / "manifest.lock")`;
 этот вызов создаёт или перезаписывает файл снимком текущего Graph.
 Для намеренного обновления зависимостей создают новый Graph без старого lockfile,
 затем явно сохраняют новый выбор. Lockfile хранят в репозитории.
@@ -229,7 +236,7 @@ report = publish_result(
 revision модели, а через неё — от исходных данных. Результаты можно получать и
 версионировать отдельно. Если они независимы, каждый Graph может ссылаться прямо на входные данные.
 
-Приложение также может читать отдельные model.yaml и report.yaml через DepsFile
+Приложение также может читать отдельные model.yaml и report.yaml через ManifestFile
 или описать оба результата в одном файле. Пути манифестов и lockfile выбирает приложение:
 одна директория проекта объединяет несколько LocalRecord/Graph с отдельными Ref.
 Каждый пакет получает файлы из соответствующего LocalRecord.files.
@@ -243,7 +250,7 @@ revision модели, а через неё — от исходных данны
 после формирования полного набора зависимостей и разрешения Graph. Момент сохранения
 и политику обновления определяет flow или его CLI; публикация в примере файл не записывает.
 
-Если flow подключил готовую группу `deps`, все зависимости из deps.yaml можно получить
+Если flow подключил готовую группу `deps`, все зависимости из manifest.yml можно получить
 командой `flow deps install`. Отдельная `flow deps lock` фиксирует или обновляет их выбор.
 Эти команды работают с явными объявлениями файла; дополнительные найденные зависимости
 и их lockfile остаются ответственностью конкретного flow.

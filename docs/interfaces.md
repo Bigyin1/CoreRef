@@ -28,7 +28,7 @@ namespace.component[.subcomponent].view.type/version[#revision]
 
 ## Основные возможности
 
-- **Формат проекта.** Готовый `DepsFile` читает рекомендуемый deps.yaml; приложение
+- **Формат проекта.** Готовый `ManifestFile` читает рекомендуемый manifest.yml; приложение
   может выбрать свой формат и создать `LocalRecord` и набор Ref. Файл может содержать часть зависимостей; остальные
   приложение добавляет по результатам поиска или других правил. Рецепты Conan SDK создаёт сам.
 - **Публикация и поиск.** Один пакет объединяет JSON payload, упакованные файлы и
@@ -40,7 +40,7 @@ namespace.component[.subcomponent].view.type/version[#revision]
 - **Фиксация выбора.** Проектный lockfile сохраняет версии/revisions для последующих
   разрешений. Уже созданный Graph использует свой снимок выбора при получении пакетов.
 - **Совместная разработка зависимостей.** Workspace получает SCM-зависимости
-  в рабочие Git-копии или подключает существующие проекты с deps.yml без Git и публикации.
+  в рабочие Git-копии или подключает существующие проекты с manifest.yml без Git и публикации.
   Conan автоматически подставляет рабочие копии в Graph из текущей директории;
   регистрации хранит Conan в conanws.yml. Локальные artifacts могут быть ещё не созданы.
 
@@ -154,7 +154,7 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 Публиковать локальный корень не требуется. Прямые зависимости опубликованного пакета
 доступны через `Graph(catalog, ref).dependencies()`.
 Связи снимка можно читать через `graph.networkx.edges`.
-Стандартный deps.yaml читает DepsFile; собственные форматы и дополнительные зависимости
+Стандартный manifest.yml читает ManifestFile; собственные форматы и дополнительные зависимости
 по-прежнему может определять приложение.
 
 | API Graph | Результат |
@@ -250,10 +250,10 @@ flow workspace list --project-dir ./project
 flow workspace remove ../existing-cpu --project-dir ./project
 ```
 
-Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/deps.yml`, если рецепта ещё нет:
+Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/manifest.yml`, если рецепта ещё нет:
 достаточно валидного YAML с `ref`. Класс Workspace от этого формата не зависит.
-`dependencies`, `source`, `files` и `payload` необязательны; пути считаются от директории YAML.
-Для Python-надстройки это `DepsFile(catalog, path).add_to_workspace(workspace)`.
+`dependencies`, `files` и `payload` необязательны; пути считаются от директории YAML.
+Для Python-надстройки это `ManifestFile(catalog, path).add_to_workspace(workspace)`.
 Рецепт читает выбранный YAML при следующих вызовах Conan, поэтому его изменения
 подхватываются без повторной регистрации. Файл может называться произвольно. Например:
 
@@ -275,34 +275,35 @@ dependencies:
 Разные подключения не разделяют состояние CLI.
 
 Для собственного формата flow формирует Graph и его lockfile сам. Для стандартного
-deps.yaml ниже описана отдельная готовая группа команд.
+manifest.yml ниже описана отдельная готовая группа команд.
 
-## Стандартный deps.yaml
+## Стандартный manifest.yml
 
-`DepsFile(catalog, path="deps.yaml")` — необязательный адаптер файла к LocalRecord и Graph.
+`ManifestFile(catalog, path="manifest.yml")` — необязательный адаптер файла к LocalRecord и Graph.
 Формат общий для разных представлений; конкретные flow могут полностью заменить его.
 
 ```yaml
 ref: soc.top.rtl.default/1.0
-source: .
 dependencies:
   - soc.cpu.rtl.default/1.0
   - soc.gpio.rtl.default/2.0#exact-revision
 ```
 
 Обязателен только `ref` без собственной revision. `dependencies` — список полных Ref;
-revision зависимости необязательна. `source`, `files`, `payload` необязательны.
-Пути source/files считаются от директории YAML; files сопоставляет имя внутри пакета
-локальному файлу. Для обычного SCM-репозитория отдельный JSON payload обычно не нужен:
+revision зависимости необязательна. `files` и `payload` необязательны.
+Пути в `files` считаются от директории YAML и сопоставляют имя внутри пакета
+локальному файлу. Поля `source` в манифесте нет: `ManifestFile.record` оставляет
+`LocalRecord.source` равным `None`, а SCM задаёт flow. Для RTL flow указывает
+корень репозитория: `record.source = manifest.path.parent`. Для обычного SCM-репозитория отдельный JSON payload обычно не нужен:
 описание исходников хранится в самом репозитории. В других пакетах payload может содержать
 дополнительные метаданные по правилам flow, например внешние пути к LIB/LEF.
 Принимаются файлы `.yaml` и `.yml`. Pydantic проверяет типы полей и запрещает неизвестные
 поля; повторные объявления одного имени пакета отклоняются. YAML читает стандартный
 SafeLoader: при повторении ключа сохраняется последнее значение. Зависимости разрешает Conan.
 
-| API DepsFile | Результат |
+| API ManifestFile | Результат |
 |---|---|
-| `create(catalog, ref, path="deps.yaml", *, source=None)` | Создать файл, отказавшись от перезаписи существующего |
+| `create(catalog, ref, path="manifest.yml")` | Создать файл, отказавшись от перезаписи существующего |
 | `record`, `dependencies` | LocalRecord и прямые Ref для обычного SDK API |
 | `add_to_workspace(workspace)` | Подготовить YAML-рецепт и зарегистрировать директорию |
 | `resolve(update=False)` | Новый Graph с существующим lockfile; Conan обнаруживает workspace по cwd |
@@ -321,7 +322,7 @@ SafeLoader: при повторении ключа сохраняется пос
 в CLI своего flow. Ниже `flow` — имя приложения, подключившего группу `deps`:
 
 ```sh
-flow deps init soc.top.rtl.default/1.0 --source .
+flow deps init soc.top.rtl.default/1.0
 flow deps add soc.cpu.rtl.default/1.0
 flow deps list
 flow deps lock
@@ -349,7 +350,7 @@ app.add_typer(create_deps_app(), name="deps")
 Фабрика `catalog_factory` работает так же, как у `create_workspace_app`.
 Готовые команды используют только зависимости из YAML. Если flow добавляет найденные
 пакеты программно, он формирует итоговый Graph и его lockfile своим кодом.
-`DepsFile.record` и `dependencies` для этого можно использовать независимо от `resolve`.
+`ManifestFile.record` и `dependencies` для этого можно использовать независимо от `resolve`.
 
 Ошибка клонирования или регистрации возвращается как ошибка SDK с исходной причиной.
 SDK не удаляет рабочие директории при сбое: неполную копию можно проверить и убрать вручную.

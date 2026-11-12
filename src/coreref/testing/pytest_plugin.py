@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..api.catalog import Catalog
-from ..tools.deps import DepsFile
+from ..tools.manifest import ManifestFile
 from .sandbox import Sandbox, environment
 from .server import LocalServer
 
@@ -96,9 +96,9 @@ def coreref_project(
     coreref_environment: Sandbox,
     coreref_catalog: Catalog,
     tmp_path: Path,
-) -> DepsFile:
+) -> ManifestFile:
     return coreref_environment.project(
         coreref_catalog,
         coreref_environment.ref("consumer"),
-        path=tmp_path / "deps.yml",
+        path=tmp_path / "manifest.yml",
     )

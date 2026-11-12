@@ -12,15 +12,17 @@ from coreref.api.errors import CatalogError, InvalidPackage
 from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Ref
 from coreref.api.workspace import Workspace
-from coreref.tools.deps import DepsFile
+from coreref.tools.manifest import ManifestFile
 
 pytestmark = pytest.mark.conan_remote
 
 
-def local_package(catalog: Catalog, directory: Path, name: str = "cpu") -> DepsFile:
+def local_package(catalog: Catalog, directory: Path, name: str = "cpu") -> ManifestFile:
     directory.mkdir(parents=True)
     (directory / f"{name}.sv").write_text(f"module {name}; endmodule\n")
-    return DepsFile.create(catalog, Ref(f"soc.{name}.rtl.default/1.0"), directory / "deps.yml")
+    return ManifestFile.create(
+        catalog, Ref(f"soc.{name}.rtl.default/1.0"), directory / "manifest.yml"
+    )
 
 
 def test_add_directory_needs_no_git_cache_or_remote(
@@ -76,7 +78,6 @@ def test_local_source_and_missing_artifact_paths_come_from_recipe(
     document = local_package(catalog, tmp_path / "cpu")
     source = document.path.parent / "rtl"
     source.mkdir()
-    document.source = "rtl"
     document.files = {"cpu.lib": "build/timing/result.lib"}
     document.save()
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -85,7 +86,7 @@ def test_local_source_and_missing_artifact_paths_come_from_recipe(
     graph = Graph(catalog, document.record.ref)
     editable = graph.get_with_sources()[0]
     artifact = document.path.parent / "build/timing/result.lib"
-    assert editable.source == source and editable.files == {"cpu.lib": artifact}
+    assert editable.source == document.path.parent and editable.files == {"cpu.lib": artifact}
     assert not artifact.exists()
     artifact.parent.mkdir(parents=True)
     artifact.write_text("library")
@@ -111,10 +112,10 @@ def test_editable_cannot_silently_return_cache_sources(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     document = local_package(catalog, tmp_path / "cpu")
-    document.source = str(catalog.cache_directory / "accidental-cache-source")
-    document.save()
+    record = document.record
+    record.source = catalog.cache_directory / "accidental-cache-source"
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    document.add_to_workspace(workspace)
+    workspace.add(document.path.parent, record=record)
     monkeypatch.chdir(workspace.path.parent)
     with pytest.raises(InvalidPackage, match="package storage"):
         Graph(catalog, document.record.ref)
@@ -162,7 +163,7 @@ def test_core_add_uses_flow_data_without_reading_manifest_files(
     directory = tmp_path / "custom project"
     source = directory / "rtl"
     source.mkdir(parents=True)
-    (directory / "deps.yml").write_text("this is deliberately not valid: [")
+    (directory / "manifest.yml").write_text("this is deliberately not valid: [")
     util = tmp_path / "util"
     util.mkdir()
     dependency = LocalRecord(Ref("soc.util.rtl.default/1.0"), source=util)
@@ -184,7 +185,7 @@ def test_core_add_uses_flow_data_without_reading_manifest_files(
     assert installed.payload == record.payload
     assert installed.files == record.files
     assert not installed.files["result"].exists()
-    assert (directory / "deps.yml").read_text() == "this is deliberately not valid: ["
+    assert (directory / "manifest.yml").read_text() == "this is deliberately not valid: ["
     assert not (directory / "record.json").exists()
     assert not (directory / "conandata.yml").exists()
 
@@ -218,11 +219,10 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     directory = tmp_path / "cpu"
     source = directory / "rtl"
     source.mkdir(parents=True)
-    document = DepsFile.create(
+    document = ManifestFile.create(
         catalog,
         Ref("soc.cpu.rtl.default/1.0"),
         directory / "custom inputs.yaml",
-        source="rtl",
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
@@ -233,8 +233,8 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     document.save()
     monkeypatch.chdir(workspace.path.parent)
     installed = catalog.get_with_sources(document.record.ref)
-    assert installed.source == source and installed.payload == {"edited": True}
-    assert not (directory / "deps.yml").exists()
+    assert installed.source == directory and installed.payload == {"edited": True}
+    assert not (directory / "manifest.yml").exists()
 
 
 def test_dotted_part_with_underscore_component_is_native_editable(
@@ -243,7 +243,7 @@ def test_dotted_part_with_underscore_component_is_native_editable(
     directory = tmp_path / "cpu source"
     directory.mkdir()
     ref = Ref("soc.cpu_core.alu.rtl.default/1.0")
-    document = DepsFile.create(catalog, ref, directory / "deps.yml")
+    document = ManifestFile.create(catalog, ref, directory / "manifest.yml")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
     assert workspace.members == {ref: directory}

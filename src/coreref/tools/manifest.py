@@ -1,4 +1,4 @@
-"""Optional standard YAML input for a local package and its direct dependencies."""
+"""Optional project manifest: package identity, dependencies, files and payload."""
 
 from __future__ import annotations
 
@@ -19,27 +19,26 @@ if TYPE_CHECKING:
     from ..api.workspace import Workspace
 
 
-class DepsFile(BaseModel):
-    """Read and edit deps.yaml; custom flow formats can still use LocalRecord and Graph."""
+class ManifestFile(BaseModel):
+    """Read and edit manifest.yml; custom flow formats can still use LocalRecord and Graph."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
     reference: str = Field(alias="ref")
     requirements: list[str] = Field(default_factory=list, alias="dependencies")
-    source: str | None = None
     files: dict[str, str] = Field(default_factory=dict)
     payload: JsonValue = None
     _catalog: Catalog = PrivateAttr()
     _file: Path = PrivateAttr()
 
-    def __init__(self, catalog: Catalog, path: str | Path = "deps.yaml") -> None:
+    def __init__(self, catalog: Catalog, path: str | Path = "manifest.yml") -> None:
         filename = Path(path).expanduser().resolve()
         if filename.suffix.lower() not in {".yaml", ".yml"}:
-            raise InvalidPackage("Dependency file must use a .yaml or .yml extension")
+            raise InvalidPackage("Manifest must use a .yaml or .yml extension")
         try:
             super().__init__(**yaml.safe_load(filename.read_text()))
         except (yaml.YAMLError, ValidationError, TypeError) as error:
-            raise InvalidPackage(f"Invalid dependency file {filename}: {error}") from error
+            raise InvalidPackage(f"Invalid manifest {filename}: {error}") from error
         self._catalog = catalog
         self._file = filename
         _ = self.lockfile
@@ -57,20 +56,16 @@ class DepsFile(BaseModel):
         cls,
         catalog: Catalog,
         ref: Ref,
-        path: str | Path = "deps.yaml",
-        *,
-        source: str | Path | None = None,
-    ) -> DepsFile:
+        path: str | Path = "manifest.yml",
+    ) -> ManifestFile:
         """Create a minimal document exclusively, preserving any existing file."""
         if ref.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
         destination = Path(path).expanduser().resolve()
         if destination.suffix.lower() not in {".yaml", ".yml"}:
-            raise InvalidPackage("Dependency file must use a .yaml or .yml extension")
+            raise InvalidPackage("Manifest must use a .yaml or .yml extension")
         # Coordinates are already validated by Ref; the remaining fields use model defaults.
-        document = cls.model_construct(
-            reference=str(ref), source=str(source) if source is not None else None
-        )
+        document = cls.model_construct(reference=str(ref))
         destination.parent.mkdir(parents=True, exist_ok=True)
         content = yaml.safe_dump(
             document.model_dump(exclude_none=True, by_alias=True), sort_keys=False
@@ -88,11 +83,10 @@ class DepsFile(BaseModel):
 
     @property
     def record(self) -> LocalRecord:
-        """Build a detached local input; all paths are relative to the YAML directory."""
+        """Build portable inputs with SCM unset; the flow supplies LocalRecord.source."""
         return LocalRecord(
             Ref(self.reference),
             cast(JSON, deepcopy(self.payload)),
-            source=self._path(self.source) if self.source is not None else None,
             files={name: self._path(path) for name, path in self.files.items()},
         )
 
@@ -102,7 +96,7 @@ class DepsFile(BaseModel):
 
     @property
     def lockfile(self) -> Path:
-        """Each manifest has its own lockfile: deps.yaml -> deps.lock."""
+        """Each manifest has its own lockfile: manifest.yml -> manifest.lock."""
         lockfile = self.path.with_suffix(".lock")
         if lockfile.resolve() == self.path or (
             lockfile.exists() and self.path.exists() and lockfile.samefile(self.path)
@@ -164,4 +158,4 @@ class DepsFile(BaseModel):
         return (self.path.parent / Path(value).expanduser()).resolve()
 
 
-__all__ = ["DepsFile"]
+__all__ = ["ManifestFile"]

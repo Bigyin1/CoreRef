@@ -28,7 +28,7 @@ CI проверяет обе группы тестов с общим порог�
 |---|---|
 | `tools/cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
 | `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
-| `tools/deps.py` | Необязательный стандарт YAML, пути и прямые объявления зависимостей |
+| `tools/manifest.py` | Необязательный стандарт YAML, пути и прямые объявления зависимостей |
 | `api/graph.py`, `workspace.py` | Разрешённый снимок и рабочие Git-копии |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
 | `_internal/recipe.py`, `templates/` | Чтение метаданных и Jinja-шаблоны временных рецептов |
@@ -59,7 +59,7 @@ Ruff ограничивает сложность: 6, аргументы: 5 (по
 
 Workspace делегирует init/add/remove и SCM open Conan. Только conanfile.py добавляется
 в директорию зависимости из LocalRecord/зависимостей или опубликованных метаданных.
-Workspace не импортирует tools и не читает манифесты. YAML-адаптер DepsFile.add_to_workspace
+Workspace не импортирует tools и не читает манифесты. YAML-адаптер ManifestFile.add_to_workspace
 готовит рецепт, читающий выбранный YAML; соответствующий CLI также находится в tools.
 Состояние workspace хранит Conan; дополнительных метаданных в checkout SDK не создаёт.
 Ref содержит только координаты; Catalog и Graph получают контекст операций явно.
@@ -73,14 +73,14 @@ Editable-узлы определяются по нативному статус�
 рецепта и layout. Локальные artifacts могут отсутствовать; проверка полноты скачанных
 пакетов сохраняется. InstalledRecord.is_editable показывает происхождение записи.
 
-DepsFile — адаптер deps.yaml, не обязательный формат flow. Install читает существующий
+ManifestFile — адаптер manifest.yml, не обязательный формат flow. Install читает существующий
 lockfile, отдельный lock разрешает объявления заново. CLI не добавляет зависимости,
 которые flow находит динамически; такой flow сохраняет lockfile итогового Graph сам.
 
 `tools/` — необязательная надстройка: стандартный YAML и готовый CLI. Основные операции
 API принимают LocalRecord и Ref; собственные форматы flow остаются возможны.
 Workspace.add(directory, record=..., dependencies=...) принимает данные собственного flow.
-DepsFile.add_to_workspace(workspace) — надстройка для стандартного YAML.
+ManifestFile.add_to_workspace(workspace) — надстройка для стандартного YAML.
 
 ## Производительность SDK
 
@@ -229,8 +229,8 @@ with environment(tmp_path / "infra", namespace="soc") as env:
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
     published = catalog.publish(cpu)
 
-    # Обычный DepsFile: можно менять зависимости через add/remove/save.
-    project = env.project(catalog, env.ref("top"), path=tmp_path / "top/deps.yml")
+    # Обычный ManifestFile: можно менять зависимости через add/remove/save.
+    project = env.project(catalog, env.ref("top"), path=tmp_path / "top/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
 
@@ -265,7 +265,7 @@ pytest_plugins = ["coreref.testing.pytest_plugin"]
 ```
 
 Плагин предоставляет function-scoped фикстуры `coreref_environment`, `coreref_server`,
-`coreref_catalog`, `coreref_project` (последний создаёт `tmp_path/deps.yml`). Они используют
+`coreref_catalog`, `coreref_project` (последний создаёт `tmp_path/manifest.yml`). Они используют
 один сервер на тест, отдельный cache и автоматически освобождают сервер после ошибки.
 Тесты с этими фикстурами получают маркер `coreref`: их можно выбрать через `pytest -m coreref`.
 Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
@@ -282,14 +282,14 @@ tests/
 ├── test_testing_projects.py
 └── test_projects/
     ├── soc/                    # Локальный consumer: soc → cpu → stdlib
-    │   ├── deps.yml
+    │   ├── manifest.yml
     │   └── rtl/soc.sv
     ├── cpu/
-    │   ├── deps.yml
+    │   ├── manifest.yml
     │   ├── rtl/cpu.sv
     │   └── scripts/run.sh
     ├── stdlib/
-    │   ├── deps.yml
+    │   ├── manifest.yml
     │   └── rtl/stdlib.sv
     └── physical/               # Проект со своим JSON-форматом и файлами без SCM
         ├── project.json
@@ -299,7 +299,7 @@ tests/
 ```python
 from pathlib import Path
 from coreref.testing import environment
-from coreref.tools.deps import DepsFile
+from coreref.tools.manifest import ManifestFile
 
 
 def test_soc(tmp_path):
@@ -308,9 +308,11 @@ def test_soc(tmp_path):
         catalog = env.new_catalog()
         # Flow сам читает манифесты и выполняет нужные команды.
         for name in ("stdlib", "cpu"):
-            project = DepsFile(catalog, env.projects / name / "deps.yml")
-            catalog.publish(project.record, dependencies=project.dependencies)
-        soc = DepsFile(env.new_catalog(), env.projects / "soc/deps.yml")
+            project = ManifestFile(catalog, env.projects / name / "manifest.yml")
+            record = project.record
+            record.source = project.path.parent  # Правило данного RTL flow.
+            catalog.publish(record, dependencies=project.dependencies)
+        soc = ManifestFile(env.new_catalog(), env.projects / "soc/manifest.yml")
         assert len(soc.resolve().get_with_sources()) == 2
 ```
 

@@ -78,7 +78,7 @@ def test_consumer_deps_edit_lock_and_workspace_next_to_project(
     catalog = env.new_catalog()
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"})
     published = catalog.publish(cpu)
-    project = env.project(catalog, env.ref("top"), path=tmp_path / "project/deps.yml")
+    project = env.project(catalog, env.ref("top"), path=tmp_path / "project/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
     assert project.resolve().get_with_sources()[0].source != cpu.source
