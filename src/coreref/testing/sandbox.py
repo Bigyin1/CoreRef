@@ -13,6 +13,7 @@ from ..api.catalog import Catalog
 from ..api.records import InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
 from ..tools.deps import DepsFile
+from .catalog import _RecordingCatalog
 from .git import FixtureFile, git_repository, git_upstream, write_files
 from .projects import copy_projects
 from .server import LocalServer, local_server
@@ -25,17 +26,44 @@ class Sandbox:
     this helper never changes cwd, environment variables or the user's Conan home.
     """
 
-    def __init__(self, server: LocalServer, root: Path, *, namespace: str = "test") -> None:
+    def __init__(
+        self,
+        server: LocalServer,
+        root: Path,
+        *,
+        namespace: str = "test",
+        timeout: float = 5,
+    ) -> None:
         self.server = server
         self.root = root.resolve()
         self.namespace = namespace
         self.projects = self.root / "projects"
         self._sequence = count()
+        self.timeout = timeout
+        self._homes: list[Path] = []
+        self._published: list[Ref] = []
 
-    def new_catalog(self) -> Catalog:
+    def new_catalog(self, *, timeout: float | None = None) -> Catalog:
         """Return a fresh isolated client authenticated against the shared server."""
         home = self.root / f"client-{next(self._sequence)}"
-        return Catalog(self.server.configure(home))
+        self._homes.append(home)
+        return _RecordingCatalog(
+            self.server.configure(home),
+            self._published,
+            timeout=self.timeout if timeout is None else timeout,
+        )
+
+    def diagnostics(self) -> str:
+        """Describe owned paths and successful publications, without Conan or network I/O."""
+        lines = [
+            f"Root: {self.root}",
+            f"Projects: {self.projects}",
+            f"Server URL: {self.server.url}",
+            f"Server log: {self.server.log_path}",
+        ]
+        lines.extend(f"Conan home: {home}" for home in self._homes)
+        lines.extend(f"Published: {ref}" for ref in dict.fromkeys(self._published))
+        return "\n".join(lines)
 
     def package(
         self,
@@ -174,6 +202,7 @@ def environment(
     namespace: str = "test",
     projects: Path | None = None,
     repositories: tuple[str, ...] = (),
+    timeout: float = 5,
 ) -> Iterator[Sandbox]:
     """Own a complete local package system for a flow test.
 
@@ -186,7 +215,7 @@ def environment(
         raise ValueError("Repository names require a project tree")
     root = root.resolve()
     with local_server(root / "server") as server:
-        sandbox = Sandbox(server, root / "fixtures", namespace=namespace)
+        sandbox = Sandbox(server, root / "fixtures", namespace=namespace, timeout=timeout)
         if projects is not None:
             sandbox.load_projects(projects, repositories=repositories)
         yield sandbox
