@@ -2,6 +2,7 @@
 
 Directories and lifetimes belong to the caller (for example pytest's tmp_path).
 Importing this module never starts a server or changes ambient Conan settings.
+Dulwich is loaded only when a Git operation is requested.
 """
 
 from .configuration import configured_home

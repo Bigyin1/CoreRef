@@ -7,10 +7,6 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-from dulwich import porcelain
-from dulwich.refs import Ref as GitRef
-from dulwich.repo import Repo
-
 
 @dataclass(frozen=True)
 class FixtureFile:
@@ -46,6 +42,10 @@ def git_repository(
     An existing repository is preserved unless reuse=True; reuse adds a commit,
     never resets or deletes history. Only supplied files are staged.
     """
+    # Load the optional Git library only when a Git operation is requested.
+    from dulwich import porcelain
+    from dulwich.refs import Ref as GitRef
+
     directory = directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     if (directory / ".git").exists():
@@ -67,6 +67,8 @@ def git_commit(
     push: bool = False,
 ) -> str:
     """Write/stage changes, commit with explicit identity, optionally push to origin."""
+    from dulwich import porcelain
+
     write_files(directory, files)
     porcelain.add(directory, paths=list(files))
     revision = porcelain.commit(
@@ -87,6 +89,10 @@ def git_upstream(checkout: Path, directory: Path) -> Path:
     The destination must not exist. Tests can commit and push subsequent changes
     with Dulwich or Git, just as they would with a remote repository.
     """
+    from dulwich import porcelain
+    from dulwich.refs import Ref as GitRef
+    from dulwich.repo import Repo
+
     directory = directory.resolve()
     directory.mkdir(parents=True)
     with porcelain.clone(str(checkout), directory, bare=True, errstream=BytesIO()):
