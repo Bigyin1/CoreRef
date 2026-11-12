@@ -7,12 +7,14 @@ Dulwich is loaded only when a Git operation is requested.
 
 from .configuration import configured_home
 from .git import FixtureFile, git_commit, git_repository, git_upstream
+from .operations import OperationTrace, trace_operations
 from .sandbox import Sandbox, environment
 from .server import LocalServer, local_server
 
 __all__ = [
     "FixtureFile",
     "LocalServer",
+    "OperationTrace",
     "Sandbox",
     "configured_home",
     "environment",
@@ -20,4 +22,5 @@ __all__ = [
     "git_repository",
     "git_upstream",
     "local_server",
+    "trace_operations",
 ]

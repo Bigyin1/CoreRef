@@ -25,11 +25,63 @@ from conan.cli.cli import Cli  # type: ignore[import-untyped]
 from .configuration import configured_home
 
 
-@dataclass(frozen=True)
+@dataclass
 class LocalServer:
     url: str
     password: str = field(repr=False)
     remote: str = "catalog-test"
+    root: Path | None = field(default=None, repr=False, compare=False)
+    _process: subprocess.Popen[str] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def log_path(self) -> Path | None:
+        return self.root / "server.log" if self.root is not None else None
+
+    @property
+    def running(self) -> bool:
+        return self._process is not None and self._process.poll() is None
+
+    def start(self) -> None:
+        """Start the owned server using its existing configuration and data."""
+        if self.running:
+            return
+        if self.root is None or self.log_path is None:
+            raise ValueError("Only a server created by local_server() can be started")
+        executable = Path(sys.executable).parent / "conan_server"
+        if not executable.is_file():
+            raise RuntimeError("Install coreref[testing] to run a local Conan server")
+        with self.log_path.open("w+") as log:
+            self._process = subprocess.Popen(  # noqa: S603 - owned executable/configuration
+                [str(executable), "--server_dir", str(self.root)],
+                stdout=log,
+                stderr=log,
+                text=True,
+            )
+        try:
+            _wait_for_server(self, self._process, self.log_path)
+        except BaseException:
+            # Also stop the owned child if startup is interrupted by the caller.
+            self.stop()
+            raise
+
+    def stop(self) -> None:
+        """Stop and reap the child; repeated calls are harmless."""
+        process, self._process = self._process, None
+        if process is None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    def restart(self) -> None:
+        """Restart with the same URL, credentials and stored packages."""
+        self.stop()
+        self.start()
 
     def configure(self, home: Path, *, local_sources: bool = True) -> Path:
         """Configure an owned cache; local Git URLs are allowed by default for tests."""
@@ -123,27 +175,14 @@ def local_server(root: Path) -> Iterator[LocalServer]:
 
 @contextmanager
 def _start_server(root: Path) -> Iterator[LocalServer]:
-    executable = Path(sys.executable).parent / "conan_server"
-    if not executable.is_file():
-        raise RuntimeError("Install coreref[testing] to run a local Conan server")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     root.mkdir(parents=True, exist_ok=True)
-    server = LocalServer(f"http://127.0.0.1:{port}", secrets.token_hex(16))
+    server = LocalServer(f"http://127.0.0.1:{port}", secrets.token_hex(16), root=root)
     (root / "server.conf").write_text(_server_config(root, port, server.password))
-    log_path = root / "server.log"
-    with log_path.open("w+") as log:
-        process = subprocess.Popen(  # noqa: S603 - owned server and isolated configuration
-            [str(executable), "--server_dir", str(root)], stdout=log, stderr=log, text=True
-        )
-        try:
-            _wait_for_server(server, process, log_path)
-            yield server
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+    try:
+        server.start()
+        yield server
+    finally:
+        server.stop()

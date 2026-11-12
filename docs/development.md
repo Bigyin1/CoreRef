@@ -341,3 +341,65 @@ Inline-создание через `env.package(..., sources={...}, files={...})
 dependencies=...)` публикует только именованные наборы. Одиночные записи, включая
 инкрементальные обновления и зависимости на ранее опубликованные пакеты, публикуются
 обычным `catalog.publish(record, dependencies=(...))`.
+
+### Недоступность сервера и диагностика
+
+`env.server.stop()`, `start()` и `restart()` управляют тем же сервером с сохранением
+URL, credentials и опубликованных пакетов. `stop()` и `start()` идемпотентны;
+контекст окружения завершает запущенный процесс и после ошибки теста.
+Для быстрой проверки отказов задайте `environment(..., timeout=0.2)` или
+`env.new_catalog(timeout=0.2)`. По умолчанию тестовые клиенты используют timeout 5 секунд;
+это timeout HTTP-запроса, а не ограничение длительности всей операции.
+
+`env.diagnostics()` возвращает пути рабочих проектов, созданных Conan home,
+текущего server log и список успешно опубликованных через эти клиенты Ref.
+Он не обращается к Conan или сети и не включает password или содержимое конфигурации.
+Pytest-плагин автоматически добавляет секцию `CoreRef environment` при ошибках
+setup, выполнения теста и teardown, если окружение уже было создано. Директории
+остаются под управлением pytest/tmp_path; эти хелперы не включают отдельную очистку
+или архивирование диагностических файлов.
+
+### Настройки pytest-маркера
+
+```python
+@pytest.mark.coreref(
+    projects="test_projects/basic",
+    repositories=("cpu", "stdlib"),
+    namespace="soc",
+    timeout=0.2,
+)
+def test_flow(coreref_environment, coreref_catalog):
+    projects = coreref_environment.projects
+    ...
+```
+
+`projects` разрешается относительно файла теста, не cwd. Маркер можно ставить на
+функцию, класс, модуль или `pytest.param(..., marks=pytest.mark.coreref(...))` для
+нескольких деревьев проектов. Используется ближайший маркер; настройки не сливаются
+между уровнями. Поддерживаются только `projects`, `repositories`, `namespace`, `timeout`;
+ошибочные параметры дают ошибку подготовки теста. Без параметров поведение фикстур прежнее.
+
+### Счётчики операций
+
+```python
+from coreref.testing import trace_operations
+
+with trace_operations() as trace:
+    graph.get_with_sources()
+assert trace.installs == 1
+
+with trace_operations() as cached:
+    graph.get_with_sources()
+assert cached.commands == ()
+```
+
+`commands` содержит снимок аргументов SDK-команд; `installs` — число попыток install,
+`recipe_reads` — чтений метаданных рецептов, `source_clones` — попыток Conan Git clone.
+`recipe_downloads` и `package_downloads` считают успешные GET архивов
+`conan_export.tgz` и `conan_package.tgz` соответственно. Это сетевые архивы,
+а не число команд download: разрешение графа тоже может скачивать рецепты.
+
+Инструментация действует на весь Python-процесс и все каталоги внутри контекста.
+Контексты не должны пересекаться или использоваться с параллельными операциями;
+это средство функциональных проверок, не измерения времени. Счётчики сохраняются
+после выхода, включая исключение, а перехваченные методы восстанавливаются.
