@@ -38,6 +38,7 @@ class Graph:
         dependencies: tuple[Ref, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
+        lockfile = lockfile.expanduser().absolute() if lockfile is not None else None
         self._catalog = catalog
         self._local: LocalPackage | None = None
         if isinstance(record, Ref):

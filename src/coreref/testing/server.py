@@ -34,12 +34,16 @@ class LocalServer:
     def configure(self, home: Path, *, local_sources: bool = True) -> Path:
         """Configure an owned cache; local Git URLs are allowed by default for tests."""
         configured_home(home)
-        if local_sources:
-            # Only this private test server accepts SCM URLs of temporary Git repos.
-            (home / "global.conf").write_text("core.scm:local_url=allow\n")
         api = ConanAPI(cache_folder=str(home.resolve()))
         Cli(api).add_commands()
-        api.command.run(["remote", "add", self.remote, self.url, "-vquiet"])
+        current = next(
+            (remote for remote in api.remotes.list() if remote.name == self.remote), None
+        )
+        if current is not None and current.url != self.url:
+            raise ValueError(f"Test remote {self.remote!r} already points at another server")
+        if current is None:
+            api.command.run(["remote", "add", self.remote, self.url, "-vquiet"])
+        self._configure_sources(home, local_sources)
         api.command.run(
             [
                 "remote",
@@ -55,6 +59,16 @@ class LocalServer:
         )
 
         return home
+
+    def _configure_sources(self, home: Path, enabled: bool) -> None:
+        path = home / "global.conf"
+        lines = path.read_text().splitlines(keepends=True) if path.exists() else []
+        lines = [line for line in lines if line.partition("=")[0].strip() != "core.scm:local_url"]
+        content = "".join(lines)
+        if content and not content.endswith("\n"):
+            content += "\n"
+        value = "allow" if enabled else "block"
+        path.write_text(content + f"core.scm:local_url={value}\n")
 
 
 def _server_config(root: Path, port: int, password: str) -> str:

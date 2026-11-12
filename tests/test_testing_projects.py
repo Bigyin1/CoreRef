@@ -150,8 +150,8 @@ def test_absolute_repository_symlink_cannot_initialize_the_source_directory(
     (source / "cpu").mkdir(parents=True)
     (source / "alias").symlink_to(source / "cpu", target_is_directory=True)
     env = Sandbox(conan_server, tmp_path / "infra")
-    with pytest.raises(ValueError, match="symlinks must stay inside"):
-        env.load_projects(source, repositories=("alias",))
+    copied = env.load_projects(source, repositories=("alias",))
+    assert (copied / "cpu/.git").exists()
     assert not (source / "cpu/.git").exists()
 
 

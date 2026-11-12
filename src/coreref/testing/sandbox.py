@@ -6,7 +6,6 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from itertools import count
 from pathlib import Path
-from shutil import copytree, ignore_patterns
 from typing import overload
 
 import networkx as nx
@@ -16,6 +15,7 @@ from ..api.records import InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
 from ..tools.deps import DepsFile
 from .git import FixtureFile, git_repository, git_upstream, write_files
+from .projects import copy_projects
 from .server import LocalServer, local_server
 
 
@@ -160,7 +160,7 @@ class Sandbox:
                 raise ValueError(f"Repository must be inside the project tree: {name}")
             if not project.is_dir():
                 raise FileNotFoundError(project)
-        copytree(source, self.projects, symlinks=True, ignore=ignore_patterns(".git"))
+        copy_projects(source, self.projects)
         self._prepare_repositories(repositories)
         return self.projects
 
