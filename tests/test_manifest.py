@@ -28,12 +28,12 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(tmp_path: Path) -> Non
         "dependencies: [soc.cpu.rtl.default/1.0#old]\n"
     )
     document = ManifestFile(path)
-    assert document.record.source is None
+    assert document.record.source == path.parent
     assert document.record.files == {"spec.json": path.parent / "build/spec.json"}
     record = document.record
     assert isinstance(record.payload, dict)
     record.payload["sources"] = []
-    assert document.record.payload == {"sources": ["top.sv"]}
+    assert document.record is record and document.record.payload == {"sources": []}
     document.add(Ref("soc.cpu.rtl.default/2.0#new"))
     document.add(Ref("soc.cpu.rtl.default/2.0#new"))
     assert document.dependencies == (Ref("soc.cpu.rtl.default/2.0#new"),)
@@ -92,8 +92,8 @@ def test_create_preserves_existing_files_and_supports_independent_manifests(tmp_
     ref = Ref("demo.block.analysis.model/1.0")
     first = ManifestFile.create(ref, tmp_path / "config/model.yaml")
     second = ManifestFile.create(ref, tmp_path / "config/report.yml")
-    assert first.record.source is None
-    assert second.record.source is None
+    assert first.record.source == first.path.parent
+    assert second.record.source == second.path.parent
     assert first.lockfile != second.lockfile
     original = first.path.read_bytes()
     with pytest.raises(Conflict, match="already exists"):
@@ -236,7 +236,7 @@ def test_source_is_not_a_manifest_field(tmp_path: Path, source: str) -> None:
 
 
 @pytest.mark.parametrize("view", ["rtl", "be"])
-def test_scm_is_explicit_flow_policy_for_every_view(
+def test_manifest_defaults_to_project_sources_with_an_explicit_scm_opt_out(
     tmp_path: Path,
     view: str,
 ) -> None:
@@ -244,11 +244,9 @@ def test_scm_is_explicit_flow_policy_for_every_view(
         Ref(f"soc.cpu.{view}.default/1.0"), tmp_path / view / "manifest.yml"
     )
     record = manifest.record
-    assert record.source is None
-    sourced = manifest.record_with_source(manifest.path.parent)
-    assert sourced.source == manifest.path.parent
-    assert manifest.record.source is None
-    assert "source" not in manifest.model_dump()
+    assert record.source == manifest.path.parent
+    record.source = None
+    assert manifest.record is record and manifest.record.source is None
     manifest.save()
     assert "source:" not in manifest.path.read_text()
 
@@ -273,18 +271,19 @@ def test_resolve_preserves_explicit_scm_in_snapshot_and_publication(
     document = ManifestFile.create(
         Ref("soc.top.rtl.default/1.0"), tmp_path / "project/manifest.yml"
     )
-    document.payload = {"generation": 1}
+    document.record.payload = {"generation": 1}
     document.save()
     document.create_lockfile(catalog)
     manifest_before = document.path.read_bytes()
     lock_before = document.lockfile.read_bytes()
-    graph = document.resolve(catalog, source=checkout, update=update)
+    document.record.source = checkout
+    graph = document.resolve(catalog, update=update)
     local = graph.record
     assert isinstance(local, LocalRecord) and local.source == checkout
-    assert document.record.source is None
-    document.payload = {"generation": 2}
+    assert document.record is local
+    document.record.payload = {"generation": 2}
     published = catalog.publish(graph)
-    assert published.has_source and published.payload == {"generation": 1}
+    assert published.has_source and published.payload == {"generation": 2}
     installed = catalog.get_with_sources(published.ref)
     assert installed.source is not None and installed.source != checkout
     assert (installed.source / "cpu.sv").read_bytes() == (checkout / "cpu.sv").read_bytes()
@@ -303,19 +302,19 @@ def test_manifest_editing_and_record_creation_need_no_catalog(
     ):
         manifest = ManifestFile.create(Ref("soc.top.rtl.default/1.0"), tmp_path / "manifest.yml")
         manifest.add(Ref("soc.cpu.rtl.default/1.0"))
-        manifest.files = {"result": "build/result"}
-        manifest.payload = {"nested": {"value": 1}}
+        manifest.record.files = {"result": tmp_path / "build/result"}
+        manifest.record.payload = {"nested": {"value": 1}}
         manifest.save()
         restored = ManifestFile(manifest.path)
-        sourced = restored.record_with_source(tmp_path / "repository")
-        plain = restored.record
-        assert sourced is not plain and plain is not restored.record
-        assert sourced.source == tmp_path / "repository" and plain.source is None
-        assert isinstance(sourced.payload, dict)
-        sourced.payload["nested"] = {}
-        sourced.files = {}
-        assert restored.record.payload == {"nested": {"value": 1}}
-        assert restored.record.files == {"result": tmp_path / "build/result"}
+        record = restored.record
+        record.source = tmp_path / "repository"
+        assert restored.record is record
+        assert isinstance(record.payload, dict)
+        record.payload["nested"] = {}
+        record.files.clear()
+        assert restored.record.payload == {"nested": {}}
+        assert restored.record.files == {}
+        assert ManifestFile(restored.path).record.payload == {"nested": {"value": 1}}
         restored.remove(restored.dependencies[0])
         restored.save()
         assert ManifestFile(restored.path).dependencies == ()

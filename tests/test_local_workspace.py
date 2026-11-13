@@ -59,7 +59,7 @@ def test_native_recipe_reads_manifest_edits_without_sync(
     old = Graph(catalog, cpu.record.ref)
     stamp = (cpu.path.parent / "conanfile.py").stat().st_mtime_ns
     cpu.add(util.record.ref)
-    cpu.payload = {"changed": True}
+    cpu.record.payload = {"changed": True}
     cpu.save()
     with patch("requests.sessions.Session.send", side_effect=AssertionError("Network")):
         graph = Graph(catalog, cpu.record.ref)
@@ -76,7 +76,7 @@ def test_local_source_and_missing_artifact_paths_come_from_recipe(
     document = local_package(tmp_path / "cpu")
     source = document.path.parent / "rtl"
     source.mkdir()
-    document.files = {"cpu.lib": "build/timing/result.lib"}
+    document.record.files = {"cpu.lib": document.path.parent / "build/timing/result.lib"}
     document.save()
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
@@ -226,7 +226,7 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     stamp = (directory / "conanfile.py").stat().st_mtime_ns
     document.add_to_workspace(workspace)
     assert (directory / "conanfile.py").stat().st_mtime_ns == stamp
-    document.payload = {"edited": True}
+    document.record.payload = {"edited": True}
     document.save()
     monkeypatch.chdir(workspace.path.parent)
     installed = catalog.get_with_sources(document.record.ref)

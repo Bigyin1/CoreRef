@@ -55,13 +55,17 @@ class LocalRecipe:
         self.record = record
         self.requirements = tuple(sorted(set(requirements)))
 
-    def write(self, directory: Path) -> None:
+    def write_for_resolution(self, directory: Path) -> None:
+        """Resolve requirements without serializing unfinished local payload or artifacts."""
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "conanfile.py").write_text(_recipe_text(self.record.ref.without_revision()))
-        (directory / "record.json").write_text(self.record.to_json())
         (directory / "conandata.yml").write_text(
             _CONANDATA_TEMPLATE.render(requirements=self.requirements)
         )
+
+    def write(self, directory: Path) -> None:
+        self.write_for_resolution(directory)
+        (directory / "record.json").write_text(self.record.to_json())
         if self.record.source is not None:
             (directory / "source-path.txt").write_text(str(self.record.source))
 

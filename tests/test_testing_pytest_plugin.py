@@ -219,7 +219,7 @@ def test_project_fixture_does_not_create_an_unused_catalog(pytester: pytest.Pyte
     pytester.makepyfile("""
 def test_project(coreref_project, coreref_environment):
     assert coreref_project.path.is_file()
-    assert coreref_project.record.source is None
+    assert coreref_project.record.source == coreref_project.path.parent
     assert list(coreref_environment.root.glob("client-*")) == []
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers")

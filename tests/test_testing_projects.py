@@ -22,7 +22,8 @@ def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
         published = {}
         for name in ("stdlib", "cpu"):
             project = ManifestFile(env.projects / name / "manifest.yml")
-            record = project.record_with_source(project.path.parent)
+            record = project.record
+            record.source = project.path.parent
             published[name] = publisher.publish(record, dependencies=project.dependencies)
         reader = env.new_catalog()
         soc = ManifestFile(env.projects / "soc/manifest.yml")
@@ -160,7 +161,8 @@ def test_inline_packages_and_projects_can_extend_a_directory_fixture(tmp_path: P
     with environment(tmp_path, projects=PROJECTS, repositories=("stdlib",)) as env:
         catalog = env.new_catalog()
         stdlib = ManifestFile(env.projects / "stdlib/manifest.yml")
-        record = stdlib.record_with_source(stdlib.path.parent)
+        record = stdlib.record
+        record.source = stdlib.path.parent
         dependency = catalog.publish(record)
         generated = env.package(
             env.ref("generated"),

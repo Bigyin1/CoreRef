@@ -159,6 +159,7 @@ def test_single_publication_keeps_lock_choice_and_records_only_successes(
     dependency = env.package(env.ref("cpu"))
     first = env.publish(catalog, dependency)
     consumer = env.project(env.ref("top"), dependencies=(dependency.ref,))
+    consumer.record.source = None  # This consumer publishes metadata, not Git sources.
     lock = consumer.create_lockfile(catalog)
     dependency.payload = {"generation": 2}
     second = env.publish(catalog, dependency)

@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from functools import cached_property
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
-
-from frozendict import deepfreeze, frozendict
 
 from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.records import InstalledRecord, LocalRecord, Record, Ref
@@ -280,7 +277,7 @@ class PackageGraph:
 
 
 class LocalPackage:
-    """A detached local description and dependencies for one catalog operation."""
+    """One working local record and a fixed set of requirements for this operation."""
 
     def __init__(
         self,
@@ -293,7 +290,7 @@ class LocalPackage:
         self._catalog = catalog
         self._client = catalog._client
         self.lockfile = lockfile.expanduser().absolute() if lockfile is not None else None
-        self.record = self._snapshot(record)
+        self.record = self._prepare(record)
         self.dependencies = self._references(dependencies)
 
     @cached_property
@@ -301,7 +298,7 @@ class LocalPackage:
         recipe = LocalRecipe(self.record, tuple(str(ref) for ref in self.dependencies))
         with TemporaryDirectory(prefix="coreref-resolve-") as temporary:
             directory = Path(temporary)
-            recipe.write(directory)
+            recipe.write_for_resolution(directory)
             update = (
                 self.lockfile is None
                 and self._client.remote is not None
@@ -330,22 +327,17 @@ class LocalPackage:
                 self._client.save_lockfile(resolved.native, lockfile)
             return self._export(directory, lockfile=lockfile)
 
-    def _snapshot(self, record: LocalRecord) -> LocalRecord:
+    def _prepare(self, record: LocalRecord) -> LocalRecord:
         if not isinstance(record, LocalRecord):
             raise InvalidPackage("Expected one LocalRecord")
         if record.ref.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
         to_conan_reference(record.ref)
-        source = record.source.expanduser().absolute() if record.source is not None else None
-        files = frozendict(
-            (name, path.expanduser().absolute()) for name, path in record.files.items()
-        )
-        return LocalRecord(
-            record.ref,
-            deepfreeze(json.loads(record.to_json())["payload"]),
-            source,
-            files,
-        )
+        if record.source is not None:
+            record.source = record.source.expanduser().absolute()
+        for name, path in record.files.items():
+            record.files[name] = path.expanduser().absolute()
+        return record
 
     def _references(self, dependencies: tuple[Ref, ...]) -> tuple[Ref, ...]:
         if any(not isinstance(ref, Ref) for ref in dependencies):

@@ -176,13 +176,13 @@ class Ref:
 
 @dataclass
 class LocalRecord:
-    """Project metadata with already available source and package file paths."""
+    """Mutable metadata and file paths prepared during one CLI command."""
 
     _format: ClassVar[int] = 7
     ref: Ref
     payload: JSON | JSONSerializable = None
     source: Path | None = None
-    files: Mapping[str, Path] = field(default_factory=dict)
+    files: dict[str, Path] = field(default_factory=dict)
 
     def to_json(self) -> str:
         """Prepare portable package metadata, excluding local source and artifact paths."""

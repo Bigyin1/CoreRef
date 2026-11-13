@@ -88,5 +88,7 @@ def local_record(
         record.ref.without_revision(),
         record.payload,
         source,
-        (record.files if isinstance(record, InstalledRecord) else {}) if files is None else files,
+        dict(record.files)
+        if files is None and isinstance(record, InstalledRecord)
+        else (files or {}),
     )

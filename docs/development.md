@@ -29,7 +29,7 @@ CI проверяет обе группы тестов с общим порог�
 | `tools/cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
 | `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
 | `tools/manifest.py` | Необязательный стандарт YAML, пути и прямые объявления зависимостей |
-| `api/graph.py`, `workspace.py` | Разрешённый снимок и рабочие Git-копии |
+| `api/graph.py`, `workspace.py` | Разрешённые зависимости, рабочий LocalRecord и Git-копии |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
 | `_internal/recipe.py`, `templates/` | Чтение метаданных и Jinja-шаблоны временных рецептов |
 | `_internal/graph.py`, `client.py` | Нативный граф и команды Conan API |
@@ -43,7 +43,9 @@ Conan закреплён на 2.34.x: доступ к его внутренни�
 ## Правила изменений
 
 - Сохранять короткий публичный API; доменную семантику RTL/BE/DFT оставлять flow.
-- При resolve/publish отделять метаданные от изменяемых входов; точные revisions сохранять во всём снимке.
+- LocalRecord — рабочий объект короткой CLI-команды; ManifestFile и Graph используют его напрямую.
+  Resolve фиксирует зависимости/revisions, не копирует и не замораживает локальные metadata/files.
+  Payload сериализовать при сохранении/публикации; готовые файлы копировать в staging перед Conan.
 - Чтение метаданных отделять от получения файлов и SCM. Повторно использовать рецепты
   внутри операции и пакетное получение Graph; избегать отдельных install на каждый узел.
 - Для изменений Conan-интеграции проверять настоящий сервер, файлы, Git-исходники,
@@ -310,7 +312,7 @@ def test_soc(tmp_path):
         # Flow сам читает манифесты и выполняет нужные команды.
         for name in ("stdlib", "cpu"):
             project = ManifestFile(env.projects / name / "manifest.yml")
-            record = project.record_with_source(project.path.parent)
+            record = project.record
             catalog.publish(record, dependencies=project.dependencies)
         soc = ManifestFile(env.projects / "soc/manifest.yml")
         assert len(soc.resolve(env.new_catalog()).get_with_sources()) == 2

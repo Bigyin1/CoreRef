@@ -1,8 +1,8 @@
-"""Resolved local and published packages, dependency ordering and lockfiles."""
+"""Resolved dependencies, a working local root, ordering and lockfiles."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -51,6 +51,9 @@ class Graph:
             self._package = self._local.resolved
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result
+        self._root_ref = self._package.record.ref
+        self._index = {record.ref: record for record in self._records}
+        self._package.resolve_ref(self._root_ref)
         self._requirements = tuple(
             target for source, target in self._dependencies if source == self._package.record.ref
         )
@@ -62,23 +65,23 @@ class Graph:
 
     @property
     def record(self) -> LocalRecord | Record:
-        """Return immutable stored metadata or a detached editable local description."""
+        """Return the working local root, or immutable metadata of a published root."""
         record = self._package.record
-        return replace(record) if isinstance(record, LocalRecord) else record
+        if record.ref != self._root_ref:
+            raise InvalidPackage("Local root coordinates changed; create a new Graph")
+        return record
 
     @property
     def records(self) -> tuple[LocalRecord | Record, ...]:
-        """Expose records without sharing the mutable local root."""
-        return tuple(
-            replace(record) if isinstance(record, LocalRecord) else record
-            for record in self._records
-        )
+        """Return records with the same working local root as record and info()."""
+        _ = self.record
+        return self._records
 
     def info(self, ref: Ref) -> LocalRecord | Record:
-        """Read a node from this snapshot, without recipe downloads or package installation."""
+        """Read resolved metadata or the working local root, without package I/O."""
         ref = self._package.resolve_ref(ref)
-        record = self._records_by_ref[ref]
-        return replace(record) if isinstance(record, LocalRecord) else record
+        _ = self.record
+        return self._index[ref]
 
     def dependencies(
         self,
@@ -93,7 +96,7 @@ class Graph:
         records = []
         targets = self.ordered_refs(selected)[:-1] if transitive else self._neighbors[selected]
         for target in targets:
-            record = self._records_by_ref[target]
+            record = self._index[target]
             if isinstance(record, Record) and query.matches(record):
                 records.append(record)
         return tuple(records)
@@ -110,6 +113,7 @@ class Graph:
             raise InvalidPackage(
                 "Only a local graph can be published; use a LocalRecord for a new package"
             )
+        _ = self.record
         return self._local.publish(resolved=self._package.graph)
 
     @property
@@ -125,6 +129,7 @@ class Graph:
         output = path if path is not None else self.lockfile
         if output is None:
             raise CatalogError("Provide a lockfile path in Graph or create_lockfile")
+        _ = self.record
         self._lockfile = self._package.create_lockfile(output)
         return self._lockfile
 
@@ -152,7 +157,7 @@ class Graph:
         if refs is None:
             refs = tuple(
                 record.ref
-                for record in self.ordered_records(self.record.ref)
+                for record in self.ordered_records(self._root_ref)
                 if isinstance(record, Record)
             )
         if filters is not None:
@@ -162,13 +167,14 @@ class Graph:
     @property
     def networkx(self) -> _RefGraph:
         """Expose the cached read-only topology; use .copy() for a working graph."""
+        _ = self.record
         return self._networkx
 
     @cached_property
     def _networkx(self) -> _RefGraph:
         """Build topology once; use .copy() when a mutable working graph is needed."""
         graph: nx.DiGraph[Ref] = nx.DiGraph()
-        graph.add_nodes_from(record.ref for record in self._records)
+        graph.add_nodes_from(self._index)
         graph.add_edges_from(self._dependencies)
         nx.freeze(graph)
         return graph
@@ -186,15 +192,7 @@ class Graph:
         self, root: Ref, *, stop_at: tuple[Ref, ...] = ()
     ) -> tuple[LocalRecord | Record, ...]:
         """Return records in the same dependency-first order as ordered_refs."""
-        records: list[LocalRecord | Record] = []
-        for ref in self.ordered_refs(root, stop_at=stop_at):
-            record = self._records_by_ref[ref]
-            records.append(replace(record) if isinstance(record, LocalRecord) else record)
-        return tuple(records)
-
-    @cached_property
-    def _records_by_ref(self) -> dict[Ref, LocalRecord | Record]:
-        return {record.ref: record for record in self._records}
+        return tuple(self.info(ref) for ref in self.ordered_refs(root, stop_at=stop_at))
 
     def _order(self, root: Ref, stop_at: tuple[Ref, ...]) -> tuple[Ref, ...]:
         if root not in self.networkx:

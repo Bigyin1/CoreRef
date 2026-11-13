@@ -1,4 +1,4 @@
-"""Each operation detaches mutable project inputs before calling Conan."""
+"""Short CLI commands share working inputs and stage publication data once."""
 
 from __future__ import annotations
 
@@ -13,35 +13,24 @@ from coreref.api.records import JSON, LocalRecord, Ref
 from tests.test_models import UserPayload
 
 
-def test_construction_snapshots_mutable_project(catalog: Catalog, tmp_path: Path) -> None:
+def test_graph_shares_the_mutable_project_without_encoding_payload(
+    catalog: Catalog, tmp_path: Path
+) -> None:
     items: list[JSON] = ["original"]
     payload = UserPayload({"items": items})
-    files = {"report": tmp_path / "original.txt"}
     local = LocalRecord(
-        Ref.from_fields("soc", "top", "rtl", "default", "1.0"),
-        payload,
-        files=files,
+        Ref("soc.top.rtl.default/1.0"), payload, files={"report": tmp_path / "original.txt"}
     )
-    project = Graph(catalog, local)
-    first = project.records[0]
-    assert isinstance(first, LocalRecord)
-    assert payload.calls == 1
+    graph = Graph(catalog, local)
+    assert graph.record is local and graph.records[0] is local
+    assert payload.calls == 0
     items.append("changed")
-    files.clear()
+    local.files.clear()
     local.source = tmp_path
-    second = Graph(catalog, local).records[0]
-    assert isinstance(second, LocalRecord)
-    assert payload.calls == 2
-    assert first is not local and second is not local
-    assert first.payload == {"items": ("original",)}
-    assert first.files == {"report": tmp_path / "original.txt"}
-    assert first.source is None
-    assert second.payload == {"items": ("original", "changed")}
-    assert second.files == {} and second.source == tmp_path
-    assert isinstance(first, LocalRecord)
-    first.payload = {"result-only": True}
-    assert local.payload is payload
-    assert second.payload == {"items": ("original", "changed")}
+    assert graph.record.payload is payload
+    assert graph.record.files == {} and graph.record.source == tmp_path
+    assert Graph(catalog, local).record is local
+    assert payload.calls == 0
 
 
 def test_publish_snapshots_before_conan_commands(
@@ -72,7 +61,7 @@ def test_publish_snapshots_before_conan_commands(
     assert local.payload == {"changed": True} and local.files == {}
 
 
-def test_construction_resolves_once_and_snapshots_before_conan(
+def test_construction_resolves_once_and_keeps_the_working_record(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dependency = catalog.publish(
@@ -94,7 +83,7 @@ def test_construction_resolves_once_and_snapshots_before_conan(
     project = Graph(catalog, local, dependencies=(dependency.ref,))
     assert calls == 1
     assert project.networkx.number_of_edges() == 1
-    assert next(record for record in project.records if record.ref == local.ref).payload is None
+    assert project.info(local.ref) is local and project.record.payload == {"edited": True}
     assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
     assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
     assert calls == 1
