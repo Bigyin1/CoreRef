@@ -12,15 +12,17 @@ def test_downstream_plugin_fixtures_marker_and_editable_project(pytester: pytest
 def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_server, monkeypatch):
     env = coreref_environment
     assert coreref_server is env.server
+    assert coreref_catalog is env.catalog
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"})
-    published = coreref_catalog.publish(cpu)
+    published = env.publish(cpu)
     coreref_project.add(published.ref.without_revision())
     coreref_project.save()
     assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].source is not None
-    workspace = env.workspace(coreref_catalog, directory=coreref_project.path.parent)
+    workspace = env.workspace(directory=coreref_project.path.parent)
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(coreref_project.path.parent)
     assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].is_editable
+    assert len(list(env.root.glob("client-*"))) == 1
 
 def test_unrelated():
     assert True

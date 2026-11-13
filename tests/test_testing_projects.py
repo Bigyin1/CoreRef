@@ -18,7 +18,7 @@ pytestmark = pytest.mark.conan_remote
 
 def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
     with environment(tmp_path / "infra", projects=PROJECTS, repositories=("stdlib", "cpu")) as env:
-        publisher = env.new_catalog()
+        publisher = env.catalog
         published = {}
         for name in ("stdlib", "cpu"):
             project = ManifestFile(env.projects / name / "manifest.yml")
@@ -48,7 +48,7 @@ def test_project_copy_preserves_custom_manifest_and_can_be_editable(
 ) -> None:
     env = Sandbox(conan_server, tmp_path / "infra")
     projects = env.load_projects(PROJECTS)
-    catalog = env.new_catalog()
+    catalog = env.catalog
     manifest = json.loads((projects / "physical/project.json").read_text())
     record = LocalRecord(
         Ref(manifest["ref"]),
@@ -56,7 +56,7 @@ def test_project_copy_preserves_custom_manifest_and_can_be_editable(
     )
     published = catalog.publish(record)
     assert env.new_catalog().get(published.ref).files["timing"].read_text() == "library(cpu) {}\n"
-    workspace = env.workspace(catalog, directory=projects)
+    workspace = env.workspace(directory=projects)
     for name in ("stdlib", "cpu"):
         ManifestFile(projects / name / "manifest.yml").add_to_workspace(workspace)
     monkeypatch.chdir(projects / "soc")
@@ -159,7 +159,7 @@ def test_absolute_repository_symlink_cannot_initialize_the_source_directory(
 
 def test_inline_packages_and_projects_can_extend_a_directory_fixture(tmp_path: Path) -> None:
     with environment(tmp_path, projects=PROJECTS, repositories=("stdlib",)) as env:
-        catalog = env.new_catalog()
+        catalog = env.catalog
         stdlib = ManifestFile(env.projects / "stdlib/manifest.yml")
         record = stdlib.record
         record.source = stdlib.path.parent

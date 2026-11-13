@@ -19,7 +19,7 @@ def test_packages_roundtrip_between_independent_clients(
     conan_server: LocalServer, tmp_path: Path
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path / "sandbox")
-    publisher, reader = sandbox.new_catalog(), sandbox.new_catalog()
+    publisher, reader = sandbox.catalog, sandbox.new_catalog()
     assert publisher.cache_directory != reader.cache_directory
     util = publisher.publish(sandbox.package(Ref("test.util.rtl.default/1.0")))
     local = sandbox.package(
@@ -43,8 +43,8 @@ def test_native_workspace_uses_fixture_sources(
     conan_server: LocalServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path / "sandbox")
-    catalog = sandbox.new_catalog()
-    workspace = sandbox.workspace(catalog)
+    catalog = sandbox.catalog
+    workspace = sandbox.workspace()
     cpu = sandbox.package(Ref("test.cpu.rtl.default/1.0"), sources={"cpu.sv": "local RTL"})
     assert cpu.source is not None
     workspace.add(cpu.source, record=cpu)
@@ -90,7 +90,6 @@ def test_package_hierarchy_downloads_from_bare_upstreams(
     conan_server: LocalServer, tmp_path: Path
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
-    publisher = sandbox.new_catalog()
     links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
     records = {
         name: sandbox.package(
@@ -100,9 +99,7 @@ def test_package_hierarchy_downloads_from_bare_upstreams(
         for name in links
     }
     # Input order need not follow the dependency order.
-    published = sandbox.publish_set(
-        publisher, dict(reversed(tuple(records.items()))), dependencies=links
-    )
+    published = sandbox.publish_set(dict(reversed(tuple(records.items()))), dependencies=links)
     # Remove every publisher checkout: SCM retrieval must use its bare origin.
     for local in records.values():
         assert local.source is not None
@@ -125,11 +122,11 @@ def test_editable_hierarchy_can_mix_local_and_published_packages(
     conan_server: LocalServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
-    catalog = sandbox.new_catalog()
+    catalog = sandbox.catalog
     util = catalog.publish(sandbox.package(Ref("test.util.rtl.default/1.0")))
     cpu = sandbox.package(Ref("test.cpu.rtl.default/1.0"), sources={"cpu.sv": "CPU"})
     top = sandbox.package(Ref("test.top.rtl.default/1.0"), sources={"top.sv": "TOP"})
-    workspace = sandbox.workspace(catalog)
+    workspace = sandbox.workspace()
     assert cpu.source is not None and top.source is not None
     workspace.add(cpu.source, record=cpu, dependencies=(util.ref,))
     workspace.add(top.source, record=top, dependencies=(cpu.ref, util.ref))
@@ -177,29 +174,28 @@ def test_package_set_rejects_invalid_links_before_publication(
     dependencies: dict[str, tuple[str, ...]],
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
-    catalog = sandbox.new_catalog()
     records = {
         name: sandbox.package(Ref(f"test.{name}.rtl.default/1.0")) for name in ("cpu", "top")
     }
-    with patch.object(catalog, "publish") as publish:
+    with patch.object(conan_server, "configure") as configure:
         with pytest.raises(ValueError, match=r"Unknown fixture packages|contain a cycle"):
-            sandbox.publish_set(catalog, records, dependencies=dependencies)
-        publish.assert_not_called()
+            sandbox.publish_set(records, dependencies=dependencies)
+        configure.assert_not_called()
 
 
 def test_package_set_can_be_empty(conan_server: LocalServer, tmp_path: Path) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
-    assert sandbox.publish_set(sandbox.new_catalog(), {}, dependencies={}) == {}
+    assert sandbox.publish_set({}, dependencies={}) == {}
+    assert list(sandbox.root.glob("client-*")) == []
 
 
 def test_environment_owns_server_clients_and_git_origins(tmp_path: Path) -> None:
     with environment(tmp_path) as sandbox:
-        publisher = sandbox.new_catalog()
         records = {
             name: sandbox.package(Ref(f"test.{name}.rtl.default/1.0"), sources={f"{name}.sv": name})
             for name in ("cpu", "top")
         }
-        published = sandbox.publish_set(publisher, records, dependencies={"top": ("cpu",)})
+        published = sandbox.publish_set(records, dependencies={"top": ("cpu",)})
         graph = Graph(sandbox.new_catalog(), published["top"].ref)
         assert len(graph.get_with_sources()) == 2
         assert sandbox.server.url.startswith("http://127.0.0.1:")
