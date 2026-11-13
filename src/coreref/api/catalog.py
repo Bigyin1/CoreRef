@@ -9,6 +9,7 @@ from .._internal.package import LocalPackage, StoredPackage
 from .._internal.references import from_conan_reference
 from .errors import InvalidPackage
 from .graph import Graph
+from .operations import OperationStep
 from .query import SearchQuery
 from .records import InstalledRecord, LocalRecord, Record, Ref
 
@@ -33,6 +34,7 @@ class Catalog:
     def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
         """Find exact coordinates without downloading recipes or reading payloads."""
         pattern = query._conan_pattern(all_revisions=all_revisions)
+        OperationStep("search", pattern).log()
         refs = []
         for reference, revisions in self._client.index(pattern).items():
             for revision in revisions.revisions:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 from functools import cached_property
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING
 from frozendict import deepfreeze, frozendict
 
 from ..api.errors import Conflict, InvalidPackage, NotFound
+from ..api.operations import OperationStep
 from ..api.records import InstalledRecord, LocalRecord, Record, Ref
 from .graph import GraphData, ResolvedConanGraph
 from .recipe import ConsumerRecipe, LocalRecipe, StoredRecipe
@@ -57,6 +59,7 @@ class StoredPackage:
 
     def resolved_graph(self, lockfile: Path | None) -> PackageGraph:
         """Resolve the stored root itself, retaining its exact revision and metadata."""
+        OperationStep("resolve", str(self.ref)).log()
         with TemporaryDirectory(prefix="coreref-resolve-") as temporary:
             directory = Path(temporary)
             ConsumerRecipe((str(self.ref),)).write(directory)
@@ -93,6 +96,7 @@ class StoredPackage:
         fetch_source = with_sources and recipe.has_source
         if not recipe.record.file_names and not fetch_source:
             return InstalledRecord(recipe.record)
+        OperationStep("install", recipe.reference, f"sources={fetch_source}").log()
         with TemporaryDirectory(prefix="coreref-install-") as temporary:
             graph = ResolvedConanGraph(
                 self._client.install(recipe.reference, Path(temporary), with_sources=fetch_source)
@@ -136,6 +140,7 @@ class StoredPackage:
         if ref not in self._recipes or native is not None:
             if directory is None:
                 directory = self._client.download_recipe(str(ref))
+            OperationStep("metadata", str(ref)).log(level=logging.DEBUG)
             self._recipes[ref] = StoredRecipe(directory, reference=str(ref), native=native)
         return self._recipes[ref]
 
@@ -175,6 +180,7 @@ class PackageGraph:
 
     def create_lockfile(self, path: str | Path) -> Path:
         output = Path(path).expanduser().resolve()
+        OperationStep("lock", str(output)).log()
         output.parent.mkdir(parents=True, exist_ok=True)
         self._client.save_lockfile(self.graph.native, output)
         return output
@@ -234,6 +240,9 @@ class PackageGraph:
     def _install(
         self, recipes: tuple[StoredRecipe, ...], *, with_sources: bool
     ) -> tuple[InstalledRecord, ...]:
+        OperationStep(
+            "install", ", ".join(recipe.reference for recipe in recipes), f"sources={with_sources}"
+        ).log()
         selected = {recipe.record.ref for recipe in recipes if with_sources and recipe.has_source}
         sources = {str(ref): ref in selected for ref in self._packages}
         with TemporaryDirectory(prefix="coreref-batch-") as temporary:
@@ -298,6 +307,7 @@ class LocalPackage:
 
     @cached_property
     def graph(self) -> ResolvedConanGraph:
+        OperationStep("resolve", str(self.record.ref)).log()
         recipe = LocalRecipe(self.record, tuple(str(ref) for ref in self.dependencies))
         with TemporaryDirectory(prefix="coreref-resolve-") as temporary:
             directory = Path(temporary)
@@ -375,6 +385,7 @@ class LocalPackage:
         return replace(self.record, source=source, files=files)
 
     def _export(self, directory: Path, *, lockfile: Path | None) -> InstalledRecord:
+        OperationStep("package", str(self.record.ref)).log()
         native = self._client.export_package(directory, lockfile=lockfile)
         reference = native.root.ref
         if reference is None:

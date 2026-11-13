@@ -6,6 +6,7 @@ to this adapter and the protocols describing its actual return objects.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Protocol, TypedDict, cast
@@ -28,6 +29,7 @@ from conan.internal.graph.graph_error import (  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, RootModel, ValidationError
 
 from ..api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from ..api.operations import OperationStep
 from .types import NativeGraph, NativePackage, NativeReference
 
 
@@ -159,6 +161,11 @@ class ConanClient:
         return cast(_API, conan)
 
     def _execute(self, arguments: tuple[str, ...], *, workspace: Path | None = None) -> object:
+        command = arguments[0]
+        if command in {"graph", "cache", "lock", "workspace"}:
+            command = " ".join(arguments[:2])
+        step = OperationStep("command", command)
+        step.log(level=logging.DEBUG)
         conan = self._api(workspace)
         try:
             result = conan.command.run(
@@ -179,6 +186,7 @@ class ConanClient:
                 self._check_graph(cast(NativeGraph, result["graph"]))
             if result.get("conan_error") is not None:
                 raise ConanException(str(result["conan_error"]))
+        step.log(status="completed", level=logging.DEBUG)
         return result
 
     def _check_graph(self, graph: NativeGraph) -> None:
@@ -386,7 +394,11 @@ class ConanClient:
         return self.remote
 
     def upload(self, reference: str) -> None:
-        self.run("upload", reference, "--remote", self.require_remote(), "--confirm")
+        remote = self.require_remote()
+        step = OperationStep("upload", reference)
+        step.log()
+        self.run("upload", reference, "--remote", remote, "--confirm")
+        step.log(status="completed")
 
     def _configured_remote(self, requested: str | None) -> str | None:
         if requested is not None:
