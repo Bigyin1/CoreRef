@@ -12,15 +12,17 @@ def test_downstream_plugin_fixtures_marker_and_editable_project(pytester: pytest
 def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_server, monkeypatch):
     env = coreref_environment
     assert coreref_server is env.server
+    assert coreref_catalog is env.catalog
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"})
-    published = coreref_catalog.publish(cpu)
+    published = env.publish(cpu)
     coreref_project.add(published.ref.without_revision())
     coreref_project.save()
-    assert coreref_project.resolve().get_with_sources()[0].source is not None
-    workspace = env.workspace(coreref_catalog, directory=coreref_project.path.parent)
+    assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].source is not None
+    workspace = env.workspace(directory=coreref_project.path.parent)
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(coreref_project.path.parent)
-    assert coreref_project.resolve().get_with_sources()[0].is_editable
+    assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].is_editable
+    assert len(list(env.root.glob("client-*"))) == 1
 
 def test_unrelated():
     assert True
@@ -119,7 +121,15 @@ def test_ok(bad_teardown):
 
 
 @pytest.mark.parametrize(
-    "options", ["unknown=True", "timeout=-1", "repositories='cpu'", "'positional'"]
+    "options",
+    [
+        "unknown=True",
+        "timeout=-1",
+        "repositories='cpu'",
+        "'positional'",
+        "projects_base='cwd'",
+        "projects_base=42",
+    ],
 )
 def test_invalid_marker_options_are_setup_errors(pytester: pytest.Pytester, options: str) -> None:
     pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
@@ -153,3 +163,66 @@ def test_tree(expected, coreref_environment):
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers", "-m", "coreref")
     result.assert_outcomes(passed=2)
+
+
+def test_root_relative_projects_are_shared_by_nested_test_modules(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+    pytester.makeini("[pytest]")
+    common = pytester.path / "test_projects"
+    common.mkdir()
+    (common / "name.txt").write_text("shared fixture")
+    for name in ("rtl/unit", "backend/regression"):
+        suite = pytester.path / name
+        (suite / "test_projects").mkdir(parents=True)
+        (suite / "test_projects/name.txt").write_text("wrong base directory")
+        (suite / f"test_{suite.name}.py").write_text("""
+import pytest
+
+pytestmark = pytest.mark.coreref(projects="test_projects", projects_base="root")
+
+def test_shared_tree(coreref_environment):
+    copied = coreref_environment.projects / "name.txt"
+    assert copied.read_text() == "shared fixture"
+    copied.write_text("local edit")
+""")
+    result = pytester.runpytest_inprocess(
+        "rtl", "backend", "-q", "--strict-markers", "-m", "coreref"
+    )
+    result.assert_outcomes(passed=2)
+    assert (common / "name.txt").read_text() == "shared fixture"
+
+
+def test_absolute_project_path_is_independent_of_marker_base(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+    source = pytester.path / "shared"
+    source.mkdir()
+    (source / "name.txt").write_text("absolute fixture")
+    pytester.makepyfile(f"""
+import pytest
+from pathlib import Path
+
+@pytest.mark.parametrize("base", [
+    pytest.param("test", marks=pytest.mark.coreref(projects=Path({str(source)!r}))),
+    pytest.param("root", marks=pytest.mark.coreref(
+        projects=Path({str(source)!r}), projects_base="root"
+    )),
+])
+def test_absolute(base, coreref_environment):
+    assert (coreref_environment.projects / "name.txt").read_text() == "absolute fixture"
+""")
+    result = pytester.runpytest_inprocess("-q", "--strict-markers")
+    result.assert_outcomes(passed=2)
+
+
+def test_project_fixture_does_not_create_an_unused_catalog(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+    pytester.makepyfile("""
+def test_project(coreref_project, coreref_environment):
+    assert coreref_project.path.is_file()
+    assert coreref_project.record.source == coreref_project.path.parent
+    assert list(coreref_environment.root.glob("client-*")) == []
+""")
+    result = pytester.runpytest_inprocess("-q", "--strict-markers")
+    result.assert_outcomes(passed=1)

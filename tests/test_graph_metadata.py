@@ -40,7 +40,7 @@ def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog)
         snapshot = graph.info(local.ref)
         assert isinstance(snapshot, LocalRecord)
         snapshot.payload = {"edited": True}
-        assert graph.info(local.ref).payload == {"root": True}
+        assert graph.info(local.ref) is local and local.payload == {"edited": True}
 
 
 def test_unknown_refs_use_one_error_contract_without_conan_io(catalog: Catalog) -> None:

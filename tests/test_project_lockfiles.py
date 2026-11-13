@@ -52,7 +52,7 @@ def test_project_lock_pins_publication_and_installation(
 
 @pytest.mark.parametrize(
     "damage,exception",
-    [("missing", CatalogError), ("incomplete", InvalidPackage), ("malformed", CatalogError)],
+    [("incomplete", InvalidPackage), ("malformed", CatalogError)],
 )
 def test_conan_validates_the_supplied_project_lockfile(
     tmp_path: Path, damage: str, exception: type[Exception], *, catalog: Catalog
@@ -67,9 +67,7 @@ def test_conan_validates_the_supplied_project_lockfile(
     )
     project = Graph(catalog, local_record(macro), dependencies=(rtl.ref,))
     lockfile = project.create_lockfile(tmp_path / "project/conan.lock")
-    if damage == "missing":
-        lockfile.unlink()
-    elif damage == "incomplete":
+    if damage == "incomplete":
         catalog._client.run(
             "lock",
             "remove",
@@ -100,3 +98,32 @@ def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
     Graph(catalog, local_record(consumer), dependencies=(root.ref,)).create_lockfile(lockfile)
     project.create_lockfile()
     assert lockfile.read_bytes() == empty_lock
+
+
+@pytest.mark.parametrize("published", [False, True])
+def test_missing_lockfile_is_optional_but_its_output_path_is_retained(
+    catalog: Catalog, tmp_path: Path, published: bool
+) -> None:
+    dependency = LocalRecord(Ref("soc.cpu.rtl.default/1.0"))
+    first = catalog.publish(dependency)
+    root = dependency.ref if published else LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    requirements = () if published else (dependency.ref,)
+    path = tmp_path / "new-project/project.lock"
+    graph = Graph(catalog, root, dependencies=requirements, lockfile=path)
+    assert graph.lockfile == path and not path.exists()
+    assert graph.info(dependency.ref).ref == first.ref
+    assert graph.create_lockfile() == path
+    dependency.payload = {"generation": 2}
+    second = catalog.publish(dependency)
+    assert second.ref != first.ref
+    assert (
+        Graph(catalog, root, dependencies=requirements, lockfile=path).info(dependency.ref).ref
+        == first.ref
+    )
+
+
+def test_an_existing_directory_cannot_be_ignored_as_a_missing_lockfile(
+    catalog: Catalog, tmp_path: Path
+) -> None:
+    with pytest.raises(CatalogError):
+        Graph(catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), lockfile=tmp_path)

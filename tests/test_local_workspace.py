@@ -17,18 +17,16 @@ from coreref.tools.manifest import ManifestFile
 pytestmark = pytest.mark.conan_remote
 
 
-def local_package(catalog: Catalog, directory: Path, name: str = "cpu") -> ManifestFile:
+def local_package(directory: Path, name: str = "cpu") -> ManifestFile:
     directory.mkdir(parents=True)
     (directory / f"{name}.sv").write_text(f"module {name}; endmodule\n")
-    return ManifestFile.create(
-        catalog, Ref(f"soc.{name}.rtl.default/1.0"), directory / "manifest.yml"
-    )
+    return ManifestFile.create(Ref(f"soc.{name}.rtl.default/1.0"), directory / "manifest.yml")
 
 
 def test_add_directory_needs_no_git_cache_or_remote(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = local_package(catalog, tmp_path / "existing cpu")
+    document = local_package(tmp_path / "existing cpu")
     directory = document.path.parent
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     with patch("requests.sessions.Session.send", side_effect=AssertionError("Network")):
@@ -52,8 +50,8 @@ def test_add_directory_needs_no_git_cache_or_remote(
 def test_native_recipe_reads_manifest_edits_without_sync(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    util = local_package(catalog, tmp_path / "util", "util")
-    cpu = local_package(catalog, tmp_path / "cpu")
+    util = local_package(tmp_path / "util", "util")
+    cpu = local_package(tmp_path / "cpu")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     cpu.add_to_workspace(workspace)
     util.add_to_workspace(workspace)
@@ -61,7 +59,7 @@ def test_native_recipe_reads_manifest_edits_without_sync(
     old = Graph(catalog, cpu.record.ref)
     stamp = (cpu.path.parent / "conanfile.py").stat().st_mtime_ns
     cpu.add(util.record.ref)
-    cpu.payload = {"changed": True}
+    cpu.record.payload = {"changed": True}
     cpu.save()
     with patch("requests.sessions.Session.send", side_effect=AssertionError("Network")):
         graph = Graph(catalog, cpu.record.ref)
@@ -75,10 +73,10 @@ def test_native_recipe_reads_manifest_edits_without_sync(
 def test_local_source_and_missing_artifact_paths_come_from_recipe(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = local_package(catalog, tmp_path / "cpu")
+    document = local_package(tmp_path / "cpu")
     source = document.path.parent / "rtl"
     source.mkdir()
-    document.files = {"cpu.lib": "build/timing/result.lib"}
+    document.record.files = {"cpu.lib": document.path.parent / "build/timing/result.lib"}
     document.save()
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
@@ -111,7 +109,7 @@ def test_native_add_preserves_an_existing_user_recipe(catalog: Catalog, tmp_path
 def test_editable_cannot_silently_return_cache_sources(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = local_package(catalog, tmp_path / "cpu")
+    document = local_package(tmp_path / "cpu")
     record = document.record
     record.source = catalog.cache_directory / "accidental-cache-source"
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -134,7 +132,7 @@ def test_workspace_and_its_packages_can_move(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "environment"
-    document = local_package(catalog, root / "cpu")
+    document = local_package(root / "cpu")
     workspace = Workspace(catalog, root / "project/conanws.yml")
     document.add_to_workspace(workspace)
     moved = tmp_path / "moved"
@@ -148,7 +146,7 @@ def test_workspace_and_its_packages_can_move(
 def test_local_consumer_gets_editable_dependencies_automatically(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = local_package(catalog, tmp_path / "cpu")
+    document = local_package(tmp_path / "cpu")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
@@ -193,7 +191,7 @@ def test_core_add_uses_flow_data_without_reading_manifest_files(
 def test_core_add_requires_a_recipe_or_explicit_description(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    document = local_package(catalog, tmp_path / "cpu")
+    document = local_package(tmp_path / "cpu")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     original = document.path.read_bytes()
     with pytest.raises(CatalogError):
@@ -220,7 +218,6 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     source = directory / "rtl"
     source.mkdir(parents=True)
     document = ManifestFile.create(
-        catalog,
         Ref("soc.cpu.rtl.default/1.0"),
         directory / "custom inputs.yaml",
     )
@@ -229,7 +226,7 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     stamp = (directory / "conanfile.py").stat().st_mtime_ns
     document.add_to_workspace(workspace)
     assert (directory / "conanfile.py").stat().st_mtime_ns == stamp
-    document.payload = {"edited": True}
+    document.record.payload = {"edited": True}
     document.save()
     monkeypatch.chdir(workspace.path.parent)
     installed = catalog.get_with_sources(document.record.ref)
@@ -243,7 +240,7 @@ def test_dotted_part_with_underscore_component_is_native_editable(
     directory = tmp_path / "cpu source"
     directory.mkdir()
     ref = Ref("soc.cpu_core.alu.rtl.default/1.0")
-    document = ManifestFile.create(catalog, ref, directory / "manifest.yml")
+    document = ManifestFile.create(ref, directory / "manifest.yml")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
     assert workspace.members == {ref: directory}

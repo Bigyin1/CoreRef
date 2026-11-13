@@ -39,7 +39,7 @@ def test_operation_trace_counts_real_fetch_then_cached_reuse(
     tmp_path: Path,
 ) -> None:
     env = Sandbox(conan_server, tmp_path)
-    publisher = env.new_catalog()
+    publisher = env.catalog
     published = publisher.publish(
         env.package(
             env.ref("cpu"),
@@ -68,7 +68,7 @@ def test_trace_restores_instrumentation_after_exception_and_retains_counts(
     tmp_path: Path,
 ) -> None:
     env = Sandbox(conan_server, tmp_path)
-    catalog = env.new_catalog()
+    catalog = env.catalog
     with pytest.raises(RuntimeError, match="caller failed"), trace_operations() as trace:
         assert catalog.search_refs(SearchQuery()) == ()
         raise RuntimeError("caller failed")
@@ -83,7 +83,7 @@ def test_diagnostics_have_paths_and_published_refs_without_io_or_password(
     tmp_path: Path,
 ) -> None:
     env = Sandbox(conan_server, tmp_path)
-    publisher = env.new_catalog()
+    publisher = env.catalog
     record = publisher.publish(env.package(env.ref("cpu")))
     with patch("requests.sessions.Session.send", side_effect=AssertionError("Unexpected I/O")):
         text = env.diagnostics()

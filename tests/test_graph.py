@@ -121,18 +121,23 @@ def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: st
     assert graph.record == local
 
 
-def test_local_views_cannot_change_the_resolved_root(catalog: Catalog) -> None:
-    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+def test_local_views_share_one_working_record_and_preserve_resolved_coordinates(
+    catalog: Catalog,
+) -> None:
+    local = LocalRecord(Ref("soc.top.rtl.default/1.0"))
     graph = Graph(catalog, local)
     expected = graph.ordered_refs(local.ref)
-    views = (graph.record, graph.records[0], graph.ordered_records(local.ref)[0])
-    for record in views:
-        assert isinstance(record, LocalRecord)
-        record.ref = Ref.from_fields("soc", "other", "rtl", "default", "1.0")
-        record.payload = {"changed": True}
-    assert graph.record.ref == local.ref
-    assert graph.records == (local,)
-    assert graph.ordered_records(local.ref) == (local,)
+    views = (
+        graph.record,
+        graph.records[0],
+        graph.ordered_records(local.ref)[0],
+        graph.info(local.ref),
+    )
+    assert all(record is local for record in views)
+    local.payload = {"changed": True}
+    assert graph.record.payload == {"changed": True}
     assert graph.ordered_refs(local.ref) is expected
     assert graph.networkx is graph.networkx
-    assert tuple(graph.networkx) == (local.ref,)
+    local.ref = Ref("soc.other.rtl.default/1.0")
+    with pytest.raises(InvalidPackage, match="coordinates changed"):
+        catalog.publish(graph)

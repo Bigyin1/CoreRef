@@ -29,7 +29,7 @@ CI проверяет обе группы тестов с общим порог�
 | `tools/cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
 | `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
 | `tools/manifest.py` | Необязательный стандарт YAML, пути и прямые объявления зависимостей |
-| `api/graph.py`, `workspace.py` | Разрешённый снимок и рабочие Git-копии |
+| `api/graph.py`, `workspace.py` | Разрешённые зависимости, рабочий LocalRecord и Git-копии |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
 | `_internal/recipe.py`, `templates/` | Чтение метаданных и Jinja-шаблоны временных рецептов |
 | `_internal/graph.py`, `client.py` | Нативный граф и команды Conan API |
@@ -43,7 +43,9 @@ Conan закреплён на 2.34.x: доступ к его внутренни�
 ## Правила изменений
 
 - Сохранять короткий публичный API; доменную семантику RTL/BE/DFT оставлять flow.
-- При resolve/publish отделять метаданные от изменяемых входов; точные revisions сохранять во всём снимке.
+- LocalRecord — рабочий объект короткой CLI-команды; ManifestFile и Graph используют его напрямую.
+  Resolve фиксирует зависимости/revisions, не копирует и не замораживает локальные metadata/files.
+  Payload сериализовать при сохранении/публикации; готовые файлы копировать в staging перед Conan.
 - Чтение метаданных отделять от получения файлов и SCM. Повторно использовать рецепты
   внутри операции и пакетное получение Graph; избегать отдельных install на каждый узел.
 - Для изменений Conan-интеграции проверять настоящий сервер, файлы, Git-исходники,
@@ -146,22 +148,23 @@ from coreref.testing import environment
 
 def test_flow(tmp_path, monkeypatch):
     with environment(tmp_path) as sandbox:
-        publisher = sandbox.new_catalog()
         cpu = sandbox.package(
             Ref("soc.cpu.rtl.default/1.0"),
             sources={"cpu.sv": "module cpu; endmodule\n"},
             files={"config.json": "{}"},
         )
-        # Обычный SDK задаёт payload, связи, lockfile и публикацию.
+        # Sandbox публикует запись через подготовленный клиент.
         cpu.payload = {"flow": "example"}
-        published = publisher.publish(cpu)
+        published = sandbox.publish(cpu)
         reader = sandbox.new_catalog()  # Независимый cache, тот же сервер.
         assert reader.get_with_sources(published.ref).files["config.json"].exists()
 
-        workspace = sandbox.workspace(reader)
+        workspace = sandbox.workspace()
         workspace.add(cpu.source, record=cpu)
         monkeypatch.chdir(workspace.path.parent)
-        graph = Graph(reader, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(cpu.ref,))
+        graph = Graph(
+            sandbox.catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(cpu.ref,)
+        )
         assert graph.get_with_sources()[0].is_editable
 ```
 
@@ -177,7 +180,8 @@ Workspace использует стандартное обнаружение Con
 
 ### Набор связанных пакетов
 
-`environment()` создаёт `Sandbox`, который объединяет сервер, Git-upstreams и несколько независимых клиентов.
+`environment()` создаёт `Sandbox`, который объединяет сервер, Git-upstreams и один
+общий каталог с изолированным cache. Дополнительные клиенты создаются явно.
 Иерархию задают обычные зависимости SDK; workspace нужен для локальной разработки
 выбранных узлов, а не для хранения опубликованного графа.
 
@@ -192,7 +196,6 @@ graph TD
 ```python
 def test_package_graph(tmp_path):
     with environment(tmp_path) as sandbox:
-        publisher = sandbox.new_catalog()
         links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
         records = {
             name: sandbox.package(
@@ -202,7 +205,7 @@ def test_package_graph(tmp_path):
             for name in links
         }
         # Порядок публикации вычисляется автоматически по связям.
-        published = sandbox.publish_set(publisher, records, dependencies=links)
+        published = sandbox.publish_set(records, dependencies=links)
 
         # Чистый клиент скачивает рецепты с Conan server, исходники — из Git origins.
         graph = Graph(sandbox.new_catalog(), published["top"].ref)
@@ -225,23 +228,23 @@ Git-сервиса. Рабочие checkout можно удалить после
 
 ```python
 with environment(tmp_path / "infra", namespace="soc") as env:
-    catalog = env.new_catalog()
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
-    published = catalog.publish(cpu)
+    published = env.publish(cpu)
 
     # Обычный ManifestFile: можно менять зависимости через add/remove/save.
-    project = env.project(catalog, env.ref("top"), path=tmp_path / "top/manifest.yml")
+    project = env.project(env.ref("top"), path=tmp_path / "top/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
 
     # Workspace находится над проектом; Conan обнаружит его из top/.
-    workspace = env.workspace(catalog, directory=tmp_path)
+    workspace = env.workspace(directory=tmp_path)
     workspace.add(cpu.source, record=cpu)
 ```
 
 `package(ref, source=existing_directory)` использует готовые исходники без изменения
-их Git-состояния; `sources={...}` создаёт новые. Обычный `Catalog.publish()` для одного `LocalRecord`
-принимает `dependencies=(published.ref, ...)`. В публикации набора значения
+их Git-состояния; `sources={...}` создаёт новые.
+`Sandbox.publish(record, dependencies=(published.ref, ...), lockfile=...)`
+публикует одну запись; готовый локальный Graph также можно передать вместо record. В публикации набора значения
 `dependencies` могут смешивать короткие имена и уже опубликованные `Ref`.
 `ref(component, version="1.0", view="rtl", type="default")` использует namespace окружения.
 `project(..., dependencies=(...))` сразу записывает зависимости; параметр `path`
@@ -266,7 +269,9 @@ pytest_plugins = ["coreref.testing.pytest_plugin"]
 
 Плагин предоставляет function-scoped фикстуры `coreref_environment`, `coreref_server`,
 `coreref_catalog`, `coreref_project` (последний создаёт `tmp_path/manifest.yml`). Они используют
-один сервер на тест, отдельный cache и автоматически освобождают сервер после ошибки.
+один сервер и один `env.catalog` на тест; `coreref_catalog is coreref_environment.catalog`.
+Сервер автоматически освобождается после ошибки. Создание манифеста через
+`coreref_project` само по себе не настраивает Conan-клиент.
 Тесты с этими фикстурами получают маркер `coreref`: их можно выбрать через `pytest -m coreref`.
 Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
 директории, выбранной тестом через `monkeypatch.chdir()`. Установка `coreref[testing]`
@@ -305,15 +310,14 @@ from coreref.tools.manifest import ManifestFile
 def test_soc(tmp_path):
     source = Path(__file__).with_name("test_projects")
     with environment(tmp_path, projects=source, repositories=("stdlib", "cpu")) as env:
-        catalog = env.new_catalog()
+        catalog = env.catalog
         # Flow сам читает манифесты и выполняет нужные команды.
         for name in ("stdlib", "cpu"):
-            project = ManifestFile(catalog, env.projects / name / "manifest.yml")
+            project = ManifestFile(env.projects / name / "manifest.yml")
             record = project.record
-            record.source = project.path.parent  # Правило данного RTL flow.
             catalog.publish(record, dependencies=project.dependencies)
-        soc = ManifestFile(env.new_catalog(), env.projects / "soc/manifest.yml")
-        assert len(soc.resolve().get_with_sources()) == 2
+        soc = ManifestFile(env.projects / "soc/manifest.yml")
+        assert len(soc.resolve(env.catalog).get_with_sources()) == 2
 ```
 
 `projects` указывает на исходное дерево; `env.projects` — отдельная рабочая копия
@@ -329,7 +333,7 @@ Git-метаданные исходных репозиториев не пере
 В pytest можно воспользоваться тем же методом на готовой фикстуре:
 `coreref_environment.load_projects(source, repositories=("stdlib", "cpu"))`.
 Workspace создаётся над рабочими проектами через
-`env.workspace(catalog, directory=env.projects)`. Команды flow запускаются из
+`env.workspace(directory=env.projects)`. Команды flow запускаются из
 `env.projects / "soc"`, чтобы Conan обнаруживал этот workspace.
 Для коммита уже изменённых на диске файлов доступен `git_commit(checkout, push=True)`;
 он учитывает `.gitignore`, не требует повторять содержимое файлов в Python.
@@ -338,11 +342,19 @@ Inline-создание через `env.package(..., sources={...}, files={...})
 также доступно. Оба способа можно смешивать в одном окружении: загрузить базовые
 проекты из директории, создать дополнительный пакет в коде и связать их обычными Ref.
 
-`env.new_catalog()` всегда создаёт новый независимый cache; сохраните возвращённый
-каталог в переменную для повторного использования. `env.publish_set(catalog, records,
-dependencies=...)` публикует только именованные наборы. Одиночные записи, включая
-инкрементальные обновления и зависимости на ранее опубликованные пакеты, публикуются
-обычным `catalog.publish(record, dependencies=(...))`.
+`env.catalog` лениво создаётся один раз на окружение и повторно используется при
+чтении свойства, в `env.publish(record)`, `env.publish_set(records, dependencies=...)`
+и `env.workspace()`. Профиль, remote и авторизация этого клиента настраиваются один раз.
+Создание пакетов и манифестов не требует клиента. Смена конфигурации или workspace
+по-прежнему подхватывается Conan при выполнении команд; нативный Conan API между
+командами не кэшируется.
+
+`env.new_catalog()` явно создаёт отдельный клиент с новым пустым cache, например для
+проверки скачивания с сервера. Он не заменяет `env.catalog`. Для операций с таким
+клиентом используйте его методы напрямую, например `reader.publish(record)`.
+`env.publish(record, dependencies=(...))` поддерживает инкрементальные публикации;
+для готового локального графа — `env.publish(graph)`. Общий и дополнительные каталоги
+сохраняют успешные публикации для диагностики; ошибки в этот список не попадают.
 
 ### Недоступность сервера и диагностика
 
@@ -365,7 +377,8 @@ setup, выполнения теста и teardown, если окружение 
 
 ```python
 @pytest.mark.coreref(
-    projects="test_projects/basic",
+    projects="tests/test_projects",
+    projects_base="root",
     repositories=("cpu", "stdlib"),
     namespace="soc",
     timeout=0.2,
@@ -375,10 +388,14 @@ def test_flow(coreref_environment, coreref_catalog):
     ...
 ```
 
-`projects` разрешается относительно файла теста, не cwd. Маркер можно ставить на
+По умолчанию `projects` разрешается относительно файла теста (`projects_base="test"`).
+Для общего дерева проектов из разных поддиректорий задайте `projects_base="root"`:
+путь будет считаться от корня pytest (`config.rootpath`, конфигурация или `--rootdir`).
+Абсолютные пути поддерживаются в обоих режимах; cwd на выбор базы не влияет.
+Маркер можно ставить на
 функцию, класс, модуль или `pytest.param(..., marks=pytest.mark.coreref(...))` для
 нескольких деревьев проектов. Используется ближайший маркер; настройки не сливаются
-между уровнями. Поддерживаются только `projects`, `repositories`, `namespace`, `timeout`;
+между уровнями. Поддерживаются только `projects`, `projects_base`, `repositories`, `namespace`, `timeout`;
 ошибочные параметры дают ошибку подготовки теста. Без параметров поведение фикстур прежнее.
 
 ### Счётчики операций

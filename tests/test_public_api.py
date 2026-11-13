@@ -55,7 +55,9 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         assert Graph(instance, record.ref).dependencies() == ()
         resolved = Graph(instance, local)
         assert isinstance(resolved.records[0], records.LocalRecord)
-        assert resolved.records[0].payload == stored.payload
+        assert resolved.record is local
+        assert local.payload is manifest
+        assert local.payload == {"views": ["rtl", "timing"]}
         try:
             instance.get(records.Ref("public.absent.rtl.default/v1"))
         except errors.NotFound:

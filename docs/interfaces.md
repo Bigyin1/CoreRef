@@ -129,7 +129,7 @@ Graph фиксирует выбранные revisions при разрешени�
 
 | Класс | Поля и назначение |
 |---|---|
-| `LocalRecord(ref, payload=None, source=None, files=...)` | Изменяемое описание проекта: исходники и локальные файлы |
+| `LocalRecord(ref, payload=None, source=None, files=...)` | Рабочие данные команды: изменяемые payload, source и словарь files |
 | `Record(ref, payload=None, *, file_names=(), has_source=False)` | Метаданные: Ref, JSON payload, имена файлов и наличие исходников |
 | `InstalledRecord(record, *, files=None, source=None, is_editable=False)` | Метаданные и готовые пути к файлам/исходникам; обычно возвращается SDK |
 
@@ -174,13 +174,37 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 Полученные записи повторно используются в пределах Graph. Для всего дерева удобнее
 один вызов Graph, чем отдельный get для каждого Ref.
 
-Graph сохраняет независимый снимок метаданных и revisions; изменения проекта или сервера
-его не пересчитывают. Для нового выбора создают новый Graph.
+Graph фиксирует зависимости и выбранные revisions, а локальный корень остаётся рабочим
+LocalRecord: `graph.record is record`, переданный в конструктор. Через `record`, `records`,
+`info` и `ordered_records` доступен тот же объект. Payload, source и files можно дополнить
+после запуска инструмента и затем вызвать `catalog.publish(graph)` без повторного разрешения.
+Payload сериализуется при публикации, а не при разрешении графа.
+Координаты корня и состав зависимостей меняют через новый Graph; старый результат
+разрешения автоматически не пересчитывается. Метаданные опубликованных узлов остаются
+только для чтения.
 Lockfile принадлежит проекту и используется при разрешении. SDK сохраняет его средствами
-Conan, не разбирая JSON. Разрешение само по себе не записывает lockfile:
+Conan, не разбирая JSON. Если переданного пути ещё нет, Graph разрешает зависимости
+без lockfile и запоминает этот путь для последующего `create_lockfile()` без аргумента.
+Существующий некорректный файл вызывает ошибку; он не игнорируется.
+Разрешение само по себе не записывает lockfile:
 `create_lockfile(path)` явно создаёт или перезаписывает файл снимком текущего Graph,
 без повторного разрешения зависимостей. Получение файлов использует уже разрешённый выбор.
-`catalog.publish(graph)` сохраняет зависимости снимка; переопределять их и lockfile нельзя.
+`catalog.publish(graph)` использует последние значения локальной записи и сохраняет
+зависимости разрешённого Graph. В редком сценарии, когда flow нашёл дополнительные
+пакеты, он явно формирует итоговый набор и разрешает новый граф:
+
+```python
+requirements = (*graph.requirements, found_be.ref)
+final_graph = Graph(catalog, graph.record, dependencies=requirements)
+# При необходимости явно обновить проектный lockfile расширенным набором.
+final_graph.create_lockfile(project_lockfile)
+catalog.publish(final_graph)
+```
+
+`graph.requirements` содержит уже выбранные точные Ref; изменения YAML, сервера или
+рабочего списка требований их не заменяют. Переданный старый lockfile может не содержать
+новые пакеты: политику его обновления определяет flow. Для публикации без отдельного
+Graph также доступен `catalog.publish(record, dependencies=requirements)`.
 
 `Workspace(catalog, path="conanws.yml")` — небольшая обёртка над Conan init/add/remove.
 Conan создаёт conanws.yml/conanws.py и управляет составом workspace. SDK не ведёт свой
@@ -253,7 +277,7 @@ flow workspace remove ../existing-cpu --project-dir ./project
 Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/manifest.yml`, если рецепта ещё нет:
 достаточно валидного YAML с `ref`. Класс Workspace от этого формата не зависит.
 `dependencies`, `files` и `payload` необязательны; пути считаются от директории YAML.
-Для Python-надстройки это `ManifestFile(catalog, path).add_to_workspace(workspace)`.
+Для Python-надстройки это `ManifestFile(path).add_to_workspace(workspace)`.
 Рецепт читает выбранный YAML при следующих вызовах Conan, поэтому его изменения
 подхватываются без повторной регистрации. Файл может называться произвольно. Например:
 
@@ -279,7 +303,9 @@ manifest.yml ниже описана отдельная готовая груп�
 
 ## Стандартный manifest.yml
 
-`ManifestFile(catalog, path="manifest.yml")` — необязательный адаптер файла к LocalRecord и Graph.
+`ManifestFile(path="manifest.yml")` — необязательный адаптер файла к LocalRecord и Graph.
+Чтение, редактирование, сохранение YAML и подготовка записей не требуют Catalog
+и не инициализируют Conan. Каталог передают явно только для разрешения графа и lockfile.
 Формат общий для разных представлений; конкретные flow могут полностью заменить его.
 
 ```yaml
@@ -292,9 +318,15 @@ dependencies:
 Обязателен только `ref` без собственной revision. `dependencies` — список полных Ref;
 revision зависимости необязательна. `files` и `payload` необязательны.
 Пути в `files` считаются от директории YAML и сопоставляют имя внутри пакета
-локальному файлу. Поля `source` в манифесте нет: `ManifestFile.record` оставляет
-`LocalRecord.source` равным `None`, а SCM задаёт flow. Для RTL flow указывает
-корень репозитория: `record.source = manifest.path.parent`. Для обычного SCM-репозитория отдельный JSON payload обычно не нужен:
+локальному файлу. Поля `source` в YAML нет. `manifest.record.source` по умолчанию указывает на директорию манифеста — корень проекта
+и Git-репозитория. Для обычного RTL-проекта задавать его вручную не требуется.
+При публикации пакета без SCM flow явно устанавливает `manifest.record.source = None`.
+Манифест читается один раз и содержит одну рабочую запись. Изменения в `record.payload`
+и `record.files` видны последующему `resolve(catalog)` и публикации. Файлы задаются как
+локальные Path; `save()` сохраняет их относительные пути в YAML. Исходники в YAML не записываются.
+Сохранение всегда явное: изменения записи и `add/remove` не меняют файл до `save()`.
+Прямых полей payload/files поверх record нет — рабочее состояние хранится в одном месте.
+Для обычного SCM-репозитория отдельный JSON payload обычно не нужен:
 описание исходников хранится в самом репозитории. В других пакетах payload может содержать
 дополнительные метаданные по правилам flow, например внешние пути к LIB/LEF.
 Принимаются файлы `.yaml` и `.yml`. Pydantic проверяет типы полей и запрещает неизвестные
@@ -303,11 +335,11 @@ SafeLoader: при повторении ключа сохраняется пос
 
 | API ManifestFile | Результат |
 |---|---|
-| `create(catalog, ref, path="manifest.yml")` | Создать файл, отказавшись от перезаписи существующего |
-| `record`, `dependencies` | LocalRecord и прямые Ref для обычного SDK API |
+| `create(ref, path="manifest.yml")` | Создать файл, отказавшись от перезаписи существующего |
+| `record`, `dependencies` | Одна изменяемая LocalRecord и текущие прямые Ref |
 | `add_to_workspace(workspace)` | Подготовить YAML-рецепт и зарегистрировать директорию |
-| `resolve(update=False)` | Новый Graph с существующим lockfile; Conan обнаруживает workspace по cwd |
-| `create_lockfile()` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
+| `resolve(catalog, *, update=False)` | Разрешить зависимости с текущей рабочей записью и существующим lockfile |
+| `create_lockfile(catalog)` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
 | `add(ref)`, `remove(ref)`, `save()` | Изменить прямые зависимости и явно сохранить YAML |
 | `path`, `lockfile` | Пути YAML и одноимённого `.lock`, например model.yaml → model.lock |
 
@@ -347,7 +379,8 @@ app = typer.Typer()
 app.add_typer(create_deps_app(), name="deps")
 ```
 
-Фабрика `catalog_factory` работает так же, как у `create_workspace_app`.
+Фабрика `catalog_factory` вызывается только для `lock` и `install`;
+`init/add/remove/list` работают с YAML без каталога.
 Готовые команды используют только зависимости из YAML. Если flow добавляет найденные
 пакеты программно, он формирует итоговый Graph и его lockfile своим кодом.
 `ManifestFile.record` и `dependencies` для этого можно использовать независимо от `resolve`.

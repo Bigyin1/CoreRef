@@ -1,4 +1,4 @@
-"""Prepared publication preserves one metadata and dependency snapshot across later changes."""
+"""Prepared publication uses current tool results and keeps its resolved dependency choices."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class Payload:
         return '{"value": "' + self.text + '"}'
 
 
-def test_publish_graph_keeps_its_metadata_files_and_revision_choice(
+def test_publish_graph_uses_updated_metadata_and_files_with_its_fixed_revision_choice(
     catalog: Catalog, tmp_path: Path
 ) -> None:
     dependency = Ref.from_fields("soc", "leaf", "rtl", "default", "1.0")
@@ -37,13 +37,16 @@ def test_publish_graph_keeps_its_metadata_files_and_revision_choice(
         files={"lib": artifact},
     )
     graph = Graph(catalog, local, dependencies=(dependency,))
-    local.files = {}
+    local.files["new"] = tmp_path / "new.lib"
+    local.files["new"].write_text("new result")
+    artifact.write_text("updated file")
     payload.text = "edited"
     catalog.publish(LocalRecord(dependency, {"generation": 2}))
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
         published = catalog.publish(graph)
-    assert published.payload == {"value": "captured"} and payload.calls == 1
-    assert published.files["lib"].read_text() == "first file"
+    assert published.payload == {"value": "edited"} and payload.calls == 1
+    assert published.files["lib"].read_text() == "updated file"
+    assert published.files["new"].read_text() == "new result"
     assert Graph(catalog, published.ref).dependencies() == (first,)
     assert not any(call.args[:2] == ("graph", "info") for call in commands.call_args_list)
     assert sum(call.args[0] == "export-pkg" for call in commands.call_args_list) == 1

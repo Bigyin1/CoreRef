@@ -189,3 +189,20 @@ def test_cli_rejects_missing_or_invalid_local_package(
     assert "Error:" in result.stderr and "Traceback" not in result.output
     assert not (project / "conanws.yml").exists()
     assert not (package / "conanfile.py").exists()
+
+
+def test_yaml_edit_commands_need_no_catalog_but_lock_and_install_do(tmp_path: Path) -> None:
+    app = create_deps_app(catalog_factory=unavailable_catalog)
+    path = tmp_path / "offline/manifest.yml"
+    options = ["--file", str(path)]
+    for arguments in (
+        ["init", "soc.top.rtl.default/1.0"],
+        ["add", "soc.cpu.rtl.default/1.0"],
+        ["list"],
+        ["remove", "soc.cpu.rtl.default/1.0"],
+    ):
+        result = runner.invoke(app, [*arguments, *options])
+        assert result.exit_code == 0, result.output
+    for operation in ("lock", "install"):
+        result = runner.invoke(app, [operation, *options])
+        assert result.exit_code == 1 and "Unavailable test catalog" in result.stderr

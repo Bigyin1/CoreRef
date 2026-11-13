@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from functools import cached_property
 from itertools import count
 from pathlib import Path
 
 import networkx as nx
 
 from ..api.catalog import Catalog
+from ..api.graph import Graph
 from ..api.records import InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
 from ..tools.manifest import ManifestFile
@@ -20,7 +22,7 @@ from .server import LocalServer, local_server
 
 
 class Sandbox:
-    """Build independent caches, package inputs and editable workspaces below root.
+    """Build package inputs and workspaces using one shared catalog below root.
 
     Use a disposable directory. The caller owns the server context and cleanup;
     this helper never changes cwd, environment variables or the user's Conan home.
@@ -42,6 +44,11 @@ class Sandbox:
         self.timeout = timeout
         self._homes: list[Path] = []
         self._published: list[Ref] = []
+
+    @cached_property
+    def catalog(self) -> Catalog:
+        """Reuse one isolated client, configuring its home on first access only."""
+        return self.new_catalog()
 
     def new_catalog(self, *, timeout: float | None = None) -> Catalog:
         """Return a fresh isolated client authenticated against the shared server."""
@@ -103,9 +110,18 @@ class Sandbox:
         """Build fixture coordinates in this sandbox's namespace."""
         return Ref.from_fields(self.namespace, component, view, type, version)
 
+    def publish(
+        self,
+        record: LocalRecord | Graph,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+        lockfile: Path | None = None,
+    ) -> InstalledRecord:
+        """Publish one fixture or local graph through the shared catalog."""
+        return self.catalog.publish(record, dependencies=dependencies, lockfile=lockfile)
+
     def publish_set(
         self,
-        catalog: Catalog,
         records: Mapping[str, LocalRecord],
         *,
         dependencies: Mapping[str, tuple[str | Ref, ...]],
@@ -134,7 +150,7 @@ class Sandbox:
                 published[dep].ref if isinstance(dep, str) else dep
                 for dep in dependencies.get(name, ())
             )
-            published[name] = catalog.publish(records[name], dependencies=refs)
+            published[name] = self.publish(records[name], dependencies=refs)
         return published
 
     def load_projects(self, source: Path, *, repositories: tuple[str, ...] = ()) -> Path:
@@ -168,7 +184,6 @@ class Sandbox:
 
     def project(
         self,
-        catalog: Catalog,
         ref: Ref,
         *,
         path: Path | None = None,
@@ -176,21 +191,21 @@ class Sandbox:
     ) -> ManifestFile:
         """Create a consumer manifest; add/save/resolve it through ManifestFile."""
         path = path or self.root / f"project-{next(self._sequence)}" / "manifest.yml"
-        document = ManifestFile.create(catalog, ref, path)
+        document = ManifestFile.create(ref, path)
         for dependency in dependencies:
             document.add(dependency)
         document.save()
         return document
 
-    def workspace(self, catalog: Catalog, *, directory: Path | None = None) -> Workspace:
-        """Initialize a native workspace; add records with Workspace.add().
+    def workspace(self, *, directory: Path | None = None) -> Workspace:
+        """Initialize a native workspace with the shared catalog; add with Workspace.add().
 
         Resolve graphs from the workspace directory to enable Conan discovery.
         Set directory to the project directory or an ancestor for normal discovery.
         Tests can use monkeypatch.chdir(project.path.parent) for that scope.
         """
         directory = directory or self.root / f"workspace-{next(self._sequence)}"
-        workspace = Workspace(catalog, directory / "conanws.yml")
+        workspace = Workspace(self.catalog, directory / "conanws.yml")
         workspace.init()
         return workspace
 
@@ -206,7 +221,7 @@ def environment(
 ) -> Iterator[Sandbox]:
     """Own a complete local package system for a flow test.
 
-    Start/stop the Conan server, and provide builders for its isolated clients,
+    Start/stop the Conan server, and provide a shared catalog with isolated storage,
     Git-backed packages and editable workspaces. Optional projects is a normal
     directory tree, copied to sandbox.projects; repositories selects its Git roots.
     The caller owns directory cleanup; logs and repositories remain there on exit.
