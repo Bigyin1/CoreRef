@@ -7,6 +7,7 @@ from pathlib import Path
 from .._internal.recipe import LocalRecipe
 from .catalog import Catalog
 from .errors import InvalidPackage
+from .operations import OperationStep
 from .records import LocalRecord, Ref
 
 
@@ -33,6 +34,7 @@ class Workspace:
         }
 
     def init(self) -> None:
+        OperationStep("workspace.init", str(self.path)).log()
         self._catalog._client.run("workspace", "init", str(self.path.parent))
 
     def add(
@@ -45,10 +47,12 @@ class Workspace:
         """Prepare a missing recipe from an optional record, then register the directory."""
         source = Path(directory).expanduser().resolve()
         if record is not None:
+            OperationStep("workspace.recipe", str(source)).log()
             LocalRecipe(record, tuple(str(ref) for ref in dependencies)).write_editable(source)
         elif dependencies:
             raise InvalidPackage("Dependencies require a local record")
         self.init()
+        OperationStep("workspace.add", str(source)).log()
         self._catalog._client.run("workspace", "add", str(source), workspace=self.path.parent)
 
     def open(self, ref: Ref, *, directory: str | Path | None = None) -> Path:
@@ -62,6 +66,7 @@ class Workspace:
             recipe = self._catalog._package(ref).recipe()
             if not recipe.has_source:
                 raise InvalidPackage("The package has no repository source")
+            OperationStep("workspace.open", str(ref), str(source)).log()
             self._catalog._client.open_sources(recipe.reference, source)
             record = LocalRecord(
                 recipe.record.ref.without_revision(),
@@ -74,6 +79,7 @@ class Workspace:
         return source
 
     def remove(self, directory: str | Path) -> None:
+        OperationStep("workspace.remove", str(directory)).log()
         self._catalog._client.run(
             "workspace",
             "remove",

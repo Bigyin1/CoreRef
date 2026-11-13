@@ -359,3 +359,68 @@ SDK не удаляет рабочие директории при сбое: н�
 Корректный запрос без совпадений возвращает пустой результат. Неизвестные Ref,
 несовпадающие revisions и некорректные `stop_at` в методах Graph также дают
 `InvalidPackage`, включая `ordered_refs()` и `ordered_records()`.
+
+## Логирование и dry-run
+
+SDK использует стандартный `logging` в пространстве имён `coreref` и сам не настраивает
+обработчики или уровни приложения. INFO показывает действия: поиск, разрешение графа,
+установку, упаковку, загрузку на сервер, сохранение lockfile и изменения workspace.
+DEBUG дополнительно показывает чтение метаданных и имена команд Conan. Автоматические
+сообщения не включают payload, SCM URL или полные аргументы команд.
+Повторное чтение полученных данных Graph не сообщает о новой установке.
+
+Для dry-run предназначены `OperationPlan` и `OperationStep` из `coreref.api.operations`.
+План строится из входов до создания Catalog/Graph: без команд Conan, сети, записи файлов,
+изменений cache и сериализации payload. `manifest.yml` для этого не требуется.
+Сам Catalog может инициализировать Conan home, а конструктор Graph разрешает зависимости,
+поэтому создавать их перед проверкой флага dry-run нельзя.
+
+```python
+import logging
+from pathlib import Path
+
+from coreref.api.catalog import Catalog
+from coreref.api.graph import Graph
+from coreref.api.operations import OperationPlan
+from coreref.api.records import LocalRecord, Ref
+
+# Настройка принадлежит CLI приложения.
+logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
+
+
+def install_project(
+    record: LocalRecord,
+    dependencies: tuple[Ref, ...],
+    *,
+    lockfile: Path | None = None,
+    dry_run: bool = False,
+) -> None:
+    if dry_run:
+        # Пути к ещё не созданным артефактам допустимы в плане.
+        OperationPlan.install(record, dependencies=dependencies, lockfile=lockfile).log()
+        return
+    graph = Graph(Catalog(), record, dependencies=dependencies, lockfile=lockfile)
+    graph.get_with_sources()
+```
+
+| Фабрика плана | Назначение |
+|---|---|
+| `resolve(record_or_ref, *, dependencies=(), lockfile=None)` | Разрешение локального или опубликованного корня |
+| `install(record_or_ref, *, dependencies=(), lockfile=None, sources=True)` | Разрешение и получение дерева |
+| `publish(record_or_graph, *, dependencies=(), lockfile=None)` | Упаковка и публикация; готовый Graph повторно не разрешается |
+| `search(query, *, all_revisions=False, metadata=False)` | Поиск Ref либо метаданных |
+| `lock(record_or_ref, path, *, dependencies=(), lockfile=None)` | Разрешение и сохранение lockfile |
+
+План описывает намерение, не проверяет remote, Git, файлы и корректность полного графа.
+Транзитивные зависимости, выбор revisions и промахи cache заранее неизвестны;
+`conditional=True` означает этап, который может не понадобиться.
+План не исполняется: реальные операции вызываются обычным API.
+
+`plan.steps` — неизменяемая последовательность с `action`, `target`, `detail`, `conditional`.
+Её можно вывести через `str(step)` или дополнить собственными шагами flow с помощью
+`OperationPlan((*plan.steps, OperationStep("simulate", "top")))`.
+`plan.log()` пишет те же названия действий со статусом `planned`.
+У событий `coreref.operations` доступны поля LogRecord: `coreref_action`, `coreref_target`,
+`coreref_status`, `coreref_conditional`. Статус `started` обозначает попытку действия;
+`completed` подтверждает завершение команды Conan или загрузки на сервер.
+Ошибки по-прежнему передаются приложению как исключения SDK.
