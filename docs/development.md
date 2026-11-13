@@ -230,7 +230,7 @@ with environment(tmp_path / "infra", namespace="soc") as env:
     published = env.publish(catalog, cpu)
 
     # Обычный ManifestFile: можно менять зависимости через add/remove/save.
-    project = env.project(catalog, env.ref("top"), path=tmp_path / "top/manifest.yml")
+    project = env.project(env.ref("top"), path=tmp_path / "top/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
 
@@ -309,12 +309,11 @@ def test_soc(tmp_path):
         catalog = env.new_catalog()
         # Flow сам читает манифесты и выполняет нужные команды.
         for name in ("stdlib", "cpu"):
-            project = ManifestFile(catalog, env.projects / name / "manifest.yml")
-            record = project.record
-            record.source = project.path.parent  # Правило данного RTL flow.
+            project = ManifestFile(env.projects / name / "manifest.yml")
+            record = project.record_with_source(project.path.parent)
             catalog.publish(record, dependencies=project.dependencies)
-        soc = ManifestFile(env.new_catalog(), env.projects / "soc/manifest.yml")
-        assert len(soc.resolve().get_with_sources()) == 2
+        soc = ManifestFile(env.projects / "soc/manifest.yml")
+        assert len(soc.resolve(env.new_catalog()).get_with_sources()) == 2
 ```
 
 `projects` указывает на исходное дерево; `env.projects` — отдельная рабочая копия

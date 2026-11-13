@@ -25,7 +25,7 @@ else:
 
 @dataclass(init=False)
 class Graph:
-    """Resolve a local or published package through an explicitly selected catalog."""
+    """Resolve a package; use an existing lockfile and retain a missing path for later saving."""
 
     _records: tuple[LocalRecord | Record, ...]
     _dependencies: tuple[tuple[Ref, Ref], ...]
@@ -39,14 +39,15 @@ class Graph:
         lockfile: Path | None = None,
     ) -> None:
         lockfile = lockfile.expanduser().absolute() if lockfile is not None else None
+        seed = lockfile if lockfile is not None and lockfile.exists() else None
         self._catalog = catalog
         self._local: LocalPackage | None = None
         if isinstance(record, Ref):
             if dependencies:
                 raise InvalidPackage("Published graph requirements come from its recipe")
-            self._package = catalog._package(record).resolved_graph(lockfile)
+            self._package = catalog._package(record).resolved_graph(seed)
         else:
-            self._local = catalog._local_package(record, dependencies, lockfile)
+            self._local = catalog._local_package(record, dependencies, seed)
             self._package = self._local.resolved
         self._lockfile = lockfile
         self._records, self._dependencies = self._package.result

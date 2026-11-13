@@ -180,7 +180,6 @@ class Sandbox:
 
     def project(
         self,
-        catalog: Catalog,
         ref: Ref,
         *,
         path: Path | None = None,
@@ -188,7 +187,7 @@ class Sandbox:
     ) -> ManifestFile:
         """Create a consumer manifest; add/save/resolve it through ManifestFile."""
         path = path or self.root / f"project-{next(self._sequence)}" / "manifest.yml"
-        document = ManifestFile.create(catalog, ref, path)
+        document = ManifestFile.create(ref, path)
         for dependency in dependencies:
             document.add(dependency)
         document.save()

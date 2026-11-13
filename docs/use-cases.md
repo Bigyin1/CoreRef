@@ -66,15 +66,9 @@ from coreref.api.records import InstalledRecord, LocalRecord
 
 def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
     """Прочитать YAML и учесть существующий manifest.lock, не изменяя его."""
-    manifest = ManifestFile(catalog, root / "manifest.yml")
-    record = manifest.record
-    record.source = manifest.path.parent  # Все RTL-пакеты этого flow имеют SCM.
-    return Graph(
-        catalog,
-        record,
-        dependencies=manifest.dependencies,
-        lockfile=manifest.lockfile if manifest.lockfile.exists() else None,
-    )
+    manifest = ManifestFile(root / "manifest.yml")
+    # Все RTL-пакеты этого flow имеют SCM; манифест сам не выбирает эту политику.
+    return manifest.resolve(catalog, source=manifest.path.parent)
 
 
 def collect_rtl_sources(graph: Graph) -> list[Path]:

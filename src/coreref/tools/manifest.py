@@ -10,12 +10,12 @@ import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, ValidationError
 
 from .._internal.recipe import LocalRecipe
-from ..api.catalog import Catalog
 from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.graph import Graph
 from ..api.records import JSON, LocalRecord, Ref
 
 if TYPE_CHECKING:
+    from ..api.catalog import Catalog
     from ..api.workspace import Workspace
 
 
@@ -28,10 +28,9 @@ class ManifestFile(BaseModel):
     requirements: list[str] = Field(default_factory=list, alias="dependencies")
     files: dict[str, str] = Field(default_factory=dict)
     payload: JsonValue = None
-    _catalog: Catalog = PrivateAttr()
     _file: Path = PrivateAttr()
 
-    def __init__(self, catalog: Catalog, path: str | Path = "manifest.yml") -> None:
+    def __init__(self, path: str | Path = "manifest.yml") -> None:
         filename = Path(path).expanduser().resolve()
         if filename.suffix.lower() not in {".yaml", ".yml"}:
             raise InvalidPackage("Manifest must use a .yaml or .yml extension")
@@ -39,7 +38,6 @@ class ManifestFile(BaseModel):
             super().__init__(**yaml.safe_load(filename.read_text()))
         except (yaml.YAMLError, ValidationError, TypeError) as error:
             raise InvalidPackage(f"Invalid manifest {filename}: {error}") from error
-        self._catalog = catalog
         self._file = filename
         _ = self.lockfile
         root = Ref(self.reference)
@@ -54,7 +52,6 @@ class ManifestFile(BaseModel):
     @classmethod
     def create(
         cls,
-        catalog: Catalog,
         ref: Ref,
         path: str | Path = "manifest.yml",
     ) -> ManifestFile:
@@ -75,7 +72,7 @@ class ManifestFile(BaseModel):
                 stream.write(content)
         except FileExistsError as error:
             raise Conflict(f"Dependency file already exists: {destination}") from error
-        return cls(catalog, destination)
+        return cls(destination)
 
     @property
     def path(self) -> Path:
@@ -83,10 +80,15 @@ class ManifestFile(BaseModel):
 
     @property
     def record(self) -> LocalRecord:
-        """Build portable inputs with SCM unset; the flow supplies LocalRecord.source."""
+        """Return a fresh detached record each time; edits never change this manifest."""
+        return self.record_with_source(None)
+
+    def record_with_source(self, directory: Path | None) -> LocalRecord:
+        """Build an independent record with flow-supplied SCM, without changing the YAML."""
         return LocalRecord(
             Ref(self.reference),
             cast(JSON, deepcopy(self.payload)),
+            source=directory,
             files={name: self._path(path) for name, path in self.files.items()},
         )
 
@@ -104,15 +106,16 @@ class ManifestFile(BaseModel):
             raise InvalidPackage("Manifest and lockfile must be different files")
         return lockfile
 
-    def resolve(self, *, source: Path | None = None, update: bool = False) -> Graph:
+    def resolve(
+        self, catalog: Catalog, *, source: Path | None = None, update: bool = False
+    ) -> Graph:
         """Resolve a snapshot with flow-supplied SCM; update ignores but never writes the lock."""
-        record = self.record
-        record.source = source
+        lockfile = self.lockfile
         return Graph(
-            self._catalog,
-            record,
+            catalog,
+            self.record_with_source(source),
             dependencies=self.dependencies,
-            lockfile=self.lockfile if self.lockfile.exists() and not update else None,
+            lockfile=None if update else lockfile,
         )
 
     def add_to_workspace(self, workspace: Workspace) -> None:
@@ -124,9 +127,9 @@ class ManifestFile(BaseModel):
             )
         workspace.add(directory)
 
-    def create_lockfile(self) -> Path:
+    def create_lockfile(self, catalog: Catalog) -> Path:
         """Resolve current declarations afresh, then save their exact revision selection."""
-        return self.resolve(update=True).create_lockfile(self.lockfile)
+        return self.resolve(catalog, update=True).create_lockfile(self.lockfile)
 
     def add(self, ref: Ref) -> None:
         """Add or replace one package's requirement; changes are saved explicitly."""

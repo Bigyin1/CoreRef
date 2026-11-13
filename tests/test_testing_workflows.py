@@ -62,8 +62,8 @@ def test_package_sets_accept_previously_published_refs(
     util = env.publish(catalog, env.package(env.ref("util")))
     records = {name: env.package(env.ref(name)) for name in ("cpu", "top")}
     result = env.publish_set(catalog, records, dependencies={"cpu": (util.ref,), "top": ("cpu",)})
-    project = env.project(env.new_catalog(), env.ref("consumer"), dependencies=(result["top"].ref,))
-    assert {r.ref.component for r in project.resolve().records} == {
+    project = env.project(env.ref("consumer"), dependencies=(result["top"].ref,))
+    assert {r.ref.component for r in project.resolve(env.new_catalog()).records} == {
         "consumer",
         "top",
         "cpu",
@@ -80,18 +80,18 @@ def test_consumer_deps_edit_lock_and_workspace_next_to_project(
     catalog = env.new_catalog()
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"})
     published = catalog.publish(cpu)
-    project = env.project(catalog, env.ref("top"), path=tmp_path / "project/manifest.yml")
+    project = env.project(env.ref("top"), path=tmp_path / "project/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
-    assert project.resolve().get_with_sources()[0].source != cpu.source
-    project.create_lockfile()
+    assert project.resolve(catalog).get_with_sources()[0].source != cpu.source
+    project.create_lockfile(catalog)
     assert project.lockfile.is_file()
     project.lockfile.unlink()
     workspace = env.workspace(catalog, directory=tmp_path)
     assert cpu.source is not None
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(project.path.parent)
-    editable = project.resolve().get_with_sources()[0]
+    editable = project.resolve(catalog).get_with_sources()[0]
     assert editable.source == cpu.source and editable.is_editable
 
 
@@ -158,8 +158,8 @@ def test_single_publication_keeps_lock_choice_and_records_only_successes(
     catalog = env.new_catalog()
     dependency = env.package(env.ref("cpu"))
     first = env.publish(catalog, dependency)
-    consumer = env.project(catalog, env.ref("top"), dependencies=(dependency.ref,))
-    lock = consumer.create_lockfile()
+    consumer = env.project(env.ref("top"), dependencies=(dependency.ref,))
+    lock = consumer.create_lockfile(catalog)
     dependency.payload = {"generation": 2}
     second = env.publish(catalog, dependency)
     assert first.ref != second.ref
@@ -168,7 +168,7 @@ def test_single_publication_keeps_lock_choice_and_records_only_successes(
     )
     reader = env.new_catalog()
     assert Graph(reader, locked.ref).requirements == (first.ref,)
-    assert env.publish(catalog, consumer.resolve()).ref == locked.ref
+    assert env.publish(catalog, consumer.resolve(catalog)).ref == locked.ref
     with pytest.raises(CatalogError):
         env.publish(catalog, env.package(env.ref("broken")), dependencies=(env.ref("absent"),))
     diagnostic = env.diagnostics()

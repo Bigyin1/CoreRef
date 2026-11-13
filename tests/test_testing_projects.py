@@ -21,13 +21,12 @@ def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
         publisher = env.new_catalog()
         published = {}
         for name in ("stdlib", "cpu"):
-            project = ManifestFile(publisher, env.projects / name / "manifest.yml")
-            record = project.record
-            record.source = project.path.parent  # SCM is a policy of this example RTL flow.
+            project = ManifestFile(env.projects / name / "manifest.yml")
+            record = project.record_with_source(project.path.parent)
             published[name] = publisher.publish(record, dependencies=project.dependencies)
         reader = env.new_catalog()
-        soc = ManifestFile(reader, env.projects / "soc/manifest.yml")
-        graph = soc.resolve()
+        soc = ManifestFile(env.projects / "soc/manifest.yml")
+        graph = soc.resolve(reader)
         records = {record.ref.component: record for record in graph.get_with_sources()}
         assert set(records) == {"cpu", "stdlib"}
         assert records["cpu"].source is not None
@@ -58,9 +57,9 @@ def test_project_copy_preserves_custom_manifest_and_can_be_editable(
     assert env.new_catalog().get(published.ref).files["timing"].read_text() == "library(cpu) {}\n"
     workspace = env.workspace(catalog, directory=projects)
     for name in ("stdlib", "cpu"):
-        ManifestFile(catalog, projects / name / "manifest.yml").add_to_workspace(workspace)
+        ManifestFile(projects / name / "manifest.yml").add_to_workspace(workspace)
     monkeypatch.chdir(projects / "soc")
-    records = ManifestFile(catalog, projects / "soc/manifest.yml").resolve().get_with_sources()
+    records = ManifestFile(projects / "soc/manifest.yml").resolve(catalog).get_with_sources()
     assert all(record.is_editable for record in records)
     assert {record.source for record in records} == {projects / "stdlib", projects / "cpu"}
     assert not (projects / "stdlib/.git").exists()
@@ -160,9 +159,8 @@ def test_absolute_repository_symlink_cannot_initialize_the_source_directory(
 def test_inline_packages_and_projects_can_extend_a_directory_fixture(tmp_path: Path) -> None:
     with environment(tmp_path, projects=PROJECTS, repositories=("stdlib",)) as env:
         catalog = env.new_catalog()
-        stdlib = ManifestFile(catalog, env.projects / "stdlib/manifest.yml")
-        record = stdlib.record
-        record.source = stdlib.path.parent
+        stdlib = ManifestFile(env.projects / "stdlib/manifest.yml")
+        record = stdlib.record_with_source(stdlib.path.parent)
         dependency = catalog.publish(record)
         generated = env.package(
             env.ref("generated"),
@@ -170,10 +168,8 @@ def test_inline_packages_and_projects_can_extend_a_directory_fixture(tmp_path: P
             files={"report.txt": "inline result"},
         )
         published = catalog.publish(generated, dependencies=(dependency.ref,))
-        consumer = env.project(
-            env.new_catalog(), env.ref("inline-soc"), dependencies=(published.ref,)
-        )
-        installed = consumer.resolve().get_with_sources()
+        consumer = env.project(env.ref("inline-soc"), dependencies=(published.ref,))
+        installed = consumer.resolve(env.new_catalog()).get_with_sources()
         assert {record.ref.component for record in installed} == {"generated", "stdlib"}
         result = next(record for record in installed if record.ref == published.ref)
         assert result.files["report.txt"].read_text() == "inline result"

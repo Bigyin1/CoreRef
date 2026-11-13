@@ -101,11 +101,9 @@ def coreref_catalog(coreref_environment: Sandbox) -> Catalog:
 @pytest.fixture
 def coreref_project(
     coreref_environment: Sandbox,
-    coreref_catalog: Catalog,
     tmp_path: Path,
 ) -> ManifestFile:
     return coreref_environment.project(
-        coreref_catalog,
         coreref_environment.ref("consumer"),
         path=tmp_path / "manifest.yml",
     )

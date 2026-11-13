@@ -16,11 +16,11 @@ def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_ser
     published = coreref_catalog.publish(cpu)
     coreref_project.add(published.ref.without_revision())
     coreref_project.save()
-    assert coreref_project.resolve().get_with_sources()[0].source is not None
+    assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].source is not None
     workspace = env.workspace(coreref_catalog, directory=coreref_project.path.parent)
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(coreref_project.path.parent)
-    assert coreref_project.resolve().get_with_sources()[0].is_editable
+    assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].is_editable
 
 def test_unrelated():
     assert True
@@ -212,3 +212,15 @@ def test_absolute(base, coreref_environment):
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers")
     result.assert_outcomes(passed=2)
+
+
+def test_project_fixture_does_not_create_an_unused_catalog(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+    pytester.makepyfile("""
+def test_project(coreref_project, coreref_environment):
+    assert coreref_project.path.is_file()
+    assert coreref_project.record.source is None
+    assert list(coreref_environment.root.glob("client-*")) == []
+""")
+    result = pytester.runpytest_inprocess("-q", "--strict-markers")
+    result.assert_outcomes(passed=1)

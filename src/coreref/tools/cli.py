@@ -50,7 +50,7 @@ class _WorkspaceCommands:
             if (source / "conanfile.py").exists():
                 workspace.add(source)
             else:
-                ManifestFile(catalog, source / "manifest.yml").add_to_workspace(workspace)
+                ManifestFile(source / "manifest.yml").add_to_workspace(workspace)
             typer.echo(source)
 
     def open(
@@ -111,15 +111,13 @@ class _DepsCommands:
     ) -> None:
         """Create manifest.yml without overwriting an existing file."""
         with _command_errors():
-            catalog = self._catalog_factory()
-            document = ManifestFile.create(catalog, Ref(ref), file)
+            document = ManifestFile.create(Ref(ref), file)
             typer.echo(document.path)
 
     def add(self, ref: str, file: Manifest = Path("manifest.yml")) -> None:
         """Declare a dependency, replacing an existing requirement of the same package."""
         with _command_errors():
-            catalog = self._catalog_factory()
-            document = ManifestFile(catalog, file)
+            document = ManifestFile(file)
             document.add(Ref(ref))
             document.save()
             typer.echo(document.path)
@@ -127,8 +125,7 @@ class _DepsCommands:
     def remove(self, ref: str, file: Manifest = Path("manifest.yml")) -> None:
         """Remove a direct dependency declaration."""
         with _command_errors():
-            catalog = self._catalog_factory()
-            document = ManifestFile(catalog, file)
+            document = ManifestFile(file)
             document.remove(Ref(ref))
             document.save()
             typer.echo(document.path)
@@ -136,15 +133,15 @@ class _DepsCommands:
     def list_dependencies(self, file: Manifest = Path("manifest.yml")) -> None:
         """List direct declarations without contacting the registry."""
         with _command_errors():
-            document = ManifestFile(self._catalog_factory(), file)
+            document = ManifestFile(file)
             for ref in document.dependencies:
                 typer.echo(ref)
 
     def lock(self, file: Manifest = Path("manifest.yml")) -> None:
         """Refresh the lockfile from current declarations and remote revisions."""
         with _command_errors():
-            document = ManifestFile(self._catalog_factory(), file)
-            typer.echo(document.create_lockfile())
+            document = ManifestFile(file)
+            typer.echo(document.create_lockfile(self._catalog_factory()))
 
     def install(
         self,
@@ -153,7 +150,7 @@ class _DepsCommands:
     ) -> None:
         """Fetch the full dependency tree in one batch, keeping the existing lockfile."""
         with _command_errors():
-            graph = ManifestFile(self._catalog_factory(), file).resolve()
+            graph = ManifestFile(file).resolve(self._catalog_factory())
             records = graph.get_with_sources() if sources else graph.get()
             typer.echo(json.dumps([record.to_dict() for record in records], indent=2))
 
