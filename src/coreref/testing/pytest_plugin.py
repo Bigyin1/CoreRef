@@ -2,6 +2,7 @@
 
 from collections.abc import Generator, Iterator
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -17,6 +18,7 @@ _ENVIRONMENT = pytest.StashKey[Sandbox]()
 class _Options(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     projects: str | Path | None = None
+    projects_base: Literal["test", "root"] = "test"
     repositories: tuple[str, ...] = ()
     namespace: str = "test"
     timeout: float = Field(default=5, gt=0, allow_inf_nan=False)
@@ -74,7 +76,12 @@ def coreref_environment(
     ) as sandbox:
         request.node.stash[_ENVIRONMENT] = sandbox
         if options.projects is not None:
-            source = request.node.path.parent / options.projects
+            base = (
+                request.config.rootpath
+                if options.projects_base == "root"
+                else request.node.path.parent
+            )
+            source = base / options.projects
             sandbox.load_projects(source, repositories=options.repositories)
         elif options.repositories:
             raise pytest.UsageError("coreref repositories require projects")

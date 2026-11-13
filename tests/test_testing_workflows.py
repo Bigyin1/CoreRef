@@ -8,6 +8,8 @@ from dulwich.objects import Commit
 from dulwich.repo import Repo
 
 from coreref.api.catalog import Catalog
+from coreref.api.errors import CatalogError
+from coreref.api.graph import Graph
 from coreref.testing import (
     FixtureFile,
     LocalServer,
@@ -26,18 +28,18 @@ def test_existing_source_incremental_publish_and_executable_update(
 ) -> None:
     env = Sandbox(conan_server, tmp_path / "fixtures", namespace="flow")
     catalog = env.new_catalog()
-    util = catalog.publish(env.package(env.ref("util")))
+    util = env.publish(catalog, env.package(env.ref("util")))
     initial = env.package(env.ref("cpu"), sources={"run.sh": FixtureFile("first", 0o755)})
     assert initial.source is not None
     record = env.package(env.ref("cpu"), source=initial.source)
-    first = catalog.publish(record, dependencies=(util.ref,))
+    first = env.publish(catalog, record, dependencies=(util.ref,))
     git_commit(
         initial.source,
         {"run.sh": FixtureFile("second", 0o755)},
         push=True,
         author="Flow <flow@example.invalid>",
     )
-    second = catalog.publish(record, dependencies=(util.ref,))
+    second = env.publish(catalog, record, dependencies=(util.ref,))
     assert first.ref != second.ref
     reader = env.new_catalog()
     for published, content in ((first, "first"), (second, "second")):
@@ -57,7 +59,7 @@ def test_package_sets_accept_previously_published_refs(
 ) -> None:
     env = Sandbox(conan_server, tmp_path)
     catalog = env.new_catalog()
-    util = catalog.publish(env.package(env.ref("util")))
+    util = env.publish(catalog, env.package(env.ref("util")))
     records = {name: env.package(env.ref(name)) for name in ("cpu", "top")}
     result = env.publish_set(catalog, records, dependencies={"cpu": (util.ref,), "top": ("cpu",)})
     project = env.project(env.new_catalog(), env.ref("consumer"), dependencies=(result["top"].ref,))
@@ -147,3 +149,28 @@ def test_fixture_ref_coordinates_and_invalid_source_options(
         env.package(env.ref("cpu"), source=tmp_path, sources={})
     with pytest.raises(FileNotFoundError):
         env.package(env.ref("cpu"), source=tmp_path / "missing")
+
+
+def test_single_publication_keeps_lock_choice_and_records_only_successes(
+    conan_server: LocalServer, tmp_path: Path
+) -> None:
+    env = Sandbox(conan_server, tmp_path / "fixtures")
+    catalog = env.new_catalog()
+    dependency = env.package(env.ref("cpu"))
+    first = env.publish(catalog, dependency)
+    consumer = env.project(catalog, env.ref("top"), dependencies=(dependency.ref,))
+    lock = consumer.create_lockfile()
+    dependency.payload = {"generation": 2}
+    second = env.publish(catalog, dependency)
+    assert first.ref != second.ref
+    locked = env.publish(
+        catalog, consumer.record, dependencies=consumer.dependencies, lockfile=lock
+    )
+    reader = env.new_catalog()
+    assert Graph(reader, locked.ref).requirements == (first.ref,)
+    assert env.publish(catalog, consumer.resolve()).ref == locked.ref
+    with pytest.raises(CatalogError):
+        env.publish(catalog, env.package(env.ref("broken")), dependencies=(env.ref("absent"),))
+    diagnostic = env.diagnostics()
+    assert str(first.ref) in diagnostic and str(second.ref) in diagnostic
+    assert "Published: test.broken." not in diagnostic

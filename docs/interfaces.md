@@ -294,7 +294,11 @@ revision зависимости необязательна. `files` и `payload`
 Пути в `files` считаются от директории YAML и сопоставляют имя внутри пакета
 локальному файлу. Поля `source` в манифесте нет: `ManifestFile.record` оставляет
 `LocalRecord.source` равным `None`, а SCM задаёт flow. Для RTL flow указывает
-корень репозитория: `record.source = manifest.path.parent`. Для обычного SCM-репозитория отдельный JSON payload обычно не нужен:
+корень репозитория: `manifest.resolve(source=manifest.path.parent)`.
+`record` каждый раз возвращает независимое описание; изменение этой копии не влияет
+на последующие вызовы `resolve()`. Для прямого вызова `catalog.publish(record, ...)`
+SCM можно задать присваиванием `record.source`.
+Для обычного SCM-репозитория отдельный JSON payload обычно не нужен:
 описание исходников хранится в самом репозитории. В других пакетах payload может содержать
 дополнительные метаданные по правилам flow, например внешние пути к LIB/LEF.
 Принимаются файлы `.yaml` и `.yml`. Pydantic проверяет типы полей и запрещает неизвестные
@@ -306,7 +310,7 @@ SafeLoader: при повторении ключа сохраняется пос
 | `create(catalog, ref, path="manifest.yml")` | Создать файл, отказавшись от перезаписи существующего |
 | `record`, `dependencies` | LocalRecord и прямые Ref для обычного SDK API |
 | `add_to_workspace(workspace)` | Подготовить YAML-рецепт и зарегистрировать директорию |
-| `resolve(update=False)` | Новый Graph с существующим lockfile; Conan обнаруживает workspace по cwd |
+| `resolve(*, source=None, update=False)` | Новый Graph с исходниками, заданными flow, и существующим lockfile; Conan обнаруживает workspace по cwd |
 | `create_lockfile()` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
 | `add(ref)`, `remove(ref)`, `save()` | Изменить прямые зависимости и явно сохранить YAML |
 | `path`, `lockfile` | Пути YAML и одноимённого `.lock`, например model.yaml → model.lock |

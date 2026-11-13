@@ -273,3 +273,31 @@ def test_default_name_and_lockfile_are_manifest(
     assert manifest.path == tmp_path / "manifest.yml"
     assert manifest.lockfile == tmp_path / "manifest.lock"
     assert ManifestFile(file_catalog).record.ref == manifest.record.ref
+
+
+@pytest.mark.conan_remote
+@pytest.mark.parametrize("update", [False, True])
+def test_resolve_preserves_explicit_scm_in_snapshot_and_publication(
+    catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path, *, update: bool
+) -> None:
+    assert git_origin.is_dir()
+    document = ManifestFile.create(
+        catalog, Ref("soc.top.rtl.default/1.0"), tmp_path / "project/manifest.yml"
+    )
+    document.payload = {"generation": 1}
+    document.save()
+    document.create_lockfile()
+    manifest_before = document.path.read_bytes()
+    lock_before = document.lockfile.read_bytes()
+    graph = document.resolve(source=checkout, update=update)
+    local = graph.record
+    assert isinstance(local, LocalRecord) and local.source == checkout
+    assert document.record.source is None
+    document.payload = {"generation": 2}
+    published = catalog.publish(graph)
+    assert published.has_source and published.payload == {"generation": 1}
+    installed = catalog.get_with_sources(published.ref)
+    assert installed.source is not None and installed.source != checkout
+    assert (installed.source / "cpu.sv").read_bytes() == (checkout / "cpu.sv").read_bytes()
+    assert document.path.read_bytes() == manifest_before
+    assert document.lockfile.read_bytes() == lock_before

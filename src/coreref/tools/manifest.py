@@ -104,11 +104,13 @@ class ManifestFile(BaseModel):
             raise InvalidPackage("Manifest and lockfile must be different files")
         return lockfile
 
-    def resolve(self, *, update: bool = False) -> Graph:
-        """Resolve a snapshot; update ignores the old lock but never writes it."""
+    def resolve(self, *, source: Path | None = None, update: bool = False) -> Graph:
+        """Resolve a snapshot with flow-supplied SCM; update ignores but never writes the lock."""
+        record = self.record
+        record.source = source
         return Graph(
             self._catalog,
-            self.record,
+            record,
             dependencies=self.dependencies,
             lockfile=self.lockfile if self.lockfile.exists() and not update else None,
         )

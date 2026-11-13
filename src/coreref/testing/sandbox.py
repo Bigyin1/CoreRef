@@ -10,6 +10,7 @@ from pathlib import Path
 import networkx as nx
 
 from ..api.catalog import Catalog
+from ..api.graph import Graph
 from ..api.records import InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
 from ..tools.manifest import ManifestFile
@@ -103,6 +104,17 @@ class Sandbox:
         """Build fixture coordinates in this sandbox's namespace."""
         return Ref.from_fields(self.namespace, component, view, type, version)
 
+    def publish(
+        self,
+        catalog: Catalog,
+        record: LocalRecord | Graph,
+        *,
+        dependencies: tuple[Ref, ...] = (),
+        lockfile: Path | None = None,
+    ) -> InstalledRecord:
+        """Publish one fixture or resolved local graph, including incremental dependencies."""
+        return catalog.publish(record, dependencies=dependencies, lockfile=lockfile)
+
     def publish_set(
         self,
         catalog: Catalog,
@@ -134,7 +146,7 @@ class Sandbox:
                 published[dep].ref if isinstance(dep, str) else dep
                 for dep in dependencies.get(name, ())
             )
-            published[name] = catalog.publish(records[name], dependencies=refs)
+            published[name] = self.publish(catalog, records[name], dependencies=refs)
         return published
 
     def load_projects(self, source: Path, *, repositories: tuple[str, ...] = ()) -> Path:

@@ -152,9 +152,9 @@ def test_flow(tmp_path, monkeypatch):
             sources={"cpu.sv": "module cpu; endmodule\n"},
             files={"config.json": "{}"},
         )
-        # Обычный SDK задаёт payload, связи, lockfile и публикацию.
+        # Sandbox публикует запись через подготовленный клиент.
         cpu.payload = {"flow": "example"}
-        published = publisher.publish(cpu)
+        published = sandbox.publish(publisher, cpu)
         reader = sandbox.new_catalog()  # Независимый cache, тот же сервер.
         assert reader.get_with_sources(published.ref).files["config.json"].exists()
 
@@ -227,7 +227,7 @@ Git-сервиса. Рабочие checkout можно удалить после
 with environment(tmp_path / "infra", namespace="soc") as env:
     catalog = env.new_catalog()
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
-    published = catalog.publish(cpu)
+    published = env.publish(catalog, cpu)
 
     # Обычный ManifestFile: можно менять зависимости через add/remove/save.
     project = env.project(catalog, env.ref("top"), path=tmp_path / "top/manifest.yml")
@@ -240,8 +240,9 @@ with environment(tmp_path / "infra", namespace="soc") as env:
 ```
 
 `package(ref, source=existing_directory)` использует готовые исходники без изменения
-их Git-состояния; `sources={...}` создаёт новые. Обычный `Catalog.publish()` для одного `LocalRecord`
-принимает `dependencies=(published.ref, ...)`. В публикации набора значения
+их Git-состояния; `sources={...}` создаёт новые.
+`Sandbox.publish(catalog, record, dependencies=(published.ref, ...), lockfile=...)`
+публикует одну запись; готовый локальный Graph также можно передать вместо record. В публикации набора значения
 `dependencies` могут смешивать короткие имена и уже опубликованные `Ref`.
 `ref(component, version="1.0", view="rtl", type="default")` использует namespace окружения.
 `project(..., dependencies=(...))` сразу записывает зависимости; параметр `path`
@@ -342,7 +343,9 @@ Inline-создание через `env.package(..., sources={...}, files={...})
 каталог в переменную для повторного использования. `env.publish_set(catalog, records,
 dependencies=...)` публикует только именованные наборы. Одиночные записи, включая
 инкрементальные обновления и зависимости на ранее опубликованные пакеты, публикуются
-обычным `catalog.publish(record, dependencies=(...))`.
+через `env.publish(catalog, record, dependencies=(...))`. Для готового снимка —
+`env.publish(catalog, graph)`. Клиенты из `env.new_catalog()` сохраняют успешные
+публикации для диагностики; ошибки публикации в этот список не попадают.
 
 ### Недоступность сервера и диагностика
 
@@ -365,7 +368,8 @@ setup, выполнения теста и teardown, если окружение 
 
 ```python
 @pytest.mark.coreref(
-    projects="test_projects/basic",
+    projects="tests/test_projects",
+    projects_base="root",
     repositories=("cpu", "stdlib"),
     namespace="soc",
     timeout=0.2,
@@ -375,10 +379,14 @@ def test_flow(coreref_environment, coreref_catalog):
     ...
 ```
 
-`projects` разрешается относительно файла теста, не cwd. Маркер можно ставить на
+По умолчанию `projects` разрешается относительно файла теста (`projects_base="test"`).
+Для общего дерева проектов из разных поддиректорий задайте `projects_base="root"`:
+путь будет считаться от корня pytest (`config.rootpath`, конфигурация или `--rootdir`).
+Абсолютные пути поддерживаются в обоих режимах; cwd на выбор базы не влияет.
+Маркер можно ставить на
 функцию, класс, модуль или `pytest.param(..., marks=pytest.mark.coreref(...))` для
 нескольких деревьев проектов. Используется ближайший маркер; настройки не сливаются
-между уровнями. Поддерживаются только `projects`, `repositories`, `namespace`, `timeout`;
+между уровнями. Поддерживаются только `projects`, `projects_base`, `repositories`, `namespace`, `timeout`;
 ошибочные параметры дают ошибку подготовки теста. Без параметров поведение фикстур прежнее.
 
 ### Счётчики операций
