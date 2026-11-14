@@ -9,6 +9,9 @@ pytestmark = pytest.mark.conan_remote
 def test_downstream_plugin_fixtures_marker_and_editable_project(pytester: pytest.Pytester) -> None:
     pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
     pytester.makepyfile("""
+import pytest
+
+@pytest.mark.coreref
 def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_server, monkeypatch):
     env = coreref_environment
     assert coreref_server is env.server
@@ -24,8 +27,8 @@ def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_ser
     assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].is_editable
     assert len(list(env.root.glob("client-*"))) == 1
 
-def test_unrelated():
-    assert True
+def test_unmarked(coreref_environment):
+    raise AssertionError("An unmarked test must be deselected by -m coreref")
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers", "-m", "coreref")
     result.assert_outcomes(passed=1, deselected=1)
@@ -223,6 +226,55 @@ def test_project(coreref_project, coreref_environment):
     assert coreref_project.path.is_file()
     assert coreref_project.record.source == coreref_project.path.parent
     assert list(coreref_environment.root.glob("client-*")) == []
+""")
+    result = pytester.runpytest_inprocess("-q", "--strict-markers")
+    result.assert_outcomes(passed=1)
+
+
+@pytest.mark.parametrize(
+    ("priority", "selection"),
+    [("", ()), ("trylast=True", ()), ("tryfirst=True", ("-m", "coreref"))],
+)
+def test_collection_hook_marker_options_are_preserved(
+    pytester: pytest.Pytester, priority: str, selection: tuple[str, ...]
+) -> None:
+    pytester.makeconftest(f"""
+import pytest
+
+pytest_plugins = ["coreref.testing.pytest_plugin"]
+
+@pytest.hookimpl({priority})
+def pytest_collection_modifyitems(items):
+    for item in items:
+        item.add_marker(pytest.mark.coreref(
+            projects="test_projects", projects_base="root", namespace="flow", timeout=0.2
+        ))
+""")
+    projects = pytester.path / "test_projects"
+    projects.mkdir()
+    (projects / "name.txt").write_text("configured from conftest")
+    pytester.makepyfile("""
+def test_flow(coreref_environment, request):
+    env = coreref_environment
+    assert str(env.ref("cpu")) == "flow.cpu.rtl.default/1.0"
+    assert env.timeout == 0.2
+    assert (env.projects / "name.txt").read_text() == "configured from conftest"
+    assert len(list(request.node.iter_markers("coreref"))) == 1
+""")
+    result = pytester.runpytest_inprocess("-q", "--strict-markers", *selection)
+    result.assert_outcomes(passed=1)
+
+
+def test_unmarked_fixtures_use_defaults_without_adding_a_marker(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+    pytester.makepyfile("""
+def test_defaults(coreref_environment, request):
+    env = coreref_environment
+    assert env.namespace == "test"
+    assert env.timeout == 5
+    assert request.node.get_closest_marker("coreref") is None
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers")
     result.assert_outcomes(passed=1)

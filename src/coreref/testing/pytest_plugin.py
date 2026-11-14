@@ -49,16 +49,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "coreref: uses an isolated CoreRef package environment")
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    for item in items:
-        if (
-            isinstance(item, pytest.Function)
-            and "coreref_environment" in item.fixturenames
-            and item.get_closest_marker("coreref") is None
-        ):
-            item.add_marker("coreref")
-
-
 @pytest.fixture
 def coreref_environment(
     tmp_path: Path,
