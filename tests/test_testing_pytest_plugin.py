@@ -1,4 +1,6 @@
-"""A dependent repository can opt into fixtures with one pytest_plugins entry."""
+"""Dependent flows configure ordinary pytest fixtures without marker hooks."""
+
+from pathlib import Path
 
 import pytest
 
@@ -6,12 +8,9 @@ pytest_plugins = ["pytester"]
 pytestmark = pytest.mark.conan_remote
 
 
-def test_downstream_plugin_fixtures_marker_and_editable_project(pytester: pytest.Pytester) -> None:
+def test_downstream_plugin_fixtures_and_editable_project(pytester: pytest.Pytester) -> None:
     pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
     pytester.makepyfile("""
-import pytest
-
-@pytest.mark.coreref
 def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_server, monkeypatch):
     env = coreref_environment
     assert coreref_server is env.server
@@ -26,44 +25,47 @@ def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_ser
     monkeypatch.chdir(coreref_project.path.parent)
     assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].is_editable
     assert len(list(env.root.glob("client-*"))) == 1
-
-def test_unmarked(coreref_environment):
-    raise AssertionError("An unmarked test must be deselected by -m coreref")
 """)
-    result = pytester.runpytest_inprocess("-q", "--strict-markers", "-m", "coreref")
-    result.assert_outcomes(passed=1, deselected=1)
+    result = pytester.runpytest_inprocess("-q", "--strict-markers")
+    result.assert_outcomes(passed=1)
 
 
-def test_marker_options_are_relative_to_test_file_and_support_parametrization(
+def test_options_fixture_configures_projects_and_parametrized_tests(
     pytester: pytest.Pytester,
 ) -> None:
     import shutil
-    from pathlib import Path
 
-    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+    pytester.makeconftest("""
+from pathlib import Path
+import pytest
+from coreref.testing.pytest_plugin import EnvironmentOptions
+
+pytest_plugins = ["coreref.testing.pytest_plugin"]
+
+@pytest.fixture
+def coreref_options() -> EnvironmentOptions:
+    return {
+        "projects": Path("suite/test_projects"), "repositories": ("stdlib",),
+        "namespace": "demo", "timeout": 0.2,
+    }
+""")
     suite = pytester.path / "suite"
     shutil.copytree(Path(__file__).with_name("test_projects"), suite / "test_projects")
     (suite / "test_flow.py").write_text("""
 import pytest
 
-@pytest.mark.coreref(
-    projects="test_projects", repositories=("stdlib",), namespace="demo", timeout=0.2
-)
-class TestFlow:
-    @pytest.mark.parametrize("case", ["one", "two"])
-    def test_projects(self, case, coreref_environment, coreref_catalog):
-        env = coreref_environment
-        assert env.timeout == 0.2
-        assert str(env.ref("cpu")) == "demo.cpu.rtl.default/1.0"
-        assert (env.projects / "stdlib/.git").exists()
-        assert not (env.projects / "cpu/.git").exists()
-        source = env.projects / "cpu/rtl/cpu.sv"
-        assert source.read_text().startswith("module cpu;")
-        source.write_text(case)
+@pytest.mark.parametrize("case", ["one", "two"])
+def test_projects(case, coreref_environment, coreref_catalog):
+    env = coreref_environment
+    assert env.timeout == 0.2
+    assert str(env.ref("cpu")) == "demo.cpu.rtl.default/1.0"
+    assert (env.projects / "stdlib/.git").exists()
+    assert not (env.projects / "cpu/.git").exists()
+    source = env.projects / "cpu/rtl/cpu.sv"
+    assert source.read_text().startswith("module cpu;")
+    source.write_text(case)
 """)
-    result = pytester.runpytest_inprocess(
-        "suite/test_flow.py", "-q", "--strict-markers", "-m", "coreref"
-    )
+    result = pytester.runpytest_inprocess("suite/test_flow.py", "-q", "--strict-markers")
     result.assert_outcomes(passed=2)
 
 
@@ -91,11 +93,17 @@ def test_failure(coreref_environment, coreref_catalog):
 
 
 def test_setup_failure_still_reports_the_created_environment(pytester: pytest.Pytester) -> None:
-    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
-    pytester.makepyfile("""
+    pytester.makeconftest("""
+from pathlib import Path
 import pytest
 
-@pytest.mark.coreref(projects="missing")
+pytest_plugins = ["coreref.testing.pytest_plugin"]
+
+@pytest.fixture
+def coreref_options():
+    return {"projects": Path("missing")}
+""")
+    pytester.makepyfile("""
 def test_failure(coreref_environment):
     pass
 """)
@@ -124,54 +132,72 @@ def test_ok(bad_teardown):
 
 
 @pytest.mark.parametrize(
-    "options",
+    ("options", "error"),
     [
-        "unknown=True",
-        "timeout=-1",
-        "repositories='cpu'",
-        "'positional'",
-        "projects_base='cwd'",
-        "projects_base=42",
+        ("{'unknown': True}", "*TypeError*unexpected keyword*unknown*"),
+        ("{'projects_base': 'root'}", "*TypeError*unexpected keyword*projects_base*"),
+        ("{'repositories': ('cpu',)}", "*ValueError*repositories require projects*"),
     ],
 )
-def test_invalid_marker_options_are_setup_errors(pytester: pytest.Pytester, options: str) -> None:
-    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
-    pytester.makepyfile(f"""
+def test_invalid_options_fail_during_setup(
+    pytester: pytest.Pytester, options: str, error: str
+) -> None:
+    pytester.makeconftest(f"""
 import pytest
+pytest_plugins = ["coreref.testing.pytest_plugin"]
 
-@pytest.mark.coreref({options})
+@pytest.fixture
+def coreref_options():
+    return {options}
+""")
+    pytester.makepyfile("""
 def test_failure(coreref_environment):
     pass
 """)
     result = pytester.runpytest_inprocess("-q")
     result.assert_outcomes(errors=1)
-    result.stdout.fnmatch_lines(["*UsageError*coreref*"])
+    result.stdout.fnmatch_lines([error])
 
 
-def test_parametrized_marker_selects_different_project_trees(pytester: pytest.Pytester) -> None:
-    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+def test_parametrized_options_fixture_selects_different_project_trees(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makeconftest("""
+from pathlib import Path
+import pytest
+
+pytest_plugins = ["coreref.testing.pytest_plugin"]
+
+@pytest.fixture(params=["one", "two"])
+def coreref_options(request):
+    return {"projects": Path(request.param), "namespace": request.param}
+""")
     for name in ("one", "two"):
         directory = pytester.path / name
         directory.mkdir()
         (directory / "name.txt").write_text(name)
     pytester.makepyfile("""
-import pytest
-
-@pytest.mark.parametrize("expected", [
-    pytest.param("one", marks=pytest.mark.coreref(projects="one")),
-    pytest.param("two", marks=pytest.mark.coreref(projects="two")),
-])
-def test_tree(expected, coreref_environment):
-    assert (coreref_environment.projects / "name.txt").read_text() == expected
+def test_tree(coreref_environment):
+    env = coreref_environment
+    assert (env.projects / "name.txt").read_text() == env.namespace
 """)
-    result = pytester.runpytest_inprocess("-q", "--strict-markers", "-m", "coreref")
+    result = pytester.runpytest_inprocess("-q", "--strict-markers")
     result.assert_outcomes(passed=2)
 
 
-def test_root_relative_projects_are_shared_by_nested_test_modules(
+def test_root_relative_projects_and_session_options_are_shared_by_nested_tests(
     pytester: pytest.Pytester,
 ) -> None:
-    pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
+    pytester.makeconftest("""
+from pathlib import Path
+import pytest
+
+pytest_plugins = ["coreref.testing.pytest_plugin"]
+
+@pytest.fixture(scope="session")
+def coreref_options():
+    return {"projects": Path("test_projects")}
+""")
     pytester.makeini("[pytest]")
     common = pytester.path / "test_projects"
     common.mkdir()
@@ -181,23 +207,22 @@ def test_root_relative_projects_are_shared_by_nested_test_modules(
         (suite / "test_projects").mkdir(parents=True)
         (suite / "test_projects/name.txt").write_text("wrong base directory")
         (suite / f"test_{suite.name}.py").write_text("""
-import pytest
+from pathlib import Path
 
-pytestmark = pytest.mark.coreref(projects="test_projects", projects_base="root")
-
-def test_shared_tree(coreref_environment):
+def test_shared_tree(coreref_environment, coreref_options):
+    assert coreref_options == {"projects": Path("test_projects")}
     copied = coreref_environment.projects / "name.txt"
     assert copied.read_text() == "shared fixture"
     copied.write_text("local edit")
 """)
-    result = pytester.runpytest_inprocess(
-        "rtl", "backend", "-q", "--strict-markers", "-m", "coreref"
-    )
+    result = pytester.runpytest_inprocess("rtl", "backend", "-q", "--strict-markers")
     result.assert_outcomes(passed=2)
     assert (common / "name.txt").read_text() == "shared fixture"
 
 
-def test_absolute_project_path_is_independent_of_marker_base(pytester: pytest.Pytester) -> None:
+def test_absolute_project_path_can_be_configured_by_a_module_fixture(
+    pytester: pytest.Pytester,
+) -> None:
     pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
     source = pytester.path / "shared"
     source.mkdir()
@@ -206,17 +231,15 @@ def test_absolute_project_path_is_independent_of_marker_base(pytester: pytest.Py
 import pytest
 from pathlib import Path
 
-@pytest.mark.parametrize("base", [
-    pytest.param("test", marks=pytest.mark.coreref(projects=Path({str(source)!r}))),
-    pytest.param("root", marks=pytest.mark.coreref(
-        projects=Path({str(source)!r}), projects_base="root"
-    )),
-])
-def test_absolute(base, coreref_environment):
+@pytest.fixture
+def coreref_options():
+    return {{"projects": Path({str(source)!r})}}
+
+def test_absolute(coreref_environment):
     assert (coreref_environment.projects / "name.txt").read_text() == "absolute fixture"
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers")
-    result.assert_outcomes(passed=2)
+    result.assert_outcomes(passed=1)
 
 
 def test_project_fixture_does_not_create_an_unused_catalog(pytester: pytest.Pytester) -> None:
@@ -231,50 +254,41 @@ def test_project(coreref_project, coreref_environment):
     result.assert_outcomes(passed=1)
 
 
-@pytest.mark.parametrize(
-    ("priority", "selection"),
-    [("", ()), ("trylast=True", ()), ("tryfirst=True", ("-m", "coreref"))],
-)
-def test_collection_hook_marker_options_are_preserved(
-    pytester: pytest.Pytester, priority: str, selection: tuple[str, ...]
-) -> None:
-    pytester.makeconftest(f"""
+def test_user_markers_only_select_tests(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest("""
 import pytest
-
 pytest_plugins = ["coreref.testing.pytest_plugin"]
 
-@pytest.hookimpl({priority})
-def pytest_collection_modifyitems(items):
-    for item in items:
-        item.add_marker(pytest.mark.coreref(
-            projects="test_projects", projects_base="root", namespace="flow", timeout=0.2
-        ))
+@pytest.fixture
+def coreref_options():
+    return {"namespace": "configured", "timeout": 0.2}
 """)
-    projects = pytester.path / "test_projects"
-    projects.mkdir()
-    (projects / "name.txt").write_text("configured from conftest")
+    pytester.makeini("[pytest]\nmarkers = flow: downstream test group")
     pytester.makepyfile("""
-def test_flow(coreref_environment, request):
-    env = coreref_environment
-    assert str(env.ref("cpu")) == "flow.cpu.rtl.default/1.0"
-    assert env.timeout == 0.2
-    assert (env.projects / "name.txt").read_text() == "configured from conftest"
-    assert len(list(request.node.iter_markers("coreref"))) == 1
+import pytest
+
+@pytest.mark.flow(namespace="ignored")
+def test_flow(coreref_environment):
+    assert coreref_environment.namespace == "configured"
+    assert coreref_environment.timeout == 0.2
+
+def test_unmarked(coreref_environment):
+    raise AssertionError("An unmarked test must be deselected by -m flow")
 """)
-    result = pytester.runpytest_inprocess("-q", "--strict-markers", *selection)
-    result.assert_outcomes(passed=1)
+    result = pytester.runpytest_inprocess("-q", "--strict-markers", "-m", "flow")
+    result.assert_outcomes(passed=1, deselected=1)
 
 
-def test_unmarked_fixtures_use_defaults_without_adding_a_marker(
-    pytester: pytest.Pytester,
-) -> None:
+def test_default_options_need_no_markers_or_catalog(pytester: pytest.Pytester) -> None:
     pytester.makeconftest('pytest_plugins = ["coreref.testing.pytest_plugin"]')
     pytester.makepyfile("""
-def test_defaults(coreref_environment, request):
+def test_defaults(coreref_environment, coreref_options, request):
     env = coreref_environment
+    assert coreref_options == {}
     assert env.namespace == "test"
     assert env.timeout == 5
     assert request.node.get_closest_marker("coreref") is None
+    assert list(env.root.glob("client-*")) == []
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers")
     result.assert_outcomes(passed=1)

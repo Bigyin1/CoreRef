@@ -272,9 +272,9 @@ pytest_plugins = ["coreref.testing.pytest_plugin"]
 один сервер и один `env.catalog` на тест; `coreref_catalog is coreref_environment.catalog`.
 Сервер автоматически освобождается после ошибки. Создание манифеста через
 `coreref_project` само по себе не настраивает Conan-клиент.
-Фикстуры работают без маркера с настройками по умолчанию. Для настройки окружения
-или отбора через `pytest -m coreref` явно добавьте `@pytest.mark.coreref(...)`.
-Плагин не добавляет маркеры автоматически.
+Окружение настраивается через обычную фикстуру `coreref_options` в `conftest.py`.
+По умолчанию она возвращает пустой словарь. CoreRef не регистрирует и не обрабатывает
+собственных маркеров; группировку тестов определяет сам flow.
 Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
 директории, выбранной тестом через `monkeypatch.chdir()`. Установка `coreref[testing]`
 включает pytest; сам `environment()` по-прежнему можно использовать без плагина.
@@ -375,36 +375,40 @@ setup, выполнения теста и teardown, если окружение 
 остаются под управлением pytest/tmp_path; эти хелперы не включают отдельную очистку
 или архивирование диагностических файлов.
 
-### Настройки pytest-маркера
+### Настройки pytest-окружения
+
+Переопределите фикстуру в общем `conftest.py`:
 
 ```python
-@pytest.mark.coreref(
-    projects="tests/test_projects",
-    projects_base="root",
-    repositories=("cpu", "stdlib"),
-    namespace="soc",
-    timeout=0.2,
-)
-def test_flow(coreref_environment, coreref_catalog):
-    projects = coreref_environment.projects
-    ...
+from pathlib import Path
+
+import pytest
+from coreref.testing.pytest_plugin import EnvironmentOptions
+
+
+@pytest.fixture
+def coreref_options() -> EnvironmentOptions:
+    return {
+        "projects": Path("tests/test_projects"),
+        "repositories": ("cpu", "stdlib"),
+        "namespace": "soc",
+        "timeout": 0.2,
+    }
 ```
 
-По умолчанию `projects` разрешается относительно файла теста (`projects_base="test"`).
-Для общего дерева проектов из разных поддиректорий задайте `projects_base="root"`:
-путь будет считаться от корня pytest (`config.rootpath`, конфигурация или `--rootdir`).
-Абсолютные пути поддерживаются в обоих режимах; cwd на выбор базы не влияет.
-Маркер можно ставить на
-функцию, класс, модуль или `pytest.param(..., marks=pytest.mark.coreref(...))` для
-нескольких деревьев проектов. Используется ближайший маркер; настройки не сливаются
-между уровнями. Поддерживаются только `projects`, `projects_base`, `repositories`, `namespace`, `timeout`;
-ошибочные параметры дают ошибку подготовки теста. Без маркера используются настройки
-по умолчанию.
+`projects` — путь к дереву исходных проектов; относительные пути считаются от корня
+pytest (`config.rootpath`, конфигурация или `--rootdir`). Это одна база для тестов из
+разных поддиректорий. Абсолютные пути также поддерживаются. Без `projects` рабочее
+дерево не копируется. `repositories` перечисляет проекты, которым нужны Git-upstreams;
+этот параметр требует `projects`.
 
-`pytestmark` в `conftest.py` не наследуется тестовыми модулями. Общие настройки можно
-назначить в `pytest_collection_modifyitems` через `item.add_marker(pytest.mark.coreref(...))`.
-Для отбора через `-m coreref` этот хук должен добавлять маркеры до встроенного отбора
-pytest, например с `@pytest.hookimpl(tryfirst=True)`.
+Все поля необязательны: namespace по умолчанию `test`, timeout — 5 секунд,
+repositories — пустой tuple. `EnvironmentOptions` описывает тип обычного словаря,
+отдельного объекта конфигурации создавать не нужно. Плагин не меняет возвращённый
+словарь, поэтому настройки можно также предоставлять через session-scoped фикстуру.
+Для отдельных сценариев используйте обычную параметризацию `coreref_options` через
+`@pytest.fixture(params=...)` или переопределите её в модуле тестов. Collection-хуки
+для настройки окружения не нужны.
 
 ### Счётчики операций
 
