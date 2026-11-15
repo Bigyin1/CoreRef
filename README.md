@@ -26,4 +26,5 @@ packages = Graph(catalog, rtl).get_with_sources()
 
 - [Публичный API и связи классов](docs/interfaces.md).
 - [Примеры: RTL, поиск LIB/LEF и несколько результатов проекта](docs/use-cases.md).
+- [Тестовые окружения для flow: пакеты, Git, workspace и pytest](docs/testing.md).
 - [Разработка и проверки](docs/development.md).
