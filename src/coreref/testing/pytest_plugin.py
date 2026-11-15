@@ -2,10 +2,9 @@
 
 from collections.abc import Generator, Iterator
 from pathlib import Path
-from typing import Literal
+from typing import TypedDict
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..api.catalog import Catalog
 from ..tools.manifest import ManifestFile
@@ -15,23 +14,19 @@ from .server import LocalServer
 _ENVIRONMENT = pytest.StashKey[Sandbox]()
 
 
-class _Options(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    projects: str | Path | None = None
-    projects_base: Literal["test", "root"] = "test"
-    repositories: tuple[str, ...] = ()
-    namespace: str = "test"
-    timeout: float = Field(default=5, gt=0, allow_inf_nan=False)
+class EnvironmentOptions(TypedDict, total=False):
+    """Optional environment settings returned by the coreref_options fixture."""
+
+    projects: Path | None
+    repositories: tuple[str, ...]
+    namespace: str
+    timeout: float
 
 
-def _options(request: pytest.FixtureRequest) -> _Options:
-    marker = request.node.get_closest_marker("coreref")
-    if marker is not None and marker.args:
-        raise pytest.UsageError("coreref marker accepts keyword arguments only")
-    try:
-        return _Options.model_validate(marker.kwargs if marker is not None else {})
-    except ValidationError as error:
-        raise pytest.UsageError(f"Invalid coreref marker: {error}") from error
+@pytest.fixture
+def coreref_options() -> EnvironmentOptions:
+    """Override this fixture in conftest.py to configure the test environment."""
+    return {}
 
 
 @pytest.hookimpl(wrapper=True)
@@ -45,46 +40,26 @@ def pytest_runtest_makereport(
     return report
 
 
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", "coreref: uses an isolated CoreRef package environment")
-
-
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    for item in items:
-        if (
-            isinstance(item, pytest.Function)
-            and "coreref_environment" in item.fixturenames
-            and item.get_closest_marker("coreref") is None
-        ):
-            item.add_marker("coreref")
-
-
 @pytest.fixture
 def coreref_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
+    coreref_options: EnvironmentOptions,
 ) -> Iterator[Sandbox]:
     """Own the server and fixture directories for one test."""
     monkeypatch.delenv("CONAN_DEFAULT_PROFILE", raising=False)
     monkeypatch.delenv("CONAN_DEFAULT_BUILD_PROFILE", raising=False)
-    options = _options(request)
-    with environment(
-        tmp_path / "coreref",
-        namespace=options.namespace,
-        timeout=options.timeout,
-    ) as sandbox:
+    options = coreref_options.copy()
+    projects = options.pop("projects", None)
+    repositories = options.pop("repositories", ())
+    with environment(tmp_path / "coreref", **options) as sandbox:
         request.node.stash[_ENVIRONMENT] = sandbox
-        if options.projects is not None:
-            base = (
-                request.config.rootpath
-                if options.projects_base == "root"
-                else request.node.path.parent
-            )
-            source = base / options.projects
-            sandbox.load_projects(source, repositories=options.repositories)
-        elif options.repositories:
-            raise pytest.UsageError("coreref repositories require projects")
+        # Load projects after stashing the environment so setup errors include its paths.
+        if projects is not None:
+            sandbox.load_projects(request.config.rootpath / projects, repositories=repositories)
+        elif repositories:
+            raise ValueError("coreref repositories require projects")
         yield sandbox
 
 
