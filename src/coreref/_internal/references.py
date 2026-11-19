@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from conan.errors import ConanException  # type: ignore[import-untyped]
-from conan.internal.model.version_range import VersionRange  # type: ignore[import-untyped]
 from edify import RegexBuilder
 
 from ..api.errors import InvalidPackage
@@ -46,6 +44,9 @@ def validate_version_range(version: str) -> None:
         or any(character in expression for character in "#/@[]:%\r\n")
     ):
         raise InvalidPackage("Expected a Conan version range in brackets without a revision")
+    from conan.errors import ConanException  # type: ignore[import-untyped]
+    from conan.internal.model.version_range import VersionRange  # type: ignore[import-untyped]
+
     try:
         VersionRange(expression)
     except ConanException as error:
