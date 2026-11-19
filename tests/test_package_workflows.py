@@ -179,10 +179,9 @@ def test_retry_publication_after_upload_failure_keeps_the_original_lock_choice(
     published = history.publisher.publish(
         local, dependencies=(history.first.ref.without_revision(),), lockfile=lock
     )
-    assert Graph(history.publisher, published.ref).dependencies() == (history.first,)
-    assert second.ref not in {
-        record.ref for record in Graph(history.publisher, published.ref).records
-    }
+    locked = Graph(history.publisher, local, dependencies=(history.local.ref,), lockfile=lock)
+    assert locked.requirements == (history.first.ref,)
+    assert Graph(history.publisher, published.ref).requirements == (second.ref,)
     assert len(history.publisher.search(SearchQuery(component="result"), all_revisions=True)) == 1
     assert graph.get_with_sources((history.first.ref,))[0].payload == {"generation": 1}
 

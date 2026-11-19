@@ -194,7 +194,7 @@ def publish_result(
         dependencies=dependencies,
         lockfile=lockfile if lockfile.exists() else None,
     )
-    # Публикация использует зафиксированный выбор этого Graph.
+    # Рецепт сохранит переданные требования, включая явно заданные revisions.
     return catalog.publish(graph)
 
 

@@ -79,6 +79,17 @@ class RecipeIndex(RootModel[dict[str, dict[str, RecipeRevisions | str]]]):
     pass
 
 
+def _declared_requirements(recipe: NativePackage) -> tuple[str, ...]:
+    # Conan replaces instance.requires during resolution. The class retains the declaration.
+    declared: str | tuple[str, ...] | None = getattr(type(recipe), "requires", None)
+    if isinstance(declared, str):
+        return (declared,)
+    if declared is not None:
+        return tuple(declared)
+    # Older published recipes and manifest-aware editables declare requires via conan_data.
+    return tuple(cast(Iterable[str], (recipe.conan_data or {}).get("requires", ())))
+
+
 class ConanClient:
     def __init__(self, home: Path | None, remote: str | None, timeout: float) -> None:
         if home is not None:
@@ -256,17 +267,25 @@ class ConanClient:
         )
         graph = cast(NativeGraph, result["graph"])
         if not update and lockfile is None and self.remote and self._floating_requirements(graph):
-            # Externally exported recipes can float below an otherwise pinned root.
+            # A pinned recipe can still declare ranges or logical revisions below it.
             return self.graph(directory, update=True)
         return graph
 
     def _floating_requirements(self, graph: NativeGraph) -> bool:
-        for node in graph.nodes:
-            data = node.conanfile.conan_data or {}
-            requirements = cast(Iterable[str], data.get("requires", ()))
-            if any("#" not in reference for reference in requirements):
-                return True
-        return False
+        return any(
+            "#" not in reference
+            for node in graph.nodes
+            for reference in _declared_requirements(node.conanfile)
+        )
+
+    def recipe_requirements(self, directory: Path) -> tuple[str, ...]:
+        """Read editable declarations from a cached recipe without resolving its graph."""
+        try:
+            api = ConanAPI(cache_folder=str(self.home))
+            recipe = api.local.inspect(str(directory / "conanfile.py"), remotes=[], lockfile=None)
+        except (ConanException, OSError) as exc:
+            raise CatalogError("Could not inspect package requirements") from exc
+        return _declared_requirements(recipe)
 
     def open_sources(self, reference: str, destination: Path) -> None:
         """Use Conan's workspace SCM checkout directly, without installing cache sources."""

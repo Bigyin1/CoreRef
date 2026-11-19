@@ -96,7 +96,7 @@ def test_lockfile_and_graph_keep_old_files_after_new_revision(
     locked = Graph(catalog, root, dependencies=(ref,), lockfile=lock)
     assert locked.requirements == (first.ref,)
     published = catalog.publish(root, dependencies=(ref,), lockfile=lock)
-    assert Graph(catalog, published.ref).dependencies() == (first,)
+    assert Graph(catalog, published.ref).dependencies() == (second,)
     assert lock.read_bytes() == contents
     with pytest.raises(CatalogError, match="lockfile"):
         Graph(catalog, root, dependencies=(second.ref,), lockfile=lock)

@@ -5,11 +5,8 @@ from conan import ConanFile
 class CatalogRecord(ConanFile):
     name = {{ name|pyrepr }}
     version = {{ version|pyrepr }}
+    requires = {{ requirements | pyrepr }}
     exports = "record.json"
-
-    def requirements(self):
-        for reference in self.conan_data.get("requires", []):
-            self.requires(reference)
 
     def export(self):
         from pathlib import Path
@@ -20,8 +17,12 @@ class CatalogRecord(ConanFile):
 
     def source(self):
         from conan.tools.scm import Git
-        if self.conan_data.get("scm"):
+        if self.conan_data and self.conan_data.get("scm"):
             Git(self, "source").checkout_from_conandata_coordinates()
+
+    def package_id(self):
+        # Packaged files are identified by this recipe revision and do not use dependency binaries.
+        self.info.requires.clear()
 
     def package(self):
         import os

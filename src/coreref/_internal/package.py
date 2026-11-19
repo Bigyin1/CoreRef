@@ -318,8 +318,7 @@ class LocalPackage:
         record = self._publication_record()
         if resolved is None and self.dependencies:
             resolved = self.resolved.graph
-        requirements = resolved.direct_references if resolved is not None else ()
-        recipe = LocalRecipe(record, requirements)
+        recipe = LocalRecipe(record, tuple(str(dep) for dep in self.dependencies))
         with TemporaryDirectory(prefix="coreref-publish-") as temporary:
             directory = Path(temporary)
             recipe.write(directory)

@@ -211,7 +211,7 @@ def test_external_ci_recipe_is_readable(conan_catalog: Catalog, tmp_path: Path) 
     assert tuple(sorted(graph.networkx.edges)) == ((graph.record.ref, rtl.ref),)
 
 
-@pytest.mark.parametrize("damage", ["missing", "missing-data", "bad-marker", "bad-coordinates"])
+@pytest.mark.parametrize("damage", ["missing", "bad-data", "bad-marker", "bad-coordinates"])
 def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None:
     rtl, be = (
         record(),
@@ -222,8 +222,8 @@ def test_corrupt_recipe_is_an_error(conan_catalog: Catalog, damage: str) -> None
     folder = conan_catalog._package(be.ref).recipe().directory
     if damage == "missing":
         (folder / "record.json").unlink()
-    elif damage == "missing-data":
-        (folder / "conandata.yml").unlink()
+    elif damage == "bad-data":
+        (folder / "conandata.yml").write_text("invalid: [")
     elif damage == "bad-marker":
         data = json.loads((folder / "record.json").read_text())
         data["format"] = 999

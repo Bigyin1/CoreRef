@@ -62,6 +62,7 @@ class Workspace:
             recipe = self._catalog._package(ref).recipe()
             if not recipe.has_source:
                 raise InvalidPackage("The package has no repository source")
+            requirements = self._catalog._client.recipe_requirements(recipe.directory)
             self._catalog._client.open_sources(recipe.reference, source)
             record = LocalRecord(
                 recipe.record.ref.without_revision(),
@@ -69,7 +70,7 @@ class Workspace:
                 source=source,
                 files={name: source / "artifacts" / name for name in recipe.record.file_names},
             )
-            LocalRecipe(record, recipe.requirements).write_editable(source)
+            LocalRecipe(record, requirements).write_editable(source)
         self.add(source)
         return source
 

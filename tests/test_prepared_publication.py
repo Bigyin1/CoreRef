@@ -1,4 +1,4 @@
-"""Prepared publication uses current tool results and keeps its resolved dependency choices."""
+"""Prepared publication uses the captured graph while exporting declared requirements."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from coreref._internal.types import NativeGraph
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage
 from coreref.api.graph import Graph
@@ -41,13 +42,14 @@ def test_publish_graph_uses_updated_metadata_and_files_with_its_fixed_revision_c
     local.files["new"].write_text("new result")
     artifact.write_text("updated file")
     payload.text = "edited"
-    catalog.publish(LocalRecord(dependency, {"generation": 2}))
+    second = catalog.publish(LocalRecord(dependency, {"generation": 2}))
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
         published = catalog.publish(graph)
     assert published.payload == {"value": "edited"} and payload.calls == 1
     assert published.files["lib"].read_text() == "updated file"
     assert published.files["new"].read_text() == "new result"
-    assert Graph(catalog, published.ref).dependencies() == (first,)
+    assert graph.requirements == (first.ref,)
+    assert Graph(catalog, published.ref).dependencies() == (second,)
     assert not any(call.args[:2] == ("graph", "info") for call in commands.call_args_list)
     assert sum(call.args[0] == "export-pkg" for call in commands.call_args_list) == 1
     assert catalog.publish(graph).ref == published.ref
@@ -60,11 +62,20 @@ def test_publish_resolved_graph_uses_captured_lock_after_original_is_deleted(
     first = catalog.publish(LocalRecord(ref, {"generation": 1}))
     root = LocalRecord(Ref.from_fields("soc", "parent", "rtl", "default", "1.0"))
     lock = Graph(catalog, root, dependencies=(ref,)).create_lockfile(tmp_path / "project.lock")
-    catalog.publish(LocalRecord(ref, {"generation": 2}))
+    second = catalog.publish(LocalRecord(ref, {"generation": 2}))
     prepared = Graph(catalog, root, dependencies=(ref,), lockfile=lock)
     lock.unlink()
-    published = catalog.publish(prepared)
-    assert Graph(catalog, published.ref).dependencies() == (first,)
+    export = catalog._client.export_package
+
+    def check_export(directory: Path, *, lockfile: Path | None) -> NativeGraph:
+        native = export(directory, lockfile=lockfile)
+        inputs = native.root.conanfile.dependencies.direct_host.values()
+        assert tuple(Ref(package.ref.repr_notime()) for package in inputs) == (first.ref,)
+        return native
+
+    with patch.object(catalog._client, "export_package", side_effect=check_export):
+        published = catalog.publish(prepared)
+    assert Graph(catalog, published.ref).dependencies() == (second,)
     assert not lock.exists()
 
 
