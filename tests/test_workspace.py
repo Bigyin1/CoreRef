@@ -12,7 +12,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage
 from coreref.api.graph import Graph
 from coreref.api.query import SearchQuery
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.records import InstalledRecord, LocalRecord, Ref, Requirement
 from coreref.api.workspace import Workspace
 
 pytestmark = pytest.mark.conan_remote
@@ -41,6 +41,22 @@ def test_open_writes_only_recipe_and_preserves_work(
         assert workspace.open(rtl.ref) == source
     assert (source / "cpu.sv").read_text() == "local edits"
     assert (source / "conanfile.py").stat().st_mtime_ns == stamp
+
+
+def test_open_keeps_declared_version_range_in_editable_recipe(
+    catalog: Catalog, checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog.publish(LocalRecord(Ref("shared.stdlib/1.2")))
+    cpu = catalog.publish(
+        LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout),
+        dependencies=(Requirement("shared.stdlib/[>=1 <2]"),),
+    )
+    workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
+    workspace.open(cpu.ref)
+    newer = catalog.publish(LocalRecord(Ref("shared.stdlib/1.3")))
+    monkeypatch.chdir(workspace.path.parent)
+    graph = Graph(catalog, cpu.ref.without_revision())
+    assert graph.requirements == (newer.ref,)
 
 
 def test_native_discovery_supplies_working_sources_instead_of_cached_sources(

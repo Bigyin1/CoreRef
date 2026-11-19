@@ -118,7 +118,7 @@ class _DepsCommands:
         """Declare a dependency, replacing an existing requirement of the same package."""
         with _command_errors():
             document = ManifestFile(file)
-            document.add(Ref(ref))
+            document.add(ref)
             document.save()
             typer.echo(document.path)
 
@@ -126,7 +126,7 @@ class _DepsCommands:
         """Remove a direct dependency declaration."""
         with _command_errors():
             document = ManifestFile(file)
-            document.remove(Ref(ref))
+            document.remove(ref)
             document.save()
             typer.echo(document.path)
 

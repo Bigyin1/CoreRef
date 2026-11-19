@@ -112,8 +112,8 @@ def test_template_changes_preserve_published_recipe_readability(
     first = catalog.publish(local)
     render = recipe_module._recipe_text
 
-    def changed_template(ref: Ref) -> str:
-        return render(ref) + "\n# Template documentation changed.\n"
+    def changed_template(ref: Ref, requirements: tuple[str, ...]) -> str:
+        return render(ref, requirements) + "\n# Template documentation changed.\n"
 
     monkeypatch.setattr(recipe_module, "_recipe_text", changed_template)
     second = catalog.publish(local)

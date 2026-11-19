@@ -12,7 +12,7 @@ import networkx as nx
 
 from ..api.catalog import Catalog
 from ..api.graph import Graph
-from ..api.records import InstalledRecord, LocalRecord, Ref
+from ..api.records import Dependency, InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
 from ..tools.manifest import ManifestFile
 from .catalog import _RecordingCatalog
@@ -114,7 +114,7 @@ class Sandbox:
         self,
         record: LocalRecord | Graph,
         *,
-        dependencies: tuple[Ref, ...] = (),
+        dependencies: tuple[Dependency, ...] = (),
         lockfile: Path | None = None,
     ) -> InstalledRecord:
         """Publish one fixture or local graph through the shared catalog."""
@@ -124,7 +124,7 @@ class Sandbox:
         self,
         records: Mapping[str, LocalRecord],
         *,
-        dependencies: Mapping[str, tuple[str | Ref, ...]],
+        dependencies: Mapping[str, tuple[str | Dependency, ...]],
     ) -> dict[str, InstalledRecord]:
         """Publish a named package set, ordering dependencies automatically.
 
@@ -187,7 +187,7 @@ class Sandbox:
         ref: Ref,
         *,
         path: Path | None = None,
-        dependencies: tuple[Ref, ...] = (),
+        dependencies: tuple[Dependency, ...] = (),
     ) -> ManifestFile:
         """Create a consumer manifest; add/save/resolve it through ManifestFile."""
         path = path or self.root / f"project-{next(self._sequence)}" / "manifest.yml"

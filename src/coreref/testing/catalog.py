@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ..api.catalog import Catalog
 from ..api.graph import Graph
-from ..api.records import InstalledRecord, LocalRecord, Ref
+from ..api.records import Dependency, InstalledRecord, LocalRecord, Ref
 
 
 class _RecordingCatalog(Catalog):
@@ -16,7 +16,7 @@ class _RecordingCatalog(Catalog):
         self,
         record: LocalRecord | Graph,
         *,
-        dependencies: tuple[Ref, ...] = (),
+        dependencies: tuple[Dependency, ...] = (),
         lockfile: Path | None = None,
     ) -> InstalledRecord:
         installed = super().publish(record, dependencies=dependencies, lockfile=lockfile)

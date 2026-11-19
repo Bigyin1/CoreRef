@@ -263,7 +263,7 @@ def test_graph_batch_downloads_sources_and_artifacts_into_a_fresh_reader(
         assert command.call_count == 1 and command.call_args.args[0] == "install"
 
 
-def test_partial_be_is_searchable_from_rtl_in_a_fresh_reader(
+def test_be_is_searchable_from_rtl_in_a_fresh_reader(
     remote_catalog: Catalog, tmp_path: Path
 ) -> None:
     rtl = remote_catalog.publish(
@@ -271,7 +271,7 @@ def test_partial_be_is_searchable_from_rtl_in_a_fresh_reader(
     )
     artifact = tmp_path / "alu.lib"
     artifact.write_text("library from server")
-    partial = remote_catalog.publish(
+    macro = remote_catalog.publish(
         LocalRecord(
             Ref.from_fields(
                 "soc",
@@ -279,20 +279,17 @@ def test_partial_be_is_searchable_from_rtl_in_a_fresh_reader(
                 "be",
                 "lib-lef",
                 "4.0",
-                subcomponent="alu",
             ),
-            {"partition": "alu"},
             files={"lib": artifact},
         ),
         dependencies=(rtl.ref,),
     )
-    home = tmp_path / "partial-reader"
+    home = tmp_path / "be-reader"
     home.mkdir()
     shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
     reader = Catalog(configured_home(home), remote="catalog")
     found = reader.search(SearchQuery(namespace="soc", component="cpu", view="be"))
-    assert tuple(record.ref for record in found) == (partial.ref,)
-    assert found[0].ref.subcomponent == "alu"
+    assert tuple(record.ref for record in found) == (macro.ref,)
     assert Graph(reader, found[0].ref).dependencies()[0].ref == rtl.ref
     assert reader.get(found[0].ref).files["lib"].read_text() == "library from server"
 

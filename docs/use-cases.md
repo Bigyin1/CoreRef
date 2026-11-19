@@ -3,7 +3,8 @@
 ## Принцип работы
 
 Ref описывает **какой компонент и в каком представлении** нужен:
-`namespace.component[.subcomponent].view.type/version[#revision]`.
+`namespace.component.view.type/version[#revision]`.
+Самостоятельные пакеты вроде `shared.stdlib/2.0` используют короткую форму.
 Например, у `soc.cpu.rtl.default/1.0` можно искать BE-представления того же
 `soc.cpu`, выбирая `view="be"` и `type="lib-lef"`. Их версия независима от версии RTL;
 происхождение проверяется по точным зависимостям. Смысл всех полей описан в [API](interfaces.md).
@@ -193,7 +194,7 @@ def publish_result(
         dependencies=dependencies,
         lockfile=lockfile if lockfile.exists() else None,
     )
-    # Публикация использует зафиксированный выбор этого Graph.
+    # Рецепт сохранит переданные требования, включая явно заданные revisions.
     return catalog.publish(graph)
 
 

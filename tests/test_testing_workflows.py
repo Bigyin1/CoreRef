@@ -164,7 +164,8 @@ def test_single_publication_keeps_lock_choice_and_records_only_successes(
     assert first.ref != second.ref
     locked = env.publish(consumer.record, dependencies=consumer.dependencies, lockfile=lock)
     reader = env.new_catalog()
-    assert Graph(reader, locked.ref).requirements == (first.ref,)
+    assert consumer.resolve(reader).requirements == (first.ref,)
+    assert Graph(reader, locked.ref).requirements == (second.ref,)
     assert env.publish(consumer.resolve(catalog)).ref == locked.ref
     with pytest.raises(CatalogError):
         env.publish(env.package(env.ref("broken")), dependencies=(env.ref("absent"),))

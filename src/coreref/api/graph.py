@@ -11,7 +11,7 @@ import networkx as nx
 
 from .errors import CatalogError, InvalidPackage
 from .query import SearchQuery
-from .records import InstalledRecord, LocalRecord, Record, Ref
+from .records import Dependency, InstalledRecord, LocalRecord, Record, Ref
 
 # NetworkX generics are provided by stubs, not its runtime classes.
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class Graph:
         catalog: Catalog,
         record: LocalRecord | Ref,
         *,
-        dependencies: tuple[Ref, ...] = (),
+        dependencies: tuple[Dependency, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
         lockfile = lockfile.expanduser().absolute() if lockfile is not None else None

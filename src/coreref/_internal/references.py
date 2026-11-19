@@ -25,20 +25,40 @@ _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 
 
-def to_conan_reference(ref: Ref) -> str:
-    """Encode a reference, rejecting names that cannot be represented without loss."""
-    if ref.namespace.startswith("-") or not all(
-        NAME_PART.fullmatch(value) for value in (ref.namespace, ref.component, ref.view, ref.type)
-    ):
-        raise InvalidPackage("Conan coordinates require lowercase tokens without dots or slashes")
-    if ref.subcomponent is not None and not NAME_PART.fullmatch(ref.subcomponent):
-        raise InvalidPackage("Subcomponent must be a nonempty lowercase token")
-    name = ref.package_name
-    value = f"{ref.package_name}/{ref.version}"
+def parse_package_name(name: str) -> list[str]:
+    fields = name.split(".")
+    if len(fields) not in (2, 4):
+        raise InvalidPackage("Expected two or four package name fields")
+    if name.startswith("-") or not all(NAME_PART.fullmatch(part) for part in fields):
+        raise InvalidPackage("Package name requires lowercase tokens separated by dots")
+    if len(name) > _MAX_NAME_LENGTH:
+        raise InvalidPackage("Reference exceeds Conan name constraints")
+    return fields
+
+
+def validate_version_range(version: str) -> None:
+    expression = version[1:-1]
     if (
-        len(name) > _MAX_NAME_LENGTH
-        or len(value) > _MAX_REFERENCE_LENGTH
-        or not VERSION.fullmatch(ref.version)
+        not (version.startswith("[") and version.endswith("]"))
+        or not expression.strip()
+        or any(character in expression for character in "#/@[]:%\r\n")
+    ):
+        raise InvalidPackage("Expected a Conan version range in brackets without a revision")
+    from conan.errors import ConanException  # type: ignore[import-untyped]
+    from conan.internal.model.version_range import VersionRange  # type: ignore[import-untyped]
+
+    try:
+        VersionRange(expression)
+    except ConanException as error:
+        raise InvalidPackage(f"Invalid Conan version range: {version}") from error
+
+
+def to_conan_reference(ref: Ref) -> str:
+    """Encode an exact canonical reference."""
+    if not isinstance(ref, Ref):
+        raise InvalidPackage("This operation requires a Ref with an exact version")
+    if len(f"{ref.package_name}/{ref.version}") > _MAX_REFERENCE_LENGTH or not VERSION.fullmatch(
+        ref.version
     ):
         raise InvalidPackage("Reference exceeds Conan name/version constraints")
     if ref.revision is not None and (

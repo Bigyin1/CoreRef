@@ -190,7 +190,7 @@ def _commit(checkout: Path) -> str:
         return repo.head().decode()
 
 
-def test_requirements_and_scm_share_one_exported_conandata(
+def test_recipe_declares_requires_and_conandata_tracks_scm(
     catalog: Catalog, checkout: Path
 ) -> None:
     dependency = catalog.publish(
@@ -206,19 +206,25 @@ def test_requirements_and_scm_share_one_exported_conandata(
     assert record["format"] == 7
     assert set(record) == {"format", "ref", "payload"}
     assert not (recipe.directory / "coreref.json").exists()
-    assert set(data) == {"requires", "scm"}
-    assert tuple(data["requires"]) == recipe.requirements
-    assert data["requires"][0] == str(dependency.ref)
+    assert set(data) == {"scm"}
+    assert catalog._client.recipe_requirements(recipe.directory) == (str(dependency.ref),)
     assert data["scm"]["commit"] == _commit(checkout)
     assert recipe.has_source
     assert Graph(catalog, parent.ref).dependencies() == (dependency,)
-    assert "requires =" not in (recipe.directory / "conanfile.py").read_text()
+    assert str(dependency.ref) in (recipe.directory / "conanfile.py").read_text()
     assert catalog.get_with_sources(parent.ref).source is not None
 
 
-def test_conandata_fields_are_read_without_an_sdk_schema(tmp_path: Path) -> None:
+def test_legacy_conandata_requirements_can_still_be_inspected(
+    catalog: Catalog, tmp_path: Path
+) -> None:
     record = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
     LocalRecipe(record).write(tmp_path)
+    (tmp_path / "conanfile.py").write_text(
+        "from conan import ConanFile\nclass Package(ConanFile):\n"
+        "    def requirements(self):\n"
+        "        for ref in self.conan_data['requires']:\n            self.requires(ref)\n"
+    )
     data = {
         "requires": ["ordinary-library/1.0"],
         "scm": {"url": "managed-by-conan", "commit": "main", "extra": {"option": True}},
@@ -226,7 +232,7 @@ def test_conandata_fields_are_read_without_an_sdk_schema(tmp_path: Path) -> None
     }
     (tmp_path / "conandata.yml").write_text(yaml.safe_dump(data))
     recipe = StoredRecipe(tmp_path, reference=str(record.ref))
-    assert recipe.requirements == ("ordinary-library/1.0",)
+    assert catalog._client.recipe_requirements(tmp_path) == ("ordinary-library/1.0",)
     assert recipe.has_source
 
 
@@ -257,7 +263,7 @@ def test_conan_reports_missing_scm_coordinates_when_sources_are_requested(
 def test_conan_reports_invalid_requires_during_resolution(catalog: Catalog, tmp_path: Path) -> None:
     record = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
     LocalRecipe(record, ("not-a-reference",)).write(tmp_path)
-    assert StoredRecipe(tmp_path, reference=str(record.ref)).requirements == ("not-a-reference",)
+    assert StoredRecipe(tmp_path, reference=str(record.ref)).record.ref == record.ref
     with pytest.raises(CatalogError, match="require"):
         catalog._client.graph(tmp_path)
 

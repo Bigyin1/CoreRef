@@ -10,7 +10,7 @@ from .._internal.references import from_conan_reference
 from .errors import InvalidPackage
 from .graph import Graph
 from .query import SearchQuery
-from .records import InstalledRecord, LocalRecord, Record, Ref
+from .records import Dependency, InstalledRecord, LocalRecord, Record, Ref
 
 
 class Catalog:
@@ -36,7 +36,11 @@ class Catalog:
         refs = []
         for reference, revisions in self._client.index(pattern).items():
             for revision in revisions.revisions:
-                ref = from_conan_reference(f"{reference}#{revision}")
+                try:
+                    ref = from_conan_reference(f"{reference}#{revision}")
+                except InvalidPackage:
+                    # A search can include Conan names outside the CoreRef grammar.
+                    continue
                 if query.matches_ref(ref):
                     refs.append(ref)
         return tuple(sorted(refs))
@@ -57,7 +61,7 @@ class Catalog:
         self,
         record: LocalRecord | Graph,
         *,
-        dependencies: tuple[Ref, ...] = (),
+        dependencies: tuple[Dependency, ...] = (),
         lockfile: Path | None = None,
     ) -> InstalledRecord:
         """Publish a local description or reuse a previously resolved local graph."""
@@ -78,7 +82,7 @@ class Catalog:
     def _local_package(
         self,
         record: LocalRecord,
-        dependencies: tuple[Ref, ...],
+        dependencies: tuple[Dependency, ...],
         lockfile: Path | None,
     ) -> LocalPackage:
         return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)

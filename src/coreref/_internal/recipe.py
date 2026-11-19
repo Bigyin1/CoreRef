@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import shutil
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -28,12 +28,11 @@ _RECIPE_ENV = Environment(
 )
 _RECIPE_ENV.filters["pyrepr"] = repr
 _RECIPE_TEMPLATE = _RECIPE_ENV.get_template("conanfile.py.j2")
-_CONANDATA_TEMPLATE = _RECIPE_ENV.get_template("conandata.yml.j2")
 
 
-def _recipe_text(ref: Ref) -> str:
+def _recipe_text(ref: Ref, requirements: tuple[str, ...]) -> str:
     name, version = to_conan_reference(ref).split("/")
-    return _RECIPE_TEMPLATE.render(name=name, version=version)
+    return _RECIPE_TEMPLATE.render(name=name, version=version, requirements=requirements)
 
 
 class ConsumerRecipe:
@@ -58,10 +57,8 @@ class LocalRecipe:
     def write_for_resolution(self, directory: Path) -> None:
         """Resolve requirements without serializing unfinished local payload or artifacts."""
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "conanfile.py").write_text(_recipe_text(self.record.ref.without_revision()))
-        (directory / "conandata.yml").write_text(
-            _CONANDATA_TEMPLATE.render(requirements=self.requirements)
-        )
+        recipe = _recipe_text(self.record.ref.without_revision(), self.requirements)
+        (directory / "conanfile.py").write_text(recipe)
 
     def write(self, directory: Path) -> None:
         self.write_for_resolution(directory)
@@ -131,7 +128,6 @@ class StoredRecipe:
             self.is_editable = native is not None
             data = (native.conan_data or {}) if native is not None else self._read_data()
             self.data = data
-            self.requirements = tuple(cast(Iterable[str], data.get("requires", ())))
             self.record = self._read_record(
                 expected, has_source=bool(data.get("scm")) or self.is_editable
             )
@@ -224,7 +220,10 @@ class StoredRecipe:
         return files
 
     def _read_data(self) -> Mapping[str, object]:
-        data = yaml.safe_load((self.directory / "conandata.yml").read_text())
+        try:
+            data = yaml.safe_load((self.directory / "conandata.yml").read_text())
+        except FileNotFoundError:
+            return {}
         if not isinstance(data, Mapping):
             raise ValueError("Conan data must be a YAML mapping")
         return cast(Mapping[str, object], data)

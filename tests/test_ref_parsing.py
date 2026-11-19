@@ -12,7 +12,13 @@ from coreref.api.records import Ref
 
 
 @pytest.mark.parametrize(
-    "value", ["soc.cpu.rtl.default/1.0", "soc.cpu_core.alu_cluster.be.lib-lef/2.0#abc123"]
+    "value",
+    [
+        "soc.cpu.rtl.default/1.0",
+        "soc.cpu_core.be.lib-lef/2.0#abc123",
+        "shared.stdlib/1.0",
+        "pdk.techlib-n5/2.0#abc123",
+    ],
 )
 def test_parse_round_trip_without_conan_calls(value: str) -> None:
     with patch("coreref._internal.client.ConanAPI", side_effect=AssertionError("Conan")):
@@ -27,6 +33,8 @@ def test_parse_round_trip_without_conan_calls(value: str) -> None:
     [
         "",
         "soc.cpu.rtl/1.0",
+        "soc.cpu.alu.be.lib-lef/1.0",
+        "shared.stdlib/[>=1.0 <2.0]",
         "soc.cpu.rtl.default/1.0#",
         "soc.cpu.rtl.default/1.0#latest",
         "soc.cpu.rtl.default/1.0#*",
