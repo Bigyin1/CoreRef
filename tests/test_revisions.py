@@ -57,11 +57,11 @@ def test_search_selects_latest_history_and_explicit_revision(catalog: Catalog) -
 
 def test_query_builds_revision_patterns_directly() -> None:
     query = SearchQuery(component="cpu")
-    assert query._conan_pattern() == "*.cpu*.*.*/*#latest"
-    assert query._conan_pattern(all_revisions=True) == "*.cpu*.*.*/*#*"
+    assert query._conan_pattern() == "*.cpu*/*#latest"
+    assert query._conan_pattern(all_revisions=True) == "*.cpu*/*#*"
     exact = SearchQuery(revision="a" * 32)
     assert exact._conan_pattern() == exact._conan_pattern(all_revisions=True)
-    assert exact._conan_pattern() == f"*.*.*.*/*#{'a' * 32}"
+    assert exact._conan_pattern() == f"*.*/*#{'a' * 32}"
     with pytest.raises(InvalidPackage, match="revision"):
         SearchQuery(revision="*")
 

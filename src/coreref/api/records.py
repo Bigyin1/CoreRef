@@ -25,23 +25,26 @@ class JSONSerializable(Protocol):
 class Ref:
     """Package coordinates independent of any client, cache or registry."""
 
+    _view: str | None
+    _type: str | None
+
     def __init__(self, reference: str) -> None:
-        from .._internal.references import to_conan_reference
+        from .._internal.references import parse_package_name, to_conan_reference
         from .errors import InvalidPackage
 
         try:
-            name, self._version = reference.split("#", 1)[0].split("/")
-            self._namespace, self._component, *parts, self._view, self._type = name.split(".")
-            if len(parts) > 1:
-                raise ValueError("Expected four or five name fields")
-            self._subcomponent = parts[0] if parts else None
-            self._revision = reference.partition("#")[2] or None
+            logical, _, revision = reference.partition("#")
+            name, self._version = logical.split("/")
+            fields = parse_package_name(name)
+            self._namespace, self._component, *representation = fields
+            self._view, self._type = representation or (None, None)
+            self._package_name = name
+            self._revision = revision or None
             if to_conan_reference(self) != reference:
                 raise ValueError("Noncanonical coordinates")
         except (ValueError, InvalidPackage) as error:
             raise InvalidPackage(
-                "Expected namespace.component[.subcomponent].view.type/version[#revision], "
-                f"got {reference!r}"
+                f"Expected namespace.component[.view.type]/version[#revision], got {reference!r}"
             ) from error
 
     @classmethod
@@ -49,24 +52,27 @@ class Ref:
         cls,
         namespace: str,
         component: str,
-        view: str,
-        type: str,
-        version: str,
+        view: str | None = None,
+        type: str | None = None,
+        version: str | None = None,
         *,
-        subcomponent: str | None = None,
         revision: str | None = None,
     ) -> Ref:
         """Construct from separate coordinates using the same canonical text parser."""
         from .errors import InvalidPackage
 
-        reference = f"{namespace}.{component}"
-        if subcomponent is not None:
-            reference = f"{reference}.{subcomponent}"
-        reference = f"{reference}.{view}.{type}/{version}"
+        if version is None:
+            raise InvalidPackage("A reference requires a version")
+        if (view is None) != (type is None):
+            raise InvalidPackage("Specify both view and type or omit both")
+        name = f"{namespace}.{component}"
+        if view is not None:
+            name = f"{name}.{view}.{type}"
+        reference = f"{name}/{version}"
         if revision is not None:
             reference = f"{reference}#{revision}"
         ref = cls(reference)
-        if ref._identity != (namespace, component, view, type, version, subcomponent, revision):
+        if ref._identity != (namespace, component, view, type, version, revision):
             raise InvalidPackage("Reference separators must not occur within coordinate fields")
         return ref
 
@@ -79,11 +85,11 @@ class Ref:
         return self._component
 
     @property
-    def view(self) -> str:
+    def view(self) -> str | None:
         return self._view
 
     @property
-    def type(self) -> str:
+    def type(self) -> str | None:
         return self._type
 
     @property
@@ -91,22 +97,17 @@ class Ref:
         return self._version
 
     @property
-    def subcomponent(self) -> str | None:
-        return self._subcomponent
-
-    @property
     def revision(self) -> str | None:
         return self._revision
 
     @property
-    def _identity(self) -> tuple[str, str, str, str, str, str | None, str | None]:
+    def _identity(self) -> tuple[str, str, str | None, str | None, str, str | None]:
         return (
             self.namespace,
             self.component,
             self.view,
             self.type,
             self.version,
-            self.subcomponent,
             self.revision,
         )
 
@@ -123,11 +124,8 @@ class Ref:
 
     @property
     def package_name(self) -> str:
-        """The namespace, component and representation without a version."""
-        component = self.component
-        if self.subcomponent is not None:
-            component = f"{component}.{self.subcomponent}"
-        return f"{self.namespace}.{component}.{self.view}.{self.type}"
+        """The Conan recipe name without a version."""
+        return self._package_name
 
     def __str__(self) -> str:
         value = f"{self.package_name}/{self.version}"
@@ -139,17 +137,15 @@ class Ref:
         return (
             self.namespace,
             self.component,
-            self.subcomponent or "",
-            self.view,
-            self.type,
+            self.view or "",
+            self.type or "",
             self.version,
             self.revision or "",
         ) < (
             other.namespace,
             other.component,
-            other.subcomponent or "",
-            other.view,
-            other.type,
+            other.view or "",
+            other.type or "",
             other.version,
             other.revision or "",
         )
@@ -159,12 +155,10 @@ class Ref:
         coordinates = {
             "namespace": self.namespace,
             "component": self.component,
-            "view": self.view,
-            "type": self.type,
             "version": self.version,
         }
-        if self.subcomponent is not None:
-            coordinates["subcomponent"] = self.subcomponent
+        if self.view is not None and self.type is not None:
+            coordinates.update(view=self.view, type=self.type)
         if self.revision is not None:
             coordinates["revision"] = self.revision
         return coordinates
@@ -172,6 +166,37 @@ class Ref:
     def without_revision(self) -> Ref:
         """Return logical coordinates without a recipe revision."""
         return Ref(str(self).partition("#")[0])
+
+
+class Requirement:
+    """An unresolved dependency with a Conan version range."""
+
+    def __init__(self, reference: str) -> None:
+        from .._internal.references import parse_package_name, validate_version_range
+
+        name, _, version = reference.partition("/")
+        parse_package_name(name)
+        validate_version_range(version)
+        self._package_name = name
+        self._version = version
+
+    @property
+    def package_name(self) -> str:
+        return self._package_name
+
+    def __str__(self) -> str:
+        return f"{self.package_name}/{self._version}"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Requirement):
+            return NotImplemented
+        return str(self) == str(other)
+
+    def __hash__(self) -> int:
+        return hash(str(self))
+
+
+Dependency: TypeAlias = Ref | Requirement
 
 
 @dataclass
@@ -311,4 +336,13 @@ class InstalledRecord(Record):
         return value
 
 
-__all__ = ["JSON", "InstalledRecord", "JSONSerializable", "LocalRecord", "Record", "Ref"]
+__all__ = [
+    "JSON",
+    "Dependency",
+    "InstalledRecord",
+    "JSONSerializable",
+    "LocalRecord",
+    "Record",
+    "Ref",
+    "Requirement",
+]

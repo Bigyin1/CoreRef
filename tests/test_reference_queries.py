@@ -20,19 +20,19 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
     logical = Ref("soc.cpu.rtl.default/1.0")
     first = catalog.publish(LocalRecord(logical, {"generation": 1}))
     second = catalog.publish(LocalRecord(logical, {"generation": 2}))
-    part = catalog.publish(LocalRecord(Ref("soc.cpu.alu.be.lib-lef/1.0")))
+    library = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
     reader = Catalog(conan_server.configure(tmp_path / "reader"))
     with (
         patch.object(reader._client, "download_recipe", side_effect=AssertionError("Metadata")),
         patch.object(reader._client, "run", wraps=reader._client.run) as commands,
     ):
         refs = reader.search_refs(SearchQuery())
-        assert refs == (second.ref, part.ref)
+        assert refs == (library.ref, second.ref)
         assert [call.args[0] for call in commands.call_args_list] == ["list"]
         assert reader.search_refs(SearchQuery(), all_revisions=True) == tuple(
-            sorted((first.ref, second.ref, part.ref))
+            sorted((first.ref, second.ref, library.ref))
         )
-        assert reader.search_refs(SearchQuery(subcomponent=None)) == (second.ref,)
+        assert reader.search_refs(SearchQuery(view="rtl")) == (second.ref,)
         assert reader.search_refs(SearchQuery(revision=first.ref.revision)) == (first.ref,)
         assert reader.search_refs(SearchQuery(component="absent")) == ()
         commands.reset_mock()

@@ -7,7 +7,7 @@ from pathlib import Path
 from .._internal.recipe import LocalRecipe
 from .catalog import Catalog
 from .errors import InvalidPackage
-from .records import LocalRecord, Ref
+from .records import Dependency, LocalRecord, Ref
 
 
 class Workspace:
@@ -40,7 +40,7 @@ class Workspace:
         directory: str | Path,
         *,
         record: LocalRecord | None = None,
-        dependencies: tuple[Ref, ...] = (),
+        dependencies: tuple[Dependency, ...] = (),
     ) -> None:
         """Prepare a missing recipe from an optional record, then register the directory."""
         source = Path(directory).expanduser().resolve()

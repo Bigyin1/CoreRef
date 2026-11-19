@@ -13,14 +13,13 @@ from .records import LocalRecord, Record, Ref
 
 @dataclass(frozen=True)
 class SearchQuery:
-    """Exact filters; subcomponent="*" includes parts, None selects whole components."""
+    """Exact filters over standalone packages and component representations."""
 
     namespace: str | None = None
     component: str | None = None
     view: str | None = None
     type: str | None = None
     version: str | None = None
-    subcomponent: str | None = "*"
     revision: str | None = None
 
     @classmethod
@@ -37,7 +36,6 @@ class SearchQuery:
         return cls(
             namespace=ref.namespace,
             component=ref.component,
-            subcomponent=ref.subcomponent,
             view=view,
             type=type,
             version=version,
@@ -47,17 +45,24 @@ class SearchQuery:
     def __post_init__(self) -> None:
         patterns = {"version": VERSION, "revision": REVISION}
         for name, value in self._criteria().items():
-            if value is not None and not patterns.get(name, NAME_PART).fullmatch(value):
+            if not patterns.get(name, NAME_PART).fullmatch(value):
                 raise InvalidPackage(f"Invalid search field {name}: {value!r}")
 
     def _conan_pattern(self, *, all_revisions: bool = False) -> str:
         """Narrow the Conan search; matches_ref applies exact filters to the results."""
-        fields = (self.namespace, self._component_pattern, self.view, self.type)
-        name = ".".join(value if value is not None else "*" for value in fields)
+        name = self._name_pattern()
         revision = self.revision or ("*" if all_revisions else "latest")
         return f"{name}/{self.version if self.version is not None else '*'}#{revision}"
 
-    def _criteria(self) -> dict[str, str | None]:
+    def _name_pattern(self) -> str:
+        namespace = self.namespace or "*"
+        component = self.component or "*"
+        if self.view is not None or self.type is not None:
+            return f"{namespace}.{component}.{self.view or '*'}.{self.type or '*'}"
+        # A single pattern covers both name lengths. Exact fields are checked after listing.
+        return f"{namespace}.{component}*" if self.component else f"{namespace}.*"
+
+    def _criteria(self) -> dict[str, str]:
         """Return the specified exact filters."""
         values = {
             "namespace": self.namespace,
@@ -67,12 +72,7 @@ class SearchQuery:
             "version": self.version,
             "revision": self.revision,
         }
-        criteria: dict[str, str | None] = {
-            name: value for name, value in values.items() if value is not None
-        }
-        if self.subcomponent != "*":
-            criteria["subcomponent"] = self.subcomponent
-        return criteria
+        return {name: value for name, value in values.items() if value is not None}
 
     def matches(self, record: LocalRecord | Record) -> bool:
         """Match common fields without interpreting consumer JSON."""
@@ -81,16 +81,6 @@ class SearchQuery:
     def matches_ref(self, ref: Ref) -> bool:
         """Check logical coordinates before downloading a matching recipe."""
         return all(getattr(ref, name) == value for name, value in self._criteria().items())
-
-    @property
-    def _component_pattern(self) -> str:
-        if self.subcomponent is None:
-            return self.component or "*"
-        if self.subcomponent != "*":
-            return f"{self.component or '*'}.{self.subcomponent}"
-        if self.component is None:
-            return "*"
-        return f"{self.component}*"
 
 
 __all__ = ["SearchQuery"]

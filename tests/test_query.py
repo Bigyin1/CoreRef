@@ -112,12 +112,12 @@ def test_view_and_type_are_independent_identity_and_search_fields(catalog: Catal
 @pytest.mark.parametrize(
     "query, pattern",
     [
-        (SearchQuery(), "*.*.*.*/*#*"),
+        (SearchQuery(), "*.*/*#*"),
         (
             SearchQuery(namespace="soc", component="cpu", view="be", type="lib-lef"),
-            "soc.cpu*.be.lib-lef/*#*",
+            "soc.cpu.be.lib-lef/*#*",
         ),
-        (SearchQuery(version="1.0"), "*.*.*.*/1.0#*"),
+        (SearchQuery(version="1.0"), "*.*/1.0#*"),
     ],
 )
 def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str) -> None:
@@ -136,8 +136,6 @@ def test_pattern_preserves_exact_filters(query: SearchQuery, pattern: str) -> No
         ("type", "?"),
         ("version", "[>=1.0]"),
         ("version", "V1"),
-        ("subcomponent", ""),
-        ("subcomponent", "alu*"),
         ("revision", "*"),
     ],
 )

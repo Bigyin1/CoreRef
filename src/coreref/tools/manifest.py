@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from .._internal.recipe import LocalRecipe
 from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.graph import Graph
-from ..api.records import JSON, LocalRecord, Ref
+from ..api.records import JSON, Dependency, LocalRecord, Ref, Requirement
 
 if TYPE_CHECKING:
     from ..api.catalog import Catalog
@@ -53,9 +53,9 @@ class ManifestFile:
         )
         if self.record.ref.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
-        self._dependencies: list[Ref] = []
+        self._dependencies: list[Dependency] = []
         for value in data.dependencies:
-            ref = Ref(value)
+            ref = self._dependency(value)
             if any(current.package_name == ref.package_name for current in self._dependencies):
                 raise InvalidPackage("Duplicate package in dependencies")
             self.add(ref)
@@ -84,7 +84,7 @@ class ManifestFile:
         return self._file
 
     @property
-    def dependencies(self) -> tuple[Ref, ...]:
+    def dependencies(self) -> tuple[Dependency, ...]:
         return tuple(self._dependencies)
 
     @property
@@ -120,8 +120,15 @@ class ManifestFile:
         """Resolve current declarations afresh, then save their exact revision selection."""
         return self.resolve(catalog, update=True).create_lockfile(self.lockfile)
 
-    def add(self, ref: Ref) -> None:
-        """Add or replace one working requirement; changes are saved explicitly."""
+    @staticmethod
+    def _dependency(value: Dependency | str) -> Dependency:
+        if not isinstance(value, str):
+            return value
+        return Requirement(value) if value.partition("/")[2].startswith("[") else Ref(value)
+
+    def add(self, value: Dependency | str) -> None:
+        """Add or replace a dependency declaration; changes are saved explicitly."""
+        ref = self._dependency(value)
         if ref.package_name == self.record.ref.package_name:
             raise InvalidPackage("A package cannot depend on itself")
         for index, current in enumerate(self._dependencies):
@@ -130,10 +137,21 @@ class ManifestFile:
                 return
         self._dependencies.append(ref)
 
-    def remove(self, ref: Ref) -> None:
-        """Remove logical coordinates; an explicit revision must match the declaration."""
+    def remove(self, value: Dependency | str) -> None:
+        """Remove a matching range or logical Ref; an explicit revision must match."""
+        ref = self._dependency(value)
+        if isinstance(ref, Requirement):
+            if ref not in self._dependencies:
+                raise NotFound(f"Dependency is not declared: {ref}")
+            self._dependencies.remove(ref)
+            return
         selected = next(
-            (r for r in self._dependencies if r.without_revision() == ref.without_revision()), None
+            (
+                current
+                for current in self._dependencies
+                if isinstance(current, Ref) and current.without_revision() == ref.without_revision()
+            ),
+            None,
         )
         if selected is None:
             raise NotFound(f"Dependency is not declared: {ref}")

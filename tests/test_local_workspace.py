@@ -234,12 +234,12 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     assert not (directory / "manifest.yml").exists()
 
 
-def test_dotted_part_with_underscore_component_is_native_editable(
+def test_short_name_with_underscore_is_native_editable(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     directory = tmp_path / "cpu source"
     directory.mkdir()
-    ref = Ref("soc.cpu_core.alu.rtl.default/1.0")
+    ref = Ref("shared.std_lib/1.0")
     document = ManifestFile.create(ref, directory / "manifest.yml")
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)

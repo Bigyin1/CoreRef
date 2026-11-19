@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from ..api.errors import Conflict, InvalidPackage, NotFound
-from ..api.records import InstalledRecord, LocalRecord, Record, Ref
+from ..api.records import Dependency, InstalledRecord, LocalRecord, Record, Ref, Requirement
 from .graph import GraphData, ResolvedConanGraph
 from .recipe import ConsumerRecipe, LocalRecipe, StoredRecipe
 from .references import from_conan_reference, to_conan_reference
@@ -284,7 +284,7 @@ class LocalPackage:
         catalog: Catalog,
         record: LocalRecord,
         *,
-        dependencies: tuple[Ref, ...],
+        dependencies: tuple[Dependency, ...],
         lockfile: Path | None,
     ) -> None:
         self._catalog = catalog
@@ -302,7 +302,10 @@ class LocalPackage:
             update = (
                 self.lockfile is None
                 and self._client.remote is not None
-                and any(ref.revision is None for ref in self.dependencies)
+                and any(
+                    isinstance(dep, Requirement) or dep.revision is None
+                    for dep in self.dependencies
+                )
             )
             native = self._client.graph(directory, lockfile=self.lockfile, update=update)
             return ResolvedConanGraph(native)
@@ -330,25 +333,24 @@ class LocalPackage:
     def _prepare(self, record: LocalRecord) -> LocalRecord:
         if not isinstance(record, LocalRecord):
             raise InvalidPackage("Expected one LocalRecord")
+        to_conan_reference(record.ref)
         if record.ref.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
-        to_conan_reference(record.ref)
         if record.source is not None:
             record.source = record.source.expanduser().absolute()
         for name, path in record.files.items():
             record.files[name] = path.expanduser().absolute()
         return record
 
-    def _references(self, dependencies: tuple[Ref, ...]) -> tuple[Ref, ...]:
-        if any(not isinstance(ref, Ref) for ref in dependencies):
-            raise InvalidPackage("Dependencies must be Ref values")
-        refs = tuple(dependencies)
-        logical = tuple(ref.without_revision() for ref in refs)
-        if len(logical) != len(set(logical)):
+    def _references(self, dependencies: tuple[Dependency, ...]) -> tuple[Dependency, ...]:
+        if any(not isinstance(dep, (Ref, Requirement)) for dep in dependencies):
+            raise InvalidPackage("Dependencies must be Ref or Requirement values")
+        logical = {dep.without_revision() if isinstance(dep, Ref) else dep for dep in dependencies}
+        if len(logical) != len(dependencies):
             raise InvalidPackage("Duplicate dependency")
         if self.record.ref in logical:
             raise InvalidPackage("A package cannot depend on itself")
-        return refs
+        return tuple(dependencies)
 
     def _publication_record(self) -> LocalRecord:
         files: dict[str, Path] = {}

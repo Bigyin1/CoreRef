@@ -2,26 +2,26 @@
 
 ## Основная идея
 
-Каталог хранит пакеты, каждый из которых описывает одно представление аппаратного
-компонента: RTL, DFT-результат, BE LIB/LEF и другие. Основа API — `Ref`: его поля
-задают смысл пакета и позволяют найти другие представления того же компонента.
+Каталог хранит представления аппаратных компонентов, например RTL, DFT и BE LIB/LEF,
+а также самостоятельные пакеты, например библиотеки. Поля `Ref` задают адрес
+пакета и позволяют найти другие представления того же компонента.
 
 ```text
-namespace.component[.subcomponent].view.type/version[#revision]
+namespace.component.view.type/version[#revision]
+namespace.component/version[#revision]
 ```
 
 | Поле | Смысл | Пример |
 |---|---|---|
 | `namespace` | Пространство имён, обычно проект | `soc` |
-| `component` | Компонент внутри проекта | `cpu` |
-| `subcomponent` | Необязательная часть компонента | `alu` в `cpu.alu` |
+| `component` | Имя компонента или самостоятельного пакета | `cpu`, `stdlib` |
 | `view` | Представление компонента | `rtl`, `dft`, `be` |
 | `type` | Вариант внутри представления | `default`, `output`, `scan`, `lib-lef` |
-| `version` | Версия конкретного представления | `1.0` |
+| `version` | Версия пакета | `1.0` |
 | `revision` | Необязательная точная recipe revision Conan | Вычисляется по содержимому |
 
 Например, `soc.cpu.rtl.default/1.0` и `soc.cpu.be.lib-lef/4.0` относятся к одному
-компоненту, но имеют независимые версии. По namespace/component/subcomponent находят
+компоненту и имеют независимые версии. По namespace/component находят
 кандидатов нужного view/type. Соответствие конкретному RTL подтверждают зависимости
 с точной revision или метаданные приложения. Само совпадение полей не гарантирует совместимость.
 Значения view/type и смысл зависимостей определяет flow; специальных типов рёбер в SDK нет.
@@ -29,7 +29,7 @@ namespace.component[.subcomponent].view.type/version[#revision]
 ## Основные возможности
 
 - **Формат проекта.** Готовый `ManifestFile` читает рекомендуемый manifest.yml; приложение
-  может выбрать свой формат и создать `LocalRecord` и набор Ref. Файл может содержать часть зависимостей; остальные
+  может выбрать свой формат и создать `LocalRecord` и набор зависимостей. Файл может содержать часть зависимостей; остальные
   приложение добавляет по результатам поиска или других правил. Рецепты Conan SDK создаёт сам.
 - **Публикация и поиск.** Один пакет объединяет JSON payload, упакованные файлы и
   необязательные Git-исходники через SCM. Поиск работает по полям Ref; внешние пути,
@@ -63,20 +63,11 @@ classDiagram
 
 `Ref(reference)` — самостоятельные координаты без каталога и операций Conan.
 Один Ref можно передать любому Catalog; создание и сравнение Ref не выполняют I/O.
-Subcomponent — отдельный необязательный сегмент: `soc.cpu_core.alu.be.lib-lef/4.0`.
-Без него: `soc.cpu_core.be.lib-lef/4.0`. Подчёркивания и дефисы входят в значения
-полей; точка разделяет поля и внутри них запрещена. Старый разделитель `_` не
-интерпретируется: `cpu_alu` теперь целиком является component.
-
-Парсер принимает ровно четыре или пять сегментов имени; пять всегда означают
-наличие subcomponent. Пустые сегменты и более длинные имена отклоняются. Точки
-в version допустимы: версия отделена от имени знаком `/`, revision — знаком `#`.
-
-Для будущего расширения нельзя просто дописать позиционное поле после type:
-четыре исходных сегмента с одним новым полем совпали бы по форме с пятью текущими.
-Расширениям понадобится явная граница и именованные значения, например
-`namespace.component[.subcomponent].view.type..corner.tt/version`. Это направление
-развития формата, а не поддерживаемый сейчас синтаксис: такие ссылки пока отклоняются.
+В короткой форме `shared.stdlib/2.0` или `foundry.techlib-n5/3.2` свойства `view`
+и `type` равны `None`, а `to_dict()` не добавляет эти ключи. Полная форма всегда
+содержит оба поля. Имя состоит из двух или четырёх сегментов, разделённых точками.
+Подчёркивания и дефисы входят в сегменты. Версия отделена знаком `/`, revision — `#`.
+Старый формат с `subcomponent` требует нового адреса для такого пакета.
 
 | Класс | Основные операции |
 |---|---|
@@ -84,21 +75,31 @@ Subcomponent — отдельный необязательный сегмент:
 | `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
 | `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
 | `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
-| `Ref.from_fields(namespace, component, view, type, version, *, subcomponent=None, revision=None)` | Создание из отдельных координат |
+| `Ref.from_fields(namespace, component, view=None, type=None, version=None, *, revision=None)` | Создание из отдельных координат. `version` обязателен, для короткой формы передайте его по имени |
 | `catalog.info(ref)` | Метаданные `Record` |
 | `catalog.get(ref)` / `catalog.get_with_sources(ref)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
 | `Graph(catalog, ref, *, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
 
-`SearchQuery` задаёт точные AND-фильтры: `namespace`, `component`, `subcomponent`,
-`view`, `type`, `version`, `revision`. Значение `None` пропускает фильтр, кроме
-`subcomponent`: здесь `None` выбирает целый компонент, `"*"` (по умолчанию) включает его части.
-Остальные поля не принимают glob-шаблоны.
+`SearchQuery` задаёт точные фильтры `namespace`, `component`, `view`, `type`,
+`version` и `revision`. `None` пропускает фильтр. Поиск по namespace или component
+может вернуть пакеты обеих форм. Фильтр по `view` или `type` выбирает представления.
 `SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
-сохраняет namespace/component/subcomponent, а версию и revision выбирает независимо.
+сохраняет namespace и component, а версию и revision выбирает независимо.
 `matches_ref` и `matches` проверяют уже полученные ссылки и записи.
 Фильтры зависимостей задаются в Graph.
 
 `query` обязателен; поиск без ограничений — `catalog.search(SearchQuery())`.
+
+## Диапазоны версий
+
+`Requirement("shared.stdlib/[>=1.0 <2.0]")` задаёт диапазон Conan для зависимости.
+Его можно передать вместе с `Ref` в `dependencies` методов `Graph`, `Catalog.publish`
+и `Workspace.add`. Диапазон не содержит `#revision`. Корень и операции получения
+конкретного пакета используют `Ref` с версией.
+
+Conan выбирает версию и revision. `graph.requirements` содержит уже выбранные
+`Ref`. Проектный lockfile фиксирует выбор, а опубликованный CoreRef-рецепт
+записывает точные зависимости из графа.
 
 ## Ревизии
 
@@ -313,10 +314,12 @@ ref: soc.top.rtl.default/1.0
 dependencies:
   - soc.cpu.rtl.default/1.0
   - soc.gpio.rtl.default/2.0#exact-revision
+  - "shared.stdlib/[>=1.0 <2.0]"
+  - foundry.techlib-n5/3.2
 ```
 
-Обязателен только `ref` без собственной revision. `dependencies` — список полных Ref;
-revision зависимости необязательна. `files` и `payload` необязательны.
+Обязателен только `ref` с конкретной версией без собственной revision.
+`dependencies` принимает обычные Ref и диапазоны Conan в квадратных скобках. `files` и `payload` необязательны.
 Пути в `files` считаются от директории YAML и сопоставляют имя внутри пакета
 локальному файлу. Поля `source` в YAML нет. `manifest.record.source` по умолчанию указывает на директорию манифеста — корень проекта
 и Git-репозитория. Для обычного RTL-проекта задавать его вручную не требуется.
@@ -336,7 +339,7 @@ SafeLoader: при повторении ключа сохраняется пос
 | API ManifestFile | Результат |
 |---|---|
 | `create(ref, path="manifest.yml")` | Создать файл, отказавшись от перезаписи существующего |
-| `record`, `dependencies` | Одна изменяемая LocalRecord и текущие прямые Ref |
+| `record`, `dependencies` | Одна изменяемая LocalRecord и текущие прямые зависимости (`Ref` или `Requirement`) |
 | `add_to_workspace(workspace)` | Подготовить YAML-рецепт и зарегистрировать директорию |
 | `resolve(catalog, *, update=False)` | Разрешить зависимости с текущей рабочей записью и существующим lockfile |
 | `create_lockfile(catalog)` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
@@ -344,7 +347,8 @@ SafeLoader: при повторении ключа сохраняется пос
 | `path`, `lockfile` | Пути YAML и одноимённого `.lock`, например model.yaml → model.lock |
 
 `add` заменяет объявление того же имени пакета, включая его версию/revision.
-`remove` без revision удаляет объявление логических координат; явная revision должна совпасть.
+`remove` сравнивает логические координаты для Ref и полное объявление для диапазона.
+Если указан `#revision`, он тоже должен совпасть.
 Редактирование через `save` записывает канонический YAML: комментарии и оформление не сохраняются.
 Чтение, resolve и install исходный YAML не меняют. Save напрямую перезаписывает YAML
 стандартными средствами Python. Init не перезаписывает существующий файл;
@@ -356,6 +360,7 @@ SafeLoader: при повторении ключа сохраняется пос
 ```sh
 flow deps init soc.top.rtl.default/1.0
 flow deps add soc.cpu.rtl.default/1.0
+flow deps add 'shared.stdlib/[>=1.0 <2.0]'
 flow deps list
 flow deps lock
 flow deps install

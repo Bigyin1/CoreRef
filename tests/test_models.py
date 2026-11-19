@@ -131,8 +131,17 @@ def test_consumer_kinds(catalog: Catalog, kind: str) -> None:
     assert type(stored.ref.view) is str
 
 
-@pytest.mark.parametrize("field", ["namespace", "component", "view", "type", "version"])
-def test_coordinate_fields_are_required(field: str) -> None:
+@pytest.mark.parametrize(
+    ("field", "error"),
+    [
+        ("namespace", TypeError),
+        ("component", TypeError),
+        ("view", InvalidPackage),
+        ("type", InvalidPackage),
+        ("version", InvalidPackage),
+    ],
+)
+def test_missing_address_fields(field: str, error: type[Exception]) -> None:
     coordinates = {
         "namespace": "demo",
         "component": "core",
@@ -141,5 +150,5 @@ def test_coordinate_fields_are_required(field: str) -> None:
         "version": "1.0",
     }
     coordinates.pop(field)
-    with pytest.raises(TypeError):
+    with pytest.raises(error):
         Ref.from_fields(**coordinates)
