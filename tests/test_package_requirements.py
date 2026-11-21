@@ -24,13 +24,10 @@ def test_short_name_has_no_representation_fields() -> None:
         "revision": "abc123",
     }
     assert str(ref) == "shared.std_lib/2.0#abc123"
-    assert ref.view is None and ref.type is None
     assert ref.to_dict() == coordinates
     assert Ref.from_fields(**coordinates) == ref
     assert Record(ref).to_dict()["ref"] == coordinates
     assert json.loads(LocalRecord(ref).to_json())["ref"] == ref.without_revision().to_dict()
-    with pytest.raises(InvalidPackage, match="both view and type"):
-        Ref.from_fields("shared", "std_lib", view="rtl", version="2.0")
 
 
 @pytest.mark.parametrize("version", ["1.0", "[]", "[>]", "[>=1.0]#abc123", "[>=1.0/2.0]"])
@@ -115,7 +112,7 @@ def test_published_explicit_pin_keeps_its_revision(
 
 
 def test_dependency_cli_roundtrips_a_range_without_conan(tmp_path: Path) -> None:
-    project = ManifestFile.create(Ref("demo.soc.rtl.default/1.0"), tmp_path / "manifest.yml")
+    project = ManifestFile.create(Ref("demo.soc/1.0"), tmp_path / "manifest.yml")
     app = create_deps_app(catalog_factory=lambda: pytest.fail("Unexpected Conan client"))
     runner = CliRunner()
     value = "pdk.techlib-n5/[>=1.0 <2.0]"

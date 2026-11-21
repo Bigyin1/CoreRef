@@ -23,7 +23,7 @@ def other_catalog(tmp_path: Path) -> Iterator[Catalog]:
 def test_one_reference_can_be_used_with_distinct_catalogs(
     catalog: Catalog, other_catalog: Catalog
 ) -> None:
-    ref = Ref("soc.cpu.rtl.default/1.0")
+    ref = Ref("soc.cpu/1.0")
     first = catalog.publish(LocalRecord(ref, {"origin": "first"}))
     second = other_catalog.publish(LocalRecord(ref, {"origin": "second"}))
     assert catalog.info(ref).payload == {"origin": "first"}
@@ -36,8 +36,8 @@ def test_one_reference_can_be_used_with_distinct_catalogs(
 
 
 def test_graph_uses_the_explicit_catalog_for_all_nodes(catalog: Catalog) -> None:
-    leaf = catalog.publish(LocalRecord(Ref("soc.leaf.rtl.default/1.0")))
-    root = LocalRecord(Ref("soc.root.rtl.default/1.0"))
+    leaf = catalog.publish(LocalRecord(Ref("soc.leaf/1.0")))
+    root = LocalRecord(Ref("soc.root/1.0"))
     graph = Graph(catalog, root, dependencies=(leaf.ref,))
     assert graph.catalog is catalog
     assert graph.get()[0].ref == leaf.ref
@@ -46,10 +46,10 @@ def test_graph_uses_the_explicit_catalog_for_all_nodes(catalog: Catalog) -> None
 
 
 def test_reference_has_no_client_context_and_read_only_coordinates() -> None:
-    ref = Ref("soc.cpu.rtl.default/1.0#abc123")
+    ref = Ref("soc.cpu/1.0#abc123")
     assert not hasattr(ref, "_catalog") and not hasattr(ref, "catalog")
-    assert repr(ref) == "Ref('soc.cpu.rtl.default/1.0#abc123')"
-    assert ref.without_revision() == Ref("soc.cpu.rtl.default/1.0")
+    assert repr(ref) == "Ref('soc.cpu/1.0#abc123')"
+    assert ref.without_revision() == Ref("soc.cpu/1.0")
     assert Ref.from_fields(**ref.to_dict()) == ref
     with pytest.raises(AttributeError):
         ref.component = "changed"  # type: ignore[misc]

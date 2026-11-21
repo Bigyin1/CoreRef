@@ -140,9 +140,7 @@ def test_fixture_ref_coordinates_and_invalid_source_options(
     tmp_path: Path,
 ) -> None:
     env = Sandbox(conan_server, tmp_path, namespace="soc")
-    assert (
-        str(env.ref("cpu_core", "2.0", view="be", type="lib-lef")) == "soc.cpu_core.be.lib-lef/2.0"
-    )
+    assert str(env.ref("cpu_core", "2.0")) == "soc.cpu_core/2.0"
     with pytest.raises(ValueError, match="existing directory"):
         env.package(env.ref("cpu"), source=tmp_path, sources={})
     with pytest.raises(FileNotFoundError):

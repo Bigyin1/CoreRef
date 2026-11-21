@@ -23,9 +23,9 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(tmp_path: Path) -> Non
     path = tmp_path / "project/manifest.yml"
     path.parent.mkdir()
     path.write_text(
-        "ref: soc.top.rtl.default/1.0\n"
+        "ref: soc.top/1.0\n"
         "files: {spec.json: build/spec.json}\npayload: {sources: [top.sv]}\n"
-        "dependencies: [soc.cpu.rtl.default/1.0#old]\n"
+        "dependencies: [soc.cpu/1.0#old]\n"
     )
     document = ManifestFile(path)
     assert document.record.source == path.parent
@@ -34,21 +34,21 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(tmp_path: Path) -> Non
     assert isinstance(record.payload, dict)
     record.payload["sources"] = []
     assert document.record is record and document.record.payload == {"sources": []}
-    document.add(Ref("soc.cpu.rtl.default/2.0#new"))
-    document.add(Ref("soc.cpu.rtl.default/2.0#new"))
-    assert document.dependencies == (Ref("soc.cpu.rtl.default/2.0#new"),)
+    document.add(Ref("soc.cpu/2.0#new"))
+    document.add(Ref("soc.cpu/2.0#new"))
+    assert document.dependencies == (Ref("soc.cpu/2.0#new"),)
     assert "1.0#old" in path.read_text()
     document.save()
     restored = ManifestFile(path)
     assert restored.dependencies == document.dependencies
     assert restored.record.payload == document.record.payload
     with pytest.raises(Conflict):
-        restored.remove(Ref("soc.cpu.rtl.default/2.0#other"))
+        restored.remove(Ref("soc.cpu/2.0#other"))
     with pytest.raises(NotFound):
-        restored.remove(Ref("soc.unknown.rtl.default/1.0"))
+        restored.remove(Ref("soc.unknown/1.0"))
     with pytest.raises(InvalidPackage, match="itself"):
         restored.add(restored.record.ref)
-    restored.remove(Ref("soc.cpu.rtl.default/2.0"))
+    restored.remove(Ref("soc.cpu/2.0"))
     restored.save()
     assert ManifestFile(path).dependencies == ()
     assert restored.lockfile == path.parent / "manifest.lock"
@@ -61,18 +61,16 @@ def test_yaml_paths_payload_and_explicit_dependency_edits(tmp_path: Path) -> Non
         "[]",
         "ref: [",
         "ref: no-ref",
-        "ref: soc.top.rtl.default/1.0#fixed",
-        "ref: soc.top.rtl.default/1.0\nunknown: true",
-        "ref: soc.top.rtl.default/1.0\ndependencies: [42]",
-        "ref: soc.top.rtl.default/1.0\ndependencies: [broken]",
-        "ref: soc.top.rtl.default/1.0\nfiles: [file.bin]",
-        "ref: soc.top.rtl.default/1.0\npayload: {when: 2020-01-01}",
+        "ref: soc.top/1.0#fixed",
+        "ref: soc.top/1.0\nunknown: true",
+        "ref: soc.top/1.0\ndependencies: [42]",
+        "ref: soc.top/1.0\ndependencies: [broken]",
+        "ref: soc.top/1.0\nfiles: [file.bin]",
+        "ref: soc.top/1.0\npayload: {when: 2020-01-01}",
         "!!python/object/apply:builtins.print [unsafe]",
-        "ref: soc.top.rtl.default/1.0\n"
-        "dependencies: [soc.cpu.rtl.default/1.0, soc.cpu.rtl.default/1.0]",
-        "ref: soc.top.rtl.default/1.0\n"
-        "dependencies: [soc.cpu.rtl.default/1.0, soc.cpu.rtl.default/2.0]",
-        "ref: soc.top.rtl.default/1.0\ndependencies: [soc.top.rtl.default/1.0]",
+        "ref: soc.top/1.0\ndependencies: [soc.cpu/1.0, soc.cpu/1.0]",
+        "ref: soc.top/1.0\ndependencies: [soc.cpu/1.0, soc.cpu/2.0]",
+        "ref: soc.top/1.0\ndependencies: [soc.top/1.0]",
     ],
 )
 def test_invalid_yaml_is_rejected_without_remote_access(
@@ -89,7 +87,7 @@ def test_invalid_yaml_is_rejected_without_remote_access(
 
 
 def test_create_preserves_existing_files_and_supports_independent_manifests(tmp_path: Path) -> None:
-    ref = Ref("demo.block.analysis.model/1.0")
+    ref = Ref("demo.block--analysis--model/1.0")
     first = ManifestFile.create(ref, tmp_path / "config/model.yaml")
     second = ManifestFile.create(ref, tmp_path / "config/report.yml")
     assert first.record.source == first.path.parent
@@ -107,7 +105,7 @@ def test_create_preserves_existing_files_and_supports_independent_manifests(tmp_
 @pytest.fixture
 def scm_package(catalog: Catalog, checkout: Path, git_origin: Path) -> InstalledRecord:
     assert git_origin.is_dir()
-    return catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
+    return catalog.publish(LocalRecord(Ref("soc.cpu/1.0"), source=checkout))
 
 
 @pytest.mark.conan_remote
@@ -116,16 +114,12 @@ def test_full_tree_is_batched_and_lock_refresh_is_explicit(
 ) -> None:
     artifact = tmp_path / "leaf.bin"
     artifact.write_text("leaf bytes")
-    leaf = catalog.publish(
-        LocalRecord(Ref("soc.leaf.data.default/1.0"), files={"leaf.bin": artifact})
-    )
+    leaf = catalog.publish(LocalRecord(Ref("soc.leaf/1.0"), files={"leaf.bin": artifact}))
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0")),
+        LocalRecord(Ref("soc.parent/1.0")),
         dependencies=(scm_package.ref, leaf.ref),
     )
-    document = ManifestFile.create(
-        Ref("soc.top.rtl.default/1.0"), tmp_path / "project/manifest.yml"
-    )
+    document = ManifestFile.create(Ref("soc.top/1.0"), tmp_path / "project/manifest.yml")
     document.add(parent.ref.without_revision())
     document.save()
     document.create_lockfile(catalog)
@@ -150,10 +144,10 @@ def test_full_tree_is_batched_and_lock_refresh_is_explicit(
 
 @pytest.mark.conan_remote
 def test_failed_lock_refresh_preserves_previous_file(catalog: Catalog, tmp_path: Path) -> None:
-    document = ManifestFile.create(Ref("soc.top.rtl.default/1.0"), tmp_path / "manifest.yml")
+    document = ManifestFile.create(Ref("soc.top/1.0"), tmp_path / "manifest.yml")
     document.create_lockfile(catalog)
     original = document.lockfile.read_bytes()
-    document.add(Ref("soc.absent.rtl.default/1.0"))
+    document.add(Ref("soc.absent/1.0"))
     document.save()
     with pytest.raises(CatalogError):
         document.create_lockfile(catalog)
@@ -164,9 +158,7 @@ def test_failed_lock_refresh_preserves_previous_file(catalog: Catalog, tmp_path:
 def test_yaml_graph_uses_native_workspace_from_current_directory(
     catalog: Catalog, scm_package: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = ManifestFile.create(
-        Ref("soc.top.rtl.default/1.0"), tmp_path / "project/manifest.yml"
-    )
+    document = ManifestFile.create(Ref("soc.top/1.0"), tmp_path / "project/manifest.yml")
     document.add(scm_package.ref)
     document.save()
     source = Workspace(catalog, document.path.parent / "conanws.yml").open(scm_package.ref)
@@ -183,7 +175,7 @@ def test_invalid_extension_never_creates_or_overwrites_a_manifest(
     tmp_path: Path, name: str
 ) -> None:
     path = tmp_path / name
-    ref = Ref("soc.top.rtl.default/1.0")
+    ref = Ref("soc.top/1.0")
     with pytest.raises(InvalidPackage, match="extension"):
         ManifestFile.create(ref, path)
     assert not path.exists()
@@ -197,7 +189,7 @@ def test_invalid_extension_never_creates_or_overwrites_a_manifest(
 def test_lockfile_alias_to_manifest_is_rejected_before_conan(
     file_catalog: Catalog, tmp_path: Path, link: str
 ) -> None:
-    document = ManifestFile.create(Ref("soc.top.rtl.default/1.0"), tmp_path / "manifest.yml")
+    document = ManifestFile.create(Ref("soc.top/1.0"), tmp_path / "manifest.yml")
     original = document.path.read_bytes()
     path = document.lockfile
     if link == "symlink":
@@ -217,32 +209,28 @@ def test_lockfile_alias_to_manifest_is_rejected_before_conan(
 def test_yaml_duplicate_keys_use_standard_loader_behavior(tmp_path: Path) -> None:
     path = tmp_path / "manifest.yml"
     path.write_text(
-        "ref: soc.top.rtl.default/1.0\n"
-        "dependencies: [soc.first.rtl.default/1.0]\n"
-        "dependencies: [soc.second.rtl.default/1.0]\n"
+        "ref: soc.top/1.0\n"
+        "dependencies: [soc.first/1.0]\n"
+        "dependencies: [soc.second/1.0]\n"
         "payload: {value: 1, value: 2}\n"
     )
     document = ManifestFile(path)
-    assert document.dependencies == (Ref("soc.second.rtl.default/1.0"),)
+    assert document.dependencies == (Ref("soc.second/1.0"),)
     assert document.record.payload == {"value": 2}
 
 
 @pytest.mark.parametrize("source", [".", "rtl", "true", "null"])
 def test_source_is_not_a_manifest_field(tmp_path: Path, source: str) -> None:
     path = tmp_path / "manifest.yml"
-    path.write_text(f"ref: soc.cpu.rtl.default/1.0\nsource: {source}\n")
+    path.write_text(f"ref: soc.cpu/1.0\nsource: {source}\n")
     with pytest.raises(InvalidPackage, match="source"):
         ManifestFile(path)
 
 
-@pytest.mark.parametrize("view", ["rtl", "be"])
 def test_manifest_defaults_to_project_sources_with_an_explicit_scm_opt_out(
     tmp_path: Path,
-    view: str,
 ) -> None:
-    manifest = ManifestFile.create(
-        Ref(f"soc.cpu.{view}.default/1.0"), tmp_path / view / "manifest.yml"
-    )
+    manifest = ManifestFile.create(Ref("soc.cpu/1.0"), tmp_path / "manifest.yml")
     record = manifest.record
     assert record.source == manifest.path.parent
     record.source = None
@@ -256,7 +244,7 @@ def test_default_name_and_lockfile_are_manifest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    manifest = ManifestFile.create(Ref("soc.cpu.rtl.default/1.0"))
+    manifest = ManifestFile.create(Ref("soc.cpu/1.0"))
     assert manifest.path == tmp_path / "manifest.yml"
     assert manifest.lockfile == tmp_path / "manifest.lock"
     assert ManifestFile().record.ref == manifest.record.ref
@@ -268,9 +256,7 @@ def test_resolve_preserves_explicit_scm_in_snapshot_and_publication(
     catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path, *, update: bool
 ) -> None:
     assert git_origin.is_dir()
-    document = ManifestFile.create(
-        Ref("soc.top.rtl.default/1.0"), tmp_path / "project/manifest.yml"
-    )
+    document = ManifestFile.create(Ref("soc.top/1.0"), tmp_path / "project/manifest.yml")
     document.record.payload = {"generation": 1}
     document.save()
     document.create_lockfile(catalog)
@@ -300,8 +286,8 @@ def test_manifest_editing_and_record_creation_need_no_catalog(
         patch("coreref._internal.client.ConanAPI", side_effect=AssertionError("Conan initialized")),
         patch("requests.sessions.Session.send", side_effect=AssertionError("Network")),
     ):
-        manifest = ManifestFile.create(Ref("soc.top.rtl.default/1.0"), tmp_path / "manifest.yml")
-        manifest.add(Ref("soc.cpu.rtl.default/1.0"))
+        manifest = ManifestFile.create(Ref("soc.top/1.0"), tmp_path / "manifest.yml")
+        manifest.add(Ref("soc.cpu/1.0"))
         manifest.record.files = {"result": tmp_path / "build/result"}
         manifest.record.payload = {"nested": {"value": 1}}
         manifest.save()

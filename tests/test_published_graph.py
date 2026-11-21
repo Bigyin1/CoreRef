@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import networkx as nx
 import pytest
 
 from coreref._internal import recipe as recipe_module
@@ -17,28 +16,26 @@ from coreref.testing import LocalServer
 
 
 def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Catalog) -> None:
-    leaf = catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0")))
+    leaf = catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "1.0")))
     root = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
+        LocalRecord(Ref.from_fields("soc", "top", "1.0")),
         dependencies=(leaf.ref,),
     )
     graph = Graph(catalog, root.ref.without_revision())
     assert graph.record == root
     assert type(graph.record) is Record
     assert graph.requirements == (leaf.ref,)
-    assert tuple(sorted(graph.networkx.edges)) == ((root.ref, leaf.ref),)
+    assert tuple(sorted(graph.edges)) == ((root.ref, leaf.ref),)
     assert graph.ordered_refs(root.ref.without_revision()) == (leaf.ref, root.ref)
     assert graph.ordered_records(root.ref) == (leaf, root)
-    assert graph.networkx is graph.networkx
-    with pytest.raises(nx.NetworkXError):
-        graph.networkx.remove_node(root.ref)
+    assert graph.edges is graph.edges
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected Conan I/O")):
         assert graph.get((root.ref.without_revision(), leaf.ref)) == (root, leaf)
         assert graph.get_with_sources((root.ref,))[0] is graph.get((root.ref,))[0]
     with pytest.raises(InvalidPackage, match="requirements come from"):
         Graph(catalog, root.ref, dependencies=(leaf.ref,))
     with pytest.raises(NotFound):
-        Graph(catalog, Ref.from_fields("soc", "missing", "rtl", "default", "1.0"))
+        Graph(catalog, Ref.from_fields("soc", "missing", "1.0"))
 
 
 def test_published_tree_installs_root_and_dependencies_in_one_batch(
@@ -48,14 +45,14 @@ def test_published_tree_installs_root_and_dependencies_in_one_batch(
     artifact.write_text("data")
     leaf = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "leaf", "1.0"),
             source=checkout,
             files={"report": artifact},
         )
     )
     root = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "top", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "top", "1.0"),
             source=checkout,
             files={"report": artifact},
         ),
@@ -84,7 +81,7 @@ def test_published_graph_and_lock_keep_the_root_revision(catalog: Catalog, tmp_p
     artifact = tmp_path / "report"
     artifact.write_text("first")
     local = LocalRecord(
-        Ref.from_fields("soc", "top", "rtl", "default", "1.0"),
+        Ref.from_fields("soc", "top", "1.0"),
         files={"report": artifact},
     )
     first = catalog.publish(local)
@@ -108,7 +105,7 @@ def test_published_graph_and_lock_keep_the_root_revision(catalog: Catalog, tmp_p
 def test_template_changes_preserve_published_recipe_readability(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+    local = LocalRecord(Ref.from_fields("soc", "top", "1.0"))
     first = catalog.publish(local)
     render = recipe_module._recipe_text
 

@@ -54,9 +54,7 @@ def test_search(
 ) -> None:
     registry, dataset = search_registry
     size = len(dataset.records)
-    query = SearchQuery(
-        namespace=dataset.namespace, component="node000" if narrow else None, view="rtl"
-    )
+    query = SearchQuery(namespace=dataset.namespace, component="node000" if narrow else None)
     benchmark.extra_info.update(
         packages=size, matches=1 if narrow else size, metadata=metadata, cache="cold"
     )

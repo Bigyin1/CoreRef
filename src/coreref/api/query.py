@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from typing_extensions import Self
-
 from .._internal.references import NAME_PART, REVISION, VERSION
 from .errors import InvalidPackage
 from .records import LocalRecord, Record, Ref
@@ -13,34 +11,12 @@ from .records import LocalRecord, Record, Ref
 
 @dataclass(frozen=True)
 class SearchQuery:
-    """Exact filters over standalone packages and component representations."""
+    """Exact filters over package coordinates."""
 
     namespace: str | None = None
     component: str | None = None
-    view: str | None = None
-    type: str | None = None
     version: str | None = None
     revision: str | None = None
-
-    @classmethod
-    def for_component(
-        cls,
-        ref: Ref,
-        *,
-        view: str | None = None,
-        type: str | None = None,
-        version: str | None = None,
-        revision: str | None = None,
-    ) -> Self:
-        """Find representations of exactly this component, with independently selected versions."""
-        return cls(
-            namespace=ref.namespace,
-            component=ref.component,
-            view=view,
-            type=type,
-            version=version,
-            revision=revision,
-        )
 
     def __post_init__(self) -> None:
         patterns = {"version": VERSION, "revision": REVISION}
@@ -50,25 +26,15 @@ class SearchQuery:
 
     def _conan_pattern(self, *, all_revisions: bool = False) -> str:
         """Narrow the Conan search; matches_ref applies exact filters to the results."""
-        name = self._name_pattern()
+        name = f"{self.namespace or '*'}.{self.component or '*'}"
         revision = self.revision or ("*" if all_revisions else "latest")
-        return f"{name}/{self.version if self.version is not None else '*'}#{revision}"
-
-    def _name_pattern(self) -> str:
-        namespace = self.namespace or "*"
-        component = self.component or "*"
-        if self.view is not None or self.type is not None:
-            return f"{namespace}.{component}.{self.view or '*'}.{self.type or '*'}"
-        # A single pattern covers both name lengths. Exact fields are checked after listing.
-        return f"{namespace}.{component}*" if self.component else f"{namespace}.*"
+        return f"{name}/{self.version or '*'}#{revision}"
 
     def _criteria(self) -> dict[str, str]:
         """Return the specified exact filters."""
         values = {
             "namespace": self.namespace,
             "component": self.component,
-            "view": self.view,
-            "type": self.type,
             "version": self.version,
             "revision": self.revision,
         }

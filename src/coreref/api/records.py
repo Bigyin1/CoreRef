@@ -25,9 +25,6 @@ class JSONSerializable(Protocol):
 class Ref:
     """Package coordinates independent of any client, cache or registry."""
 
-    _view: str | None
-    _type: str | None
-
     def __init__(self, reference: str) -> None:
         from .._internal.references import parse_package_name, to_conan_reference
         from .errors import InvalidPackage
@@ -35,44 +32,32 @@ class Ref:
         try:
             logical, _, revision = reference.partition("#")
             name, self._version = logical.split("/")
-            fields = parse_package_name(name)
-            self._namespace, self._component, *representation = fields
-            self._view, self._type = representation or (None, None)
-            self._package_name = name
+            self._namespace, self._component = parse_package_name(name)
             self._revision = revision or None
             if to_conan_reference(self) != reference:
                 raise ValueError("Noncanonical coordinates")
         except (ValueError, InvalidPackage) as error:
             raise InvalidPackage(
-                f"Expected namespace.component[.view.type]/version[#revision], got {reference!r}"
+                f"Expected namespace.component/version[#revision], got {reference!r}"
             ) from error
 
     @classmethod
-    def from_fields(  # noqa: PLR0913, PLR0917 - One argument per coordinate.
+    def from_fields(
         cls,
         namespace: str,
         component: str,
-        view: str | None = None,
-        type: str | None = None,
-        version: str | None = None,
+        version: str,
         *,
         revision: str | None = None,
     ) -> Ref:
         """Construct from separate coordinates using the same canonical text parser."""
         from .errors import InvalidPackage
 
-        if version is None:
-            raise InvalidPackage("A reference requires a version")
-        if (view is None) != (type is None):
-            raise InvalidPackage("Specify both view and type or omit both")
-        name = f"{namespace}.{component}"
-        if view is not None:
-            name = f"{name}.{view}.{type}"
-        reference = f"{name}/{version}"
+        reference = f"{namespace}.{component}/{version}"
         if revision is not None:
             reference = f"{reference}#{revision}"
         ref = cls(reference)
-        if ref._identity != (namespace, component, view, type, version, revision):
+        if ref._identity != (namespace, component, version, revision):
             raise InvalidPackage("Reference separators must not occur within coordinate fields")
         return ref
 
@@ -85,14 +70,6 @@ class Ref:
         return self._component
 
     @property
-    def view(self) -> str | None:
-        return self._view
-
-    @property
-    def type(self) -> str | None:
-        return self._type
-
-    @property
     def version(self) -> str:
         return self._version
 
@@ -101,15 +78,8 @@ class Ref:
         return self._revision
 
     @property
-    def _identity(self) -> tuple[str, str, str | None, str | None, str, str | None]:
-        return (
-            self.namespace,
-            self.component,
-            self.view,
-            self.type,
-            self.version,
-            self.revision,
-        )
+    def _identity(self) -> tuple[str, str, str, str | None]:
+        return self.namespace, self.component, self.version, self.revision
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Ref):
@@ -125,7 +95,7 @@ class Ref:
     @property
     def package_name(self) -> str:
         """The Conan recipe name without a version."""
-        return self._package_name
+        return f"{self.namespace}.{self.component}"
 
     def __str__(self) -> str:
         value = f"{self.package_name}/{self.version}"
@@ -137,15 +107,11 @@ class Ref:
         return (
             self.namespace,
             self.component,
-            self.view or "",
-            self.type or "",
             self.version,
             self.revision or "",
         ) < (
             other.namespace,
             other.component,
-            other.view or "",
-            other.type or "",
             other.version,
             other.revision or "",
         )
@@ -157,8 +123,6 @@ class Ref:
             "component": self.component,
             "version": self.version,
         }
-        if self.view is not None and self.type is not None:
-            coordinates.update(view=self.view, type=self.type)
         if self.revision is not None:
             coordinates["revision"] = self.revision
         return coordinates

@@ -21,7 +21,7 @@ pytestmark = pytest.mark.conan_remote
 @pytest.fixture
 def rtl(catalog: Catalog, checkout: Path, git_origin: Path) -> InstalledRecord:
     assert git_origin.is_dir()
-    return catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
+    return catalog.publish(LocalRecord(Ref("soc.cpu/1.0"), source=checkout))
 
 
 def test_open_writes_only_recipe_and_preserves_work(
@@ -48,7 +48,7 @@ def test_open_keeps_declared_version_range_in_editable_recipe(
 ) -> None:
     catalog.publish(LocalRecord(Ref("shared.stdlib/1.2")))
     cpu = catalog.publish(
-        LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout),
+        LocalRecord(Ref("soc.cpu/1.0"), source=checkout),
         dependencies=(Requirement("shared.stdlib/[>=1 <2]"),),
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -96,7 +96,7 @@ def test_mixed_graph_batches_only_cached_packages_and_supports_filters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0"), source=checkout),
+        LocalRecord(Ref("soc.parent/1.0"), source=checkout),
         dependencies=(rtl.ref,),
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -122,7 +122,7 @@ def test_editable_artifact_paths_can_exist_only_after_local_build(
     artifact.write_text("published library")
     record = catalog.publish(
         LocalRecord(
-            Ref("soc.cpu.be.lib-lef/1.0"),
+            Ref("soc.cpu--be--lib-lef/1.0"),
             source=checkout,
             files={"timing/cpu.lib": artifact},
         )
@@ -147,16 +147,16 @@ def test_workspace_consumer_can_save_and_reuse_native_lockfile(
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
-    local = LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    local = LocalRecord(Ref("soc.top/1.0"))
     graph = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),))
     lock = graph.create_lockfile(tmp_path / "project.lock")
     locked = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),), lockfile=lock)
     assert locked.get_with_sources()[0].source == source
-    assert tuple(sorted(locked.networkx.edges)) == tuple(sorted(graph.networkx.edges))
+    assert tuple(sorted(locked.edges)) == tuple(sorted(graph.edges))
 
 
 def test_open_without_repository_source_is_rejected(catalog: Catalog, tmp_path: Path) -> None:
-    record = catalog.publish(LocalRecord(Ref("soc.meta.data.default/1.0")))
+    record = catalog.publish(LocalRecord(Ref("soc.meta/1.0")))
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     with pytest.raises(InvalidPackage, match="no repository source"):
         workspace.open(record.ref)
@@ -195,7 +195,7 @@ def test_a_cached_snapshot_does_not_silently_switch_to_new_editables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0"), source=checkout),
+        LocalRecord(Ref("soc.parent/1.0"), source=checkout),
         dependencies=(rtl.ref,),
     )
     snapshot = Graph(catalog, parent.ref)

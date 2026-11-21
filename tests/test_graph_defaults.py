@@ -15,25 +15,27 @@ from coreref.api.records import LocalRecord, Ref
 
 
 def test_transitive_filters_do_not_prune_intermediate_nodes(catalog: Catalog) -> None:
-    leaf = catalog.publish(LocalRecord(Ref("soc.z-leaf.rtl.default/1.0")))
+    leaf = catalog.publish(LocalRecord(Ref("soc.z-leaf/1.0")))
     middle = catalog.publish(
-        LocalRecord(Ref("soc.a-middle.be.netlist/1.0")),
+        LocalRecord(Ref("soc.a-middle--be--netlist/1.0")),
         dependencies=(leaf.ref,),
     )
-    local = LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    local = LocalRecord(Ref("soc.top/1.0"))
     graph = Graph(catalog, local, dependencies=(middle.ref, leaf.ref))
     newer = catalog.publish(LocalRecord(leaf.ref.without_revision(), {"generation": 2}))
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected I/O")):
         assert graph.dependencies() == (middle, leaf)
         assert graph.dependencies(transitive=True) == (leaf, middle)
-        assert graph.dependencies(transitive=True, filters=SearchQuery(view="rtl")) == (leaf,)
+        assert graph.dependencies(transitive=True, filters=SearchQuery(component="z-leaf")) == (
+            leaf,
+        )
         assert graph.dependencies(middle.ref.without_revision(), transitive=True) == (leaf,)
         assert graph.dependencies(leaf.ref.without_revision(), transitive=True) == ()
         assert graph.dependencies(transitive=True, filters=SearchQuery(component="absent")) == ()
         with pytest.raises(InvalidPackage, match="Revision"):
             graph.dependencies(newer.ref, transitive=True)
         with pytest.raises(InvalidPackage, match="Unknown"):
-            graph.dependencies(Ref("soc.absent.rtl.default/1.0"), transitive=True)
+            graph.dependencies(Ref("soc.absent/1.0"), transitive=True)
 
 
 @pytest.mark.parametrize("published", [False, True])
@@ -42,9 +44,9 @@ def test_default_retrieval_batches_the_tree_and_preserves_snapshot(
 ) -> None:
     artifact = tmp_path / "report"
     artifact.write_text("original")
-    leaf = catalog.publish(LocalRecord(Ref("soc.z-leaf.rtl.default/1.0"), source=checkout))
+    leaf = catalog.publish(LocalRecord(Ref("soc.z-leaf/1.0"), source=checkout))
     root = LocalRecord(
-        Ref("soc.a-root.rtl.default/1.0"),
+        Ref("soc.a-root/1.0"),
         source=checkout,
         files={"report": artifact},
     )
@@ -77,7 +79,7 @@ def test_default_get_leaves_sources_for_an_explicit_source_request(
     artifact = tmp_path / "report"
     artifact.write_text("data")
     local = LocalRecord(
-        Ref("soc.a-root.rtl.default/1.0"),
+        Ref("soc.a-root/1.0"),
         source=checkout,
         files={"report": artifact},
     )
@@ -95,7 +97,7 @@ def test_default_get_leaves_sources_for_an_explicit_source_request(
 
 
 def test_empty_local_graph_defaults_do_not_run_conan(catalog: Catalog) -> None:
-    graph = Graph(catalog, LocalRecord(Ref("soc.empty.rtl.default/1.0")))
+    graph = Graph(catalog, LocalRecord(Ref("soc.empty/1.0")))
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected I/O")):
         assert graph.dependencies(transitive=True) == ()
         assert graph.get() == graph.get_with_sources() == ()

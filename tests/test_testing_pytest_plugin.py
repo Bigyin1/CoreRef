@@ -58,7 +58,7 @@ import pytest
 def test_projects(case, coreref_environment, coreref_catalog):
     env = coreref_environment
     assert env.timeout == 0.2
-    assert str(env.ref("cpu")) == "demo.cpu.rtl.default/1.0"
+    assert str(env.ref("cpu")) == "demo.cpu/1.0"
     assert (env.projects / "stdlib/.git").exists()
     assert not (env.projects / "cpu/.git").exists()
     source = env.projects / "cpu/rtl/cpu.sv"
@@ -87,7 +87,7 @@ def test_failure(coreref_environment, coreref_catalog):
             "Server URL: *",
             "Server log: *server.log",
             "Conan home: *",
-            "Published: test.cpu.rtl.default/1.0#*",
+            "Published: test.cpu/1.0#*",
         ]
     )
 

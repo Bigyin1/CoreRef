@@ -22,8 +22,8 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
     catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path
 ) -> None:
     assert git_origin.is_dir()
-    leaf = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0")))
-    manifest = ManifestFile.create(Ref("soc.top.rtl.default/1.0"), checkout / "manifest.yml")
+    leaf = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
+    manifest = ManifestFile.create(Ref("soc.top/1.0"), checkout / "manifest.yml")
     manifest.add(leaf.ref)
     manifest.save()
     git_commit(checkout, push=True)
@@ -59,9 +59,9 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
 def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choices(
     catalog: Catalog, tmp_path: Path, prepared: bool
 ) -> None:
-    rtl = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0")))
-    macro = catalog.publish(LocalRecord(Ref("soc.cpu.be.lib-lef/1.0")), dependencies=(rtl.ref,))
-    manifest = ManifestFile.create(Ref("soc.top.be.result/1.0"), tmp_path / "manifest.yml")
+    rtl = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
+    macro = catalog.publish(LocalRecord(Ref("soc.cpu--be--lib-lef/1.0")), dependencies=(rtl.ref,))
+    manifest = ManifestFile.create(Ref("soc.top--be--result/1.0"), tmp_path / "manifest.yml")
     manifest.record.source = None  # Artifact-only result, without SCM.
     manifest.add(rtl.ref.without_revision())
     manifest.save()
@@ -90,14 +90,14 @@ def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choic
 def test_conflicting_extra_dependency_does_not_replace_the_existing_graph(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    rtl = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0")))
-    root = LocalRecord(Ref("soc.top.be.result/1.0"))
+    rtl = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
+    root = LocalRecord(Ref("soc.top--be--result/1.0"))
     graph = Graph(catalog, root, dependencies=(rtl.ref,))
     lock = graph.create_lockfile(tmp_path / "project.lock")
     original = lock.read_bytes()
     other_rtl = catalog.publish(LocalRecord(rtl.ref.without_revision(), {"generation": 2}))
     macro = catalog.publish(
-        LocalRecord(Ref("soc.cpu.be.lib-lef/1.0")), dependencies=(other_rtl.ref,)
+        LocalRecord(Ref("soc.cpu--be--lib-lef/1.0")), dependencies=(other_rtl.ref,)
     )
     with (
         patch.object(catalog._client, "export_package", side_effect=AssertionError("Export")),

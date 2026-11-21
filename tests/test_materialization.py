@@ -19,7 +19,7 @@ def test_files_are_available_on_fetch_and_source_is_optional(
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+        Ref.from_fields("soc", "cpu", "1.0"),
         payload={"lef": str(tmp_path / "mounted/cpu.lef")},
         source=checkout,
         files={"timing.lib": artifact},
@@ -47,7 +47,7 @@ def test_payload_only_record_does_not_install_a_binary(
     paths = {"lib": str(tmp_path / "not-mounted-yet/cpu.lib")}
     record = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"),
+            Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"),
             payload={"paths": paths},
         )
     )
@@ -68,7 +68,7 @@ def test_payload_only_record_does_not_install_a_binary(
 
 
 def test_published_record_is_not_a_local_publication_input(catalog: Catalog) -> None:
-    record = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    record = Record(Ref.from_fields("soc", "cpu", "1.0"))
     with pytest.raises(InvalidPackage, match="LocalRecord"):
         catalog.publish(record)  # type: ignore[arg-type]  # Deliberate contract misuse.
     assert catalog.search(SearchQuery()) == ()
@@ -76,7 +76,7 @@ def test_published_record_is_not_a_local_publication_input(catalog: Catalog) -> 
 
 def test_local_metadata_uses_names_and_record_decodes_package_paths(tmp_path: Path) -> None:
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+        Ref.from_fields("soc", "cpu", "1.0"),
         payload={"lef": str(tmp_path / "nfs/cpu.lef")},
         source=tmp_path / "working-tree",
         files={"timing/cpu.lib": tmp_path / "output.lib"},
@@ -97,7 +97,7 @@ def test_local_metadata_uses_names_and_record_decodes_package_paths(tmp_path: Pa
 def test_package_source_metadata_belongs_to_conan(tmp_path: Path, field: str) -> None:
     import json
 
-    local = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    local = LocalRecord(Ref.from_fields("soc", "cpu", "1.0"))
     value = json.loads(local.to_json())
     value[field] = "unexpected"
     LocalRecipe(local).write(tmp_path)

@@ -65,7 +65,7 @@ Workspace не импортирует tools и не читает манифес�
 готовит рецепт, читающий выбранный YAML; соответствующий CLI также находится в tools.
 Состояние workspace хранит Conan; дополнительных метаданных в checkout SDK не создаёт.
 Ref содержит только координаты; Catalog и Graph получают контекст операций явно.
-Имя содержит два сегмента `namespace.component` или четыре с `view.type`.
+Имя содержит два сегмента `namespace.component`.
 Зависимости могут задавать нативные диапазоны через `Requirement`.
 При публикации сохраняйте исходные объявления зависимостей, включая диапазоны.
 Точные выбранные версии и RREV доступны в Graph и проектном lockfile.
@@ -150,7 +150,7 @@ from coreref.testing import environment
 def test_flow(tmp_path, monkeypatch):
     with environment(tmp_path) as sandbox:
         cpu = sandbox.package(
-            Ref("soc.cpu.rtl.default/1.0"),
+            Ref("soc.cpu/1.0"),
             sources={"cpu.sv": "module cpu; endmodule\n"},
             files={"config.json": "{}"},
         )
@@ -163,9 +163,7 @@ def test_flow(tmp_path, monkeypatch):
         workspace = sandbox.workspace()
         workspace.add(cpu.source, record=cpu)
         monkeypatch.chdir(workspace.path.parent)
-        graph = Graph(
-            sandbox.catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(cpu.ref,)
-        )
+        graph = Graph(sandbox.catalog, LocalRecord(Ref("soc.top/1.0")), dependencies=(cpu.ref,))
         assert graph.get_with_sources()[0].is_editable
 ```
 
@@ -200,7 +198,7 @@ def test_package_graph(tmp_path):
         links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
         records = {
             name: sandbox.package(
-                Ref(f"soc.{name}.rtl.default/1.0"),
+                Ref(f"soc.{name}/1.0"),
                 sources={f"{name}.sv": f"module {name}; endmodule\n"},
             )
             for name in links
@@ -247,7 +245,7 @@ with environment(tmp_path / "infra", namespace="soc") as env:
 `Sandbox.publish(record, dependencies=(published.ref, ...), lockfile=...)`
 публикует одну запись; готовый локальный Graph также можно передать вместо record. В публикации набора значения
 `dependencies` могут смешивать короткие имена и уже опубликованные `Ref`.
-`ref(component, version="1.0", view="rtl", type="default")` использует namespace окружения.
+`ref(component, version="1.0")` использует namespace окружения.
 `project(..., dependencies=(...))` сразу записывает зависимости; параметр `path`
 позволяет выбрать собственное имя YAML и расположение проекта.
 
