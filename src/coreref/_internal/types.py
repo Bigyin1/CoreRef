@@ -84,6 +84,12 @@ class NativePackage(Protocol):
 
 class NativeNode(Protocol):
     @property
+    def package_id(self) -> str | None: ...
+
+    @property
+    def prev(self) -> str | None: ...
+
+    @property
     def recipe(self) -> str: ...
 
     @property
