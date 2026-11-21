@@ -57,6 +57,10 @@ class _Workspace(Protocol):
     def open(self, ref: str, remotes: list[_Remote], *, cwd: str, folder: str) -> str: ...
 
 
+class _Install(Protocol):
+    def install_sources(self, graph: NativeGraph, remotes: list[_Remote]) -> None: ...
+
+
 class _Config(Protocol):
     def get(self, name: str, default: str) -> str: ...
 
@@ -66,6 +70,7 @@ class _API(Protocol):
     remotes: _Remotes
     workspace: _Workspace
     config: _Config
+    install: _Install
 
     @property
     def home_folder(self) -> str: ...
@@ -373,6 +378,30 @@ class ConanClient:
             ),
         )
         return cast(NativeGraph, result["graph"])
+
+    def install_sources(self, graph: NativeGraph, references: frozenset[str]) -> None:
+        """Fetch SCM sources for selected nodes on the already resolved graph."""
+        configured = [
+            node.conanfile.conf
+            for node in graph.nodes
+            if node.ref is not None and node.ref.repr_notime() in references
+        ]
+        flag = "tools.build:download_source"
+        level = ConanOutput.get_output_level()
+        try:
+            ConanOutput.set_output_level(ConanOutput.valid_log_levels()["quiet"])
+            api = self._api()
+            remotes = api.remotes.list(self.remote) if self.remote is not None else []
+            for conf in configured:
+                conf.define(flag, True)
+            api.install.install_sources(graph, remotes)
+        except (ConanException, OSError) as error:
+            raise CatalogError("Could not retrieve package sources") from error
+        finally:
+            # Graph resolution explicitly sets this flag to False for every host package.
+            for conf in configured:
+                conf.define(flag, False)
+            ConanOutput.set_output_level(level)
 
     def install_project(self, directory: Path, sources: Mapping[str, bool]) -> NativeGraph:
         """Install one pinned consumer graph, enabling SCM only for selected packages."""

@@ -162,6 +162,7 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 | `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
 | `ordered_refs(root)`, `ordered_records(root)` | Узлы подграфа в топологическом порядке Conan, включая корень |
 | `get(refs=None, *, filters=None)`, `get_with_sources(refs=None, *, filters=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
+| `get_sources(refs)` | Получение SCM для выбранных ссылок без загрузки бинарных пакетов. Возвращает `dict[Ref, Path]` с точными `Ref`. Для пакетов без SCM записи пропускаются. |
 | `create_lockfile(path=None)`, `lockfile` | Сохранение выбора Conan и путь проектного lockfile |
 | `edges` | Неизменяемые пары Ref от потребителя к зависимости |
 

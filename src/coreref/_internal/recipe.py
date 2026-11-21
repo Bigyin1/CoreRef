@@ -201,12 +201,14 @@ class StoredRecipe:
                 },
             )
         files = self._installed_files(package)
-        source = None
-        if with_sources:
-            if package.folders.source_folder is None:
-                raise CatalogError("Package source directory is unavailable")
-            source = Path(package.folders.source_folder) / "source"
+        source = self.source_directory(package) if with_sources else None
         return InstalledRecord(self.record, source=source, files=files)
+
+    def source_directory(self, package: NativePackage) -> Path:
+        folder = package.folders.source_folder
+        if folder is None:
+            raise CatalogError(f"Source directory is unavailable for {self.record.ref}")
+        return Path(folder) / "source"
 
     def _installed_files(self, package: NativePackage) -> dict[str, Path]:
         if not self.record.file_names:

@@ -143,6 +143,10 @@ class Graph:
         """Fetch files and sources; omitted refs select registry/editable nodes, leaves first."""
         return self._get(refs, filters, with_sources=True)
 
+    def get_sources(self, refs: tuple[Ref, ...]) -> dict[Ref, Path]:
+        """Fetch Git sources only, keyed by exact refs. Omit packages without sources."""
+        return self._package.get_sources(refs)
+
     def _get(
         self, refs: tuple[Ref, ...] | None, filters: SearchQuery | None, *, with_sources: bool
     ) -> tuple[InstalledRecord, ...]:

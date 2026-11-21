@@ -169,6 +169,9 @@ class PackageGraph:
         ):
             raise InvalidPackage("Working package sources point into package storage")
         self._fetched.update((record.ref, record) for record in editables)
+        self._sources = {
+            record.ref: record.source for record in editables if record.source is not None
+        }
 
     def create_lockfile(self, path: str | Path) -> Path:
         output = Path(path).expanduser().resolve()
@@ -182,10 +185,31 @@ class PackageGraph:
     def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
         return self._get(refs, with_sources=True)
 
-    def _get(self, refs: tuple[Ref, ...], *, with_sources: bool) -> tuple[InstalledRecord, ...]:
+    def get_sources(self, refs: tuple[Ref, ...]) -> dict[Ref, Path]:
+        selected = self._select(refs)
+        missing = tuple(
+            ref
+            for ref in selected
+            if ref not in self._sources and self._packages[ref].recipe().has_source
+        )
+        if missing:
+            self._client.install_sources(self.graph.native, frozenset(map(str, missing)))
+            self._sources.update(
+                {
+                    ref: self._packages[ref].recipe().source_directory(self.graph.package(ref))
+                    for ref in missing
+                }
+            )
+        return {ref: self._sources[ref] for ref in selected if ref in self._sources}
+
+    def _select(self, refs: tuple[Ref, ...]) -> tuple[Ref, ...]:
         selected = tuple(dict.fromkeys(self.resolve_ref(ref) for ref in refs))
         if any(ref not in self._packages for ref in selected):
             raise InvalidPackage("Only published dependencies of this graph can be fetched")
+        return selected
+
+    def _get(self, refs: tuple[Ref, ...], *, with_sources: bool) -> tuple[InstalledRecord, ...]:
+        selected = self._select(refs)
         missing = tuple(
             ref for ref in selected if self._needs_fetch(ref, with_sources=with_sources)
         )
@@ -207,6 +231,9 @@ class PackageGraph:
                     for record in self._install(required, with_sources=with_sources)
                 )
             self._fetched.update(records)
+            self._sources.update(
+                (ref, record.source) for ref, record in records.items() if record.source is not None
+            )
         return tuple(self._fetched[ref] for ref in selected)
 
     @cached_property

@@ -14,6 +14,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage
 from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Record, Ref
+from coreref.testing import LocalServer
 
 
 def test_sources_and_files_are_fetched_once_without_project_lockfile(
@@ -69,6 +70,28 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
     assert "coreref-batch-" not in capsys.readouterr().err
     assert len(calls) == 1 and calls[0][0] == "install"
     assert not Path(calls[0][calls[0].index("--lockfile") + 1]).exists()
+
+
+def test_only_selected_git_sources_are_fetched_without_package_files(
+    catalog: Catalog, conan_server: LocalServer, checkout: Path, tmp_path: Path
+) -> None:
+    artifact = tmp_path / "large-netlist.v"
+    artifact.write_text("netlist")
+    leaf = catalog.publish(LocalRecord(Ref("soc.leaf/1.0"), source=checkout))
+    parent = catalog.publish(
+        LocalRecord(Ref("soc.parent/1.0"), source=checkout, files={artifact.name: artifact}),
+        dependencies=(leaf.ref,),
+    )
+    consumer = Catalog(conan_server.configure(tmp_path / "consumer", local_sources=True))
+    graph = Graph(consumer, LocalRecord(Ref("soc.top/1.0")), dependencies=(parent.ref,))
+
+    sources = graph.get_sources((parent.ref.without_revision(),))
+    assert tuple(sources) == (parent.ref,)
+    assert (sources[parent.ref] / "cpu.sv").is_file()
+    assert tuple(consumer.cache_directory.rglob("cpu.sv")) == (sources[parent.ref] / "cpu.sv",)
+    assert not tuple(consumer.cache_directory.rglob(artifact.name))
+    assert graph.get_sources((parent.ref, parent.ref)) == sources
+    assert graph.get((parent.ref,))[0].files[artifact.name].read_text() == "netlist"
 
 
 def test_metadata_only_selection_does_not_run_conan(
