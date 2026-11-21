@@ -57,7 +57,7 @@ def history(catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path) 
     report = tmp_path / "report"
     report.write_text("first")
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+        Ref.from_fields("soc", "cpu", "1.0"),
         {"generation": 1},
         source=checkout,
         files={"report": report},
@@ -73,10 +73,8 @@ def snapshot(
     request: pytest.FixtureRequest,
 ) -> Graph:
     reader = Catalog(conan_server.configure(tmp_path / "reader", local_sources=True))
-    meta = history.publisher.publish(
-        LocalRecord(Ref.from_fields("soc", "meta", "run", "default", "1.0"))
-    )
-    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+    meta = history.publisher.publish(LocalRecord(Ref.from_fields("soc", "meta", "1.0")))
+    root = LocalRecord(Ref.from_fields("soc", "top", "1.0"))
     requirements = (history.first.ref, meta.ref)
     if request.param == "local":
         return Graph(reader, root, dependencies=requirements)
@@ -164,7 +162,7 @@ def test_mixed_valid_and_invalid_batch_does_no_io_and_does_not_poison_retry(
 def test_retry_publication_after_upload_failure_keeps_the_original_lock_choice(
     history: SourceHistory, tmp_path: Path
 ) -> None:
-    local = LocalRecord(Ref.from_fields("soc", "result", "be", "lib-lef", "1.0"))
+    local = LocalRecord(Ref.from_fields("soc", "result", "1.0"))
     graph = Graph(history.publisher, local, dependencies=(history.first.ref.without_revision(),))
     lock = graph.create_lockfile(tmp_path / "result.lock")
     with (
@@ -191,20 +189,20 @@ def test_conflicting_diamond_revisions_do_not_damage_independent_snapshots(
     history: SourceHistory, reverse: bool
 ) -> None:
     left = history.publisher.publish(
-        LocalRecord(Ref.from_fields("soc", "left", "rtl", "default", "1.0")),
+        LocalRecord(Ref.from_fields("soc", "left", "1.0")),
         dependencies=(history.first.ref,),
     )
     existing = Graph(history.publisher, left.ref)
     second = history.advance()
     right = history.publisher.publish(
-        LocalRecord(Ref.from_fields("soc", "right", "rtl", "default", "1.0")),
+        LocalRecord(Ref.from_fields("soc", "right", "1.0")),
         dependencies=(second.ref,),
     )
     requirements = (right.ref, left.ref) if reverse else (left.ref, right.ref)
     with pytest.raises(Conflict):
         Graph(
             history.publisher,
-            LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
+            LocalRecord(Ref.from_fields("soc", "top", "1.0")),
             dependencies=requirements,
         )
     assert history.first.ref in {record.ref for record in existing.records}

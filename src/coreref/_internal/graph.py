@@ -33,6 +33,15 @@ class ResolvedConanGraph:
             for package in self.native.root.conanfile.dependencies.direct_host.values()
         )
 
+    def ordered_dependencies(self, root: Ref) -> tuple[str, ...]:
+        """Select the given package's dependencies in Conan's topological order."""
+        native_root = self.native.root.ref
+        if native_root is not None and native_root.name == root.package_name:
+            return self.references
+        dependencies = self.package(root).dependencies.host.values()
+        selected = {package.ref.repr_notime() for package in dependencies}
+        return tuple(reference for reference in self.references if reference in selected)
+
     def package_ref(self, ref: Ref) -> Ref:
         return Ref(self.package(ref).ref.repr_notime())
 

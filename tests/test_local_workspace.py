@@ -20,7 +20,7 @@ pytestmark = pytest.mark.conan_remote
 def local_package(directory: Path, name: str = "cpu") -> ManifestFile:
     directory.mkdir(parents=True)
     (directory / f"{name}.sv").write_text(f"module {name}; endmodule\n")
-    return ManifestFile.create(Ref(f"soc.{name}.rtl.default/1.0"), directory / "manifest.yml")
+    return ManifestFile.create(Ref(f"soc.{name}/1.0"), directory / "manifest.yml")
 
 
 def test_add_directory_needs_no_git_cache_or_remote(
@@ -97,13 +97,13 @@ def test_native_add_preserves_an_existing_user_recipe(catalog: Catalog, tmp_path
     recipe = directory / "conanfile.py"
     text = (
         "from conan import ConanFile\nclass Package(ConanFile):\n"
-        '    name = "soc.cpu.rtl.default"\n    version = "1.0"\n'
+        '    name = "soc.cpu"\n    version = "1.0"\n'
     )
     recipe.write_text(text)
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     workspace.add(directory)
     assert recipe.read_text() == text
-    assert workspace.members == {Ref("soc.cpu.rtl.default/1.0"): directory}
+    assert workspace.members == {Ref("soc.cpu/1.0"): directory}
 
 
 def test_editable_cannot_silently_return_cache_sources(
@@ -150,7 +150,7 @@ def test_local_consumer_gets_editable_dependencies_automatically(
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
-    root = LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    root = LocalRecord(Ref("soc.top/1.0"))
     graph = Graph(catalog, root, dependencies=(document.record.ref,))
     assert graph.get_with_sources()[0].source == document.path.parent
 
@@ -164,9 +164,9 @@ def test_core_add_uses_flow_data_without_reading_manifest_files(
     (directory / "manifest.yml").write_text("this is deliberately not valid: [")
     util = tmp_path / "util"
     util.mkdir()
-    dependency = LocalRecord(Ref("soc.util.rtl.default/1.0"), source=util)
+    dependency = LocalRecord(Ref("soc.util/1.0"), source=util)
     record = LocalRecord(
-        Ref("soc.cpu.rtl.default/1.0"),
+        Ref("soc.cpu/1.0"),
         payload={"format": "owned by the flow"},
         source=source,
         files={"result": directory / "build/result"},
@@ -205,7 +205,7 @@ def test_dependencies_without_record_do_not_initialize_workspace(
     catalog: Catalog, tmp_path: Path
 ) -> None:
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    dependency = Ref("soc.util.rtl.default/1.0")
+    dependency = Ref("soc.util/1.0")
     with pytest.raises(InvalidPackage, match="require a local record"):
         workspace.add(tmp_path, dependencies=(dependency,))
     assert not workspace.path.exists()
@@ -218,7 +218,7 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     source = directory / "rtl"
     source.mkdir(parents=True)
     document = ManifestFile.create(
-        Ref("soc.cpu.rtl.default/1.0"),
+        Ref("soc.cpu/1.0"),
         directory / "custom inputs.yaml",
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -245,7 +245,7 @@ def test_short_name_with_underscore_is_native_editable(
     document.add_to_workspace(workspace)
     assert workspace.members == {ref: directory}
     monkeypatch.chdir(workspace.path.parent)
-    graph = Graph(catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(ref,))
+    graph = Graph(catalog, LocalRecord(Ref("soc.top/1.0")), dependencies=(ref,))
     installed = graph.get_with_sources()[0]
     assert installed.ref == ref and installed.source == directory
     assert installed.is_editable

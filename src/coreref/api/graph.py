@@ -7,20 +7,13 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import networkx as nx
-
 from .errors import CatalogError, InvalidPackage
-from .query import SearchQuery
 from .records import Dependency, InstalledRecord, LocalRecord, Record, Ref
 
-# NetworkX generics are provided by stubs, not its runtime classes.
 if TYPE_CHECKING:
     from .._internal.package import LocalPackage
     from .catalog import Catalog
-
-    _RefGraph = nx.DiGraph[Ref]
-else:
-    _RefGraph = nx.DiGraph
+    from .query import SearchQuery
 
 
 @dataclass(init=False)
@@ -57,7 +50,7 @@ class Graph:
         self._requirements = tuple(
             target for source, target in self._dependencies if source == self._package.record.ref
         )
-        self._orders: dict[tuple[Ref, tuple[Ref, ...]], tuple[Ref, ...]] = {}
+        self._orders: dict[Ref, tuple[Ref, ...]] = {}
 
     @property
     def catalog(self) -> Catalog:
@@ -92,12 +85,11 @@ class Graph:
     ) -> tuple[Record, ...]:
         """Read dependencies without I/O; transitive results exclude the root, leaves first."""
         selected = self.record.ref if ref is None else self._package.resolve_ref(ref)
-        query = SearchQuery() if filters is None else filters
         records = []
         targets = self.ordered_refs(selected)[:-1] if transitive else self._neighbors[selected]
         for target in targets:
             record = self._index[target]
-            if isinstance(record, Record) and query.matches(record):
+            if isinstance(record, Record) and (filters is None or filters.matches(record)):
                 records.append(record)
         return tuple(records)
 
@@ -165,50 +157,23 @@ class Graph:
         return self._package.get_with_sources(refs) if with_sources else self._package.get(refs)
 
     @property
-    def networkx(self) -> _RefGraph:
-        """Expose the cached read-only topology; use .copy() for a working graph."""
+    def edges(self) -> tuple[tuple[Ref, Ref], ...]:
+        """Read direct edges selected by Conan, from consumer to dependency."""
         _ = self.record
-        return self._networkx
+        return self._dependencies
 
-    @cached_property
-    def _networkx(self) -> _RefGraph:
-        """Build topology once; use .copy() when a mutable working graph is needed."""
-        graph: nx.DiGraph[Ref] = nx.DiGraph()
-        graph.add_nodes_from(self._index)
-        graph.add_edges_from(self._dependencies)
-        nx.freeze(graph)
-        return graph
-
-    def ordered_refs(self, root: Ref, *, stop_at: tuple[Ref, ...] = ()) -> tuple[Ref, ...]:
-        """Order reachable dependencies first, treating stop_at references as leaves."""
+    def ordered_refs(self, root: Ref) -> tuple[Ref, ...]:
+        """Return reachable packages in Conan order, including the root."""
+        _ = self.record
         root = self._package.resolve_ref(root)
-        stops = tuple(self._package.resolve_ref(ref) for ref in stop_at)
-        key = (root, tuple(sorted(set(stops))))
-        if key not in self._orders:
-            self._orders[key] = self._order(root, key[1])
-        return self._orders[key]
+        if root not in self._orders:
+            references = self._package.graph.ordered_dependencies(root)
+            self._orders[root] = (*map(Ref, references), root)
+        return self._orders[root]
 
-    def ordered_records(
-        self, root: Ref, *, stop_at: tuple[Ref, ...] = ()
-    ) -> tuple[LocalRecord | Record, ...]:
+    def ordered_records(self, root: Ref) -> tuple[LocalRecord | Record, ...]:
         """Return records in the same dependency-first order as ordered_refs."""
-        return tuple(self.info(ref) for ref in self.ordered_refs(root, stop_at=stop_at))
-
-    def _order(self, root: Ref, stop_at: tuple[Ref, ...]) -> tuple[Ref, ...]:
-        if root not in self.networkx:
-            raise InvalidPackage("Unknown dependency graph root")
-        stops = frozenset(stop_at)
-        if root in stops or not stops.issubset(self.networkx):
-            raise InvalidPackage("Stop references must be dependencies of the root")
-        graph = nx.subgraph_view(
-            self.networkx, filter_edge=lambda source, _target: source not in stops
-        )
-        reachable = {root, *nx.descendants(graph, root)}
-        if not stops.issubset(reachable):
-            raise InvalidPackage("A stop reference is hidden or unreachable from the root")
-        return tuple(
-            nx.lexicographical_topological_sort(graph.subgraph(reachable).reverse(copy=False))
-        )
+        return tuple(self.info(ref) for ref in self.ordered_refs(root))
 
 
 __all__ = ["Graph"]

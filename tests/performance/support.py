@@ -27,7 +27,7 @@ class Dataset:
     edges: tuple[tuple[Ref, Ref], ...]
 
     def resolve(self, catalog: Catalog, *, lockfile: Path | None = None) -> Graph:
-        root = LocalRecord(Ref(f"{self.namespace}.local.rtl.default/1.0"))
+        root = LocalRecord(Ref(f"{self.namespace}.local/1.0"))
         return Graph(
             catalog,
             root,
@@ -40,7 +40,7 @@ class Dataset:
             record.ref for record in self.records
         }
         expected = {*self.edges, *((graph.record.ref, ref) for ref in self.roots)}
-        assert set(graph.networkx.edges) == expected
+        assert set(graph.edges) == expected
 
 
 class Registry:
@@ -92,7 +92,7 @@ class Registry:
     def _record(self, namespace: str, index: int, content: Content) -> LocalRecord:
         kind = ("files", "scm", "both")[index % 3] if content == "mixed" else content
         return LocalRecord(
-            Ref(f"{namespace}.node{index:03}.rtl.default/1.0"),
+            Ref(f"{namespace}.node{index:03}/1.0"),
             payload={"index": index},
             source=self.source if kind in {"scm", "both"} else None,
             files={"result.bin": self.artifact} if kind in {"files", "both"} else {},

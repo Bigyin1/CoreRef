@@ -17,13 +17,11 @@ from tests.helpers import local_record
 def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    first = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
-    )
+    first = catalog.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
     second = catalog.publish(
         local_record(Record(Ref.from_fields(**(first.ref.to_dict() | {"version": "2.0"}))))
     )
-    root = Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+    root = Record(Ref.from_fields("soc", "top", "1.0"))
     left = Graph(catalog, local_record(root), dependencies=(first.ref,))
     right = Graph(
         catalog,
@@ -51,7 +49,7 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
 def test_graph_lockfile_requires_a_path(catalog: Catalog) -> None:
     graph = Graph(
         catalog,
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))),
+        local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))),
     )
     with pytest.raises(CatalogError, match="lockfile path"):
         graph.create_lockfile()
@@ -62,7 +60,7 @@ def test_failed_lock_creation_preserves_previous_scope(catalog: Catalog, tmp_pat
     parent.mkdir()
     graph = Graph(
         catalog,
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))),
+        local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))),
     )
     original = graph.create_lockfile(parent / "conan.lock")
     blocked = tmp_path / "blocked"
@@ -82,12 +80,10 @@ def test_legacy_coordinate_names_are_rejected() -> None:
 def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
     catalog: Catalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    dependency = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0")))
-    )
-    local = local_record(Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0")))
+    dependency = catalog.publish(local_record(Record(Ref.from_fields("soc", "leaf", "1.0"))))
+    local = local_record(Record(Ref.from_fields("soc", "top", "1.0")))
     graph = Graph(catalog, local, dependencies=(dependency.ref,))
-    records, topology = graph.records, graph.networkx
+    records, topology = graph.records, graph.edges
 
     def reject(*_arguments: str) -> object:
         raise AssertionError("Saving a resolved graph must not issue more Conan commands")
@@ -96,7 +92,7 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         patch.setattr(catalog._client, "run", reject)
         lockfile = graph.create_lockfile(tmp_path / "conan.lock")
         assert graph.create_lockfile() == lockfile
-    assert graph.records == records and graph.networkx is topology
+    assert graph.records == records and graph.edges is topology
     assert Graph(catalog, local, dependencies=(dependency.ref,), lockfile=lockfile) == graph
 
 
@@ -107,12 +103,12 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         "record",
         "records",
         "requirements",
-        "networkx",
+        "edges",
         "lockfile",
     ],
 )
 def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: str) -> None:
-    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+    local = LocalRecord(Ref.from_fields("soc", "top", "1.0"))
     graph = Graph(catalog, local)
     expected = graph.ordered_refs(local.ref)
     with pytest.raises(AttributeError):
@@ -124,7 +120,7 @@ def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: st
 def test_local_views_share_one_working_record_and_preserve_resolved_coordinates(
     catalog: Catalog,
 ) -> None:
-    local = LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    local = LocalRecord(Ref("soc.top/1.0"))
     graph = Graph(catalog, local)
     expected = graph.ordered_refs(local.ref)
     views = (
@@ -137,7 +133,7 @@ def test_local_views_share_one_working_record_and_preserve_resolved_coordinates(
     local.payload = {"changed": True}
     assert graph.record.payload == {"changed": True}
     assert graph.ordered_refs(local.ref) is expected
-    assert graph.networkx is graph.networkx
-    local.ref = Ref("soc.other.rtl.default/1.0")
+    assert graph.edges is graph.edges
+    local.ref = Ref("soc.other/1.0")
     with pytest.raises(InvalidPackage, match="coordinates changed"):
         catalog.publish(graph)

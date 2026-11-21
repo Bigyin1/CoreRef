@@ -12,16 +12,14 @@ from coreref.api.graph import Graph
 from tests.performance.support import Registry
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]
-Operation = Literal["networkx", "order", "pruned", "metadata"]
+Operation = Literal["edges", "order", "metadata"]
 
 
 def snapshot_operation(graph: Graph, operation: Operation) -> object:
-    if operation == "networkx":
-        return graph.networkx
+    if operation == "edges":
+        return graph.edges
     if operation == "order":
         return graph.ordered_refs(graph.record.ref)
-    if operation == "pruned":
-        return graph.ordered_refs(graph.record.ref, stop_at=(graph.requirements[-1],))
     return graph.dependencies(transitive=True)
 
 
@@ -40,7 +38,7 @@ def first_setup(
 
 
 @pytest.mark.parametrize("size", [8, 32])
-@pytest.mark.parametrize("operation", ["networkx", "order", "pruned", "metadata"])
+@pytest.mark.parametrize("operation", ["edges", "order", "metadata"])
 def test_first_snapshot_access(
     benchmark: BenchmarkFixture,
     registry: Registry,
@@ -57,7 +55,7 @@ def test_first_snapshot_access(
 
 @pytest.mark.benchmark(min_time=0.0001, max_time=0.2)
 @pytest.mark.parametrize("size", [8, 32])
-@pytest.mark.parametrize("operation", ["networkx", "order", "pruned", "metadata"])
+@pytest.mark.parametrize("operation", ["edges", "order", "metadata"])
 def test_repeated_snapshot_access(
     benchmark: BenchmarkFixture,
     registry: Registry,

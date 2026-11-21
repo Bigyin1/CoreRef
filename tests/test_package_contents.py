@@ -26,13 +26,13 @@ def test_metadata_operations_leave_artifacts_on_the_server(
     artifact.write_bytes(b"package data" * 10000)
     leaf = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0"),
+            Ref.from_fields("soc", "cpu--be--lib-lef", "1.0"),
             files={"cpu.lib": artifact},
         )
     )
     parent = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "parent", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "parent", "1.0"),
         ),
         dependencies=(leaf.ref,),
     )
@@ -48,7 +48,7 @@ def test_metadata_operations_leave_artifacts_on_the_server(
         assert Graph(reader, Ref.from_fields(**parent.ref.to_dict())).dependencies() == (metadata,)
         graph = Graph(
             reader,
-            LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
+            LocalRecord(Ref.from_fields("soc", "top", "1.0")),
             dependencies=(parent.ref,),
         )
         assert metadata in graph.records
@@ -72,7 +72,7 @@ def test_exported_metadata_has_digests_and_no_artifact_bytes(
 ) -> None:
     artifact = tmp_path / "artifact.bin"
     artifact.write_bytes(contents)
-    ref = Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0")
+    ref = Ref.from_fields("soc", "cpu--be--lib-lef", "1.0")
     first = catalog.publish(LocalRecord(ref, files={"result.bin": artifact}))
     folder = catalog._package(first.ref).recipe().directory
     value = json.loads((folder / "record.json").read_text())
@@ -95,7 +95,7 @@ def test_source_presence_and_source_readiness_are_distinct(
 ) -> None:
     record = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "cpu", "1.0"),
             source=checkout,
         )
     )
@@ -105,7 +105,7 @@ def test_source_presence_and_source_readiness_are_distinct(
     fetched = catalog.get_with_sources(record.ref)
     assert fetched.has_source and fetched.source is not None and fetched.sources_ready
     assert (fetched.source / "cpu.sv").is_file()
-    empty = catalog.publish(LocalRecord(Ref.from_fields("soc", "empty", "be", "lib-lef", "1.0")))
+    empty = catalog.publish(LocalRecord(Ref.from_fields("soc", "empty--be--lib-lef", "1.0")))
     assert not empty.has_source and empty.source is None and empty.sources_ready
     output = json.loads(json.dumps(fetched.to_dict()))
     assert output["source"] == str(fetched.source)
@@ -118,7 +118,7 @@ def test_missing_package_file_is_not_reported_as_installed(
     artifact.write_text("contents")
     record = catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0"),
+            Ref.from_fields("soc", "cpu--be--lib-lef", "1.0"),
             files={"file": artifact},
         )
     )
@@ -132,7 +132,7 @@ def test_missing_package_file_is_not_reported_as_installed(
     "attribute", ["ref", "payload", "file_names", "has_source", "files", "source"]
 )
 def test_metadata_and_installed_fields_are_read_only(attribute: str) -> None:
-    metadata = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"), {"value": [1]})
+    metadata = Record(Ref.from_fields("soc", "cpu", "1.0"), {"value": [1]})
     ready = InstalledRecord(metadata)
     if attribute in ("ref", "payload", "file_names", "has_source"):
         with pytest.raises(AttributeError):
@@ -143,7 +143,7 @@ def test_metadata_and_installed_fields_are_read_only(attribute: str) -> None:
 
 
 def test_installed_record_requires_the_declared_contents() -> None:
-    ref = Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0")
+    ref = Ref.from_fields("soc", "cpu--be--lib-lef", "1.0")
     with pytest.raises(ValueError, match="declared file names"):
         InstalledRecord(Record(ref, file_names=("missing",)))
     with pytest.raises(ValueError, match="no SCM source"):
@@ -152,7 +152,7 @@ def test_installed_record_requires_the_declared_contents() -> None:
 
 def test_installation_reuses_the_immutable_payload() -> None:
     payload = UserPayload({"nested": [1, 2]})
-    metadata = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"), payload)
+    metadata = Record(Ref.from_fields("soc", "cpu", "1.0"), payload)
     ready = InstalledRecord(metadata)
     assert payload.calls == 1
     assert ready.payload is metadata.payload
@@ -177,7 +177,7 @@ def test_incomplete_package_is_rejected_before_upload(
         with pytest.raises(InvalidPackage, match="missing a declared file"):
             catalog.publish(
                 LocalRecord(
-                    Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0"),
+                    Ref.from_fields("soc", "cpu--be--lib-lef", "1.0"),
                     files={"result": artifact},
                 )
             )

@@ -17,21 +17,19 @@ def test_materialize_uses_published_requirements_without_project_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked: bool, *, catalog: Catalog
 ) -> None:
     catalog = Catalog(catalog._client.home)
-    rtl = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
-    )
+    rtl = catalog.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     record = catalog.publish(
         local_record(
-            Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0")),
+            Record(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0")),
             files={"cpu.lib": artifact},
         ),
         dependencies=(rtl.ref,),
     )
     project = Graph(
         catalog,
-        local_record(Record(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))),
+        local_record(Record(Ref.from_fields("soc", "top", "1.0"))),
         dependencies=(record.ref,),
     )
     lock = project.create_lockfile(tmp_path / "conan.lock") if locked else None
@@ -61,11 +59,9 @@ def test_metadata_queries_do_not_resolve_dependency_graphs(
 ) -> None:
     connection = Catalog(catalog._client.home)
     catalog = connection
-    rtl = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
-    )
+    rtl = catalog.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
     macro = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"))),
+        local_record(Record(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"))),
         dependencies=(rtl.ref,),
     )
     run = connection._client.run

@@ -99,16 +99,9 @@ class Sandbox:
         paths = write_files(directory / "artifacts", files or {})
         return LocalRecord(ref, source=source, files=paths)
 
-    def ref(
-        self,
-        component: str,
-        version: str = "1.0",
-        *,
-        view: str = "rtl",
-        type: str = "default",
-    ) -> Ref:
+    def ref(self, component: str, version: str = "1.0") -> Ref:
         """Build fixture coordinates in this sandbox's namespace."""
-        return Ref.from_fields(self.namespace, component, view, type, version)
+        return Ref.from_fields(self.namespace, component, version)
 
     def publish(
         self,

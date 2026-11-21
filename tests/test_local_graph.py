@@ -20,7 +20,7 @@ def local_catalog(catalog: Catalog) -> Catalog:
 
 
 def record(name: str, version: str = "1.0") -> Record:
-    return Record(Ref.from_fields("soc", name, "rtl", "default", version))
+    return Record(Ref.from_fields("soc", name, version))
 
 
 def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalog) -> None:
@@ -33,7 +33,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     root = Record(record("top").ref, {"local": ["working-tree"]})
     graph = Graph(local_catalog, local_record(root), dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
-    assert set(graph.networkx.edges) == {
+    assert set(graph.edges) == {
         (root.ref, left.ref),
         (root.ref, right.ref),
         (left.ref, leaf.ref),
@@ -50,7 +50,7 @@ def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     root = record("top")
     graph = Graph(local_catalog, local_record(root))
     assert graph.records == (local_record(root),)
-    assert tuple(sorted(graph.networkx.edges)) == ()
+    assert tuple(sorted(graph.edges)) == ()
     assert local_catalog.search(SearchQuery()) == ()
 
 
@@ -63,7 +63,7 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     local = Record(root.ref, {"local": True})
     graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
-    assert tuple(sorted(graph.networkx.edges)) == ((root.ref.without_revision(), current.ref),)
+    assert tuple(sorted(graph.edges)) == ((root.ref.without_revision(), current.ref),)
     assert catalog.get(Ref.from_fields(**root.ref.to_dict())) == root
     assert Graph(catalog, Ref.from_fields(**root.ref.to_dict())).dependencies() == (old,)
 
@@ -145,7 +145,7 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(
     connection._client.run(
         "lock",
         "remove",
-        "--requires=soc.leaf.rtl.default/*",
+        "--requires=soc.leaf/*",
         "--lockfile",
         str(lockfile),
         "--lockfile-out",

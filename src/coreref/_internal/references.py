@@ -25,15 +25,15 @@ _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 
 
-def parse_package_name(name: str) -> list[str]:
-    fields = name.split(".")
-    if len(fields) not in (2, 4):
-        raise InvalidPackage("Expected two or four package name fields")
-    if name.startswith("-") or not all(NAME_PART.fullmatch(part) for part in fields):
-        raise InvalidPackage("Package name requires lowercase tokens separated by dots")
+def parse_package_name(name: str) -> tuple[str, str]:
+    namespace, _, component = name.partition(".")
+    if namespace.startswith("-") or not (
+        NAME_PART.fullmatch(namespace) and NAME_PART.fullmatch(component)
+    ):
+        raise InvalidPackage("Expected lowercase namespace.component")
     if len(name) > _MAX_NAME_LENGTH:
         raise InvalidPackage("Reference exceeds Conan name constraints")
-    return fields
+    return namespace, component
 
 
 def validate_version_range(version: str) -> None:

@@ -121,7 +121,7 @@ def test_full_install_budget(registry: Registry, *, sources: bool) -> None:
 def test_search_refs_reads_no_recipes(registry: Registry) -> None:
     dataset = registry.dataset("wide", 100)
     reader = registry.reader()
-    query = SearchQuery(namespace=dataset.namespace, view="rtl")
+    query = SearchQuery(namespace=dataset.namespace)
     with (
         patch.object(reader._client, "run", wraps=reader._client.run) as commands,
         recipe_reads() as reads,
@@ -141,11 +141,8 @@ def test_snapshot_queries_do_not_perform_io(registry: Registry) -> None:
         patch.object(Session, "send", side_effect=AssertionError("Network I/O")),
         patch.object(StoredRecipe, "__init__", side_effect=AssertionError("Recipe I/O")),
     ):
-        assert graph.networkx is graph.networkx
+        assert graph.edges is graph.edges
         order = graph.ordered_refs(graph.record.ref)
         assert graph.ordered_refs(graph.record.ref) is order
-        stops = (graph.requirements[-1],)
-        pruned = graph.ordered_refs(graph.record.ref, stop_at=stops)
-        assert graph.ordered_refs(graph.record.ref, stop_at=stops) is pruned
         assert len(graph.dependencies(transitive=True)) == 32
         assert all(graph.info(ref).ref == ref for ref in order)

@@ -2,35 +2,31 @@
 
 ## Основная идея
 
-Каталог хранит представления аппаратных компонентов, например RTL, DFT и BE LIB/LEF,
-а также самостоятельные пакеты, например библиотеки. Поля `Ref` задают адрес
-пакета и позволяют найти другие представления того же компонента.
+Каталог хранит версии аппаратных компонентов, библиотек и других входов flow.
+Один пакет компонента может содержать Git-исходники RTL, netlist и файлы физической
+реализации. Flow получает нужные данные из ревизии, выбранной для проекта.
 
 ```text
-namespace.component.view.type/version[#revision]
 namespace.component/version[#revision]
 ```
 
 | Поле | Смысл | Пример |
 |---|---|---|
 | `namespace` | Пространство имён, обычно проект | `soc` |
-| `component` | Имя компонента или самостоятельного пакета | `cpu`, `stdlib` |
-| `view` | Представление компонента | `rtl`, `dft`, `be` |
-| `type` | Вариант внутри представления | `default`, `output`, `scan`, `lib-lef` |
+| `component` | Имя компонента или библиотеки | `cpu`, `stdlib` |
 | `version` | Версия пакета | `1.0` |
 | `revision` | Необязательная точная recipe revision Conan | Вычисляется по содержимому |
 
-Например, `soc.cpu.rtl.default/1.0` и `soc.cpu.be.lib-lef/4.0` относятся к одному
-компоненту и имеют независимые версии. По namespace/component находят
-кандидатов нужного view/type. Соответствие конкретному RTL подтверждают зависимости
-с точной revision или метаданные приложения. Само совпадение полей не гарантирует совместимость.
-Значения view/type и смысл зависимостей определяет flow; специальных типов рёбер в SDK нет.
+Пакет `soc.cpu/1.0` может сначала содержать RTL, а в следующей ревизии также netlist,
+Liberty и LEF. При публикации flow объявляет фактический состав. Зависимый проект
+закрепляет нужную ревизию через lockfile. Вид компонента и смысл его файлов
+приложение может описать в метаданных пакета.
 
 ## Основные возможности
 
 - **Формат проекта.** Готовый `ManifestFile` читает рекомендуемый manifest.yml; приложение
-  может выбрать свой формат и создать `LocalRecord` и набор зависимостей. Файл может содержать часть зависимостей; остальные
-  приложение добавляет по результатам поиска или других правил. Рецепты Conan SDK создаёт сам.
+  может выбрать свой формат и создать `LocalRecord` и набор зависимостей. Свои
+  дополнительные входы flow может объявить программно. Рецепт для обычной публикации создаёт SDK.
 - **Публикация и поиск.** Один пакет объединяет JSON payload, упакованные файлы и
   необязательные Git-исходники через SCM. Поиск работает по полям Ref; внешние пути,
   например NFS, приложение может хранить в payload.
@@ -63,11 +59,10 @@ classDiagram
 
 `Ref(reference)` — самостоятельные координаты без каталога и операций Conan.
 Один Ref можно передать любому Catalog; создание и сравнение Ref не выполняют I/O.
-В короткой форме `shared.stdlib/2.0` или `foundry.techlib-n5/3.2` свойства `view`
-и `type` равны `None`, а `to_dict()` не добавляет эти ключи. Полная форма всегда
-содержит оба поля. Имя состоит из двух или четырёх сегментов, разделённых точками.
-Подчёркивания и дефисы входят в сегменты. Версия отделена знаком `/`, revision — `#`.
-Старый формат с `subcomponent` требует нового адреса для такого пакета.
+Имя состоит из двух сегментов `namespace.component`. В сегментах допустимы
+строчные латинские буквы, цифры, подчёркивания и дефисы. Версия отделена знаком
+`/`, revision — знаком `#`. Пакеты со старыми адресами нужно опубликовать под
+новым именем, а зависимости и lockfile обновить.
 
 | Класс | Основные операции |
 |---|---|
@@ -75,16 +70,13 @@ classDiagram
 | `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
 | `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
 | `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
-| `Ref.from_fields(namespace, component, view=None, type=None, version=None, *, revision=None)` | Создание из отдельных координат. `version` обязателен, для короткой формы передайте его по имени |
+| `Ref.from_fields(namespace, component, version, *, revision=None)` | Создание из отдельных координат |
 | `catalog.info(ref)` | Метаданные `Record` |
 | `catalog.get(ref)` / `catalog.get_with_sources(ref)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
 | `Graph(catalog, ref, *, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
 
-`SearchQuery` задаёт точные фильтры `namespace`, `component`, `view`, `type`,
-`version` и `revision`. `None` пропускает фильтр. Поиск по namespace или component
-может вернуть пакеты обеих форм. Фильтр по `view` или `type` выбирает представления.
-`SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
-сохраняет namespace и component, а версию и revision выбирает независимо.
+`SearchQuery` задаёт точные фильтры `namespace`, `component`, `version` и
+`revision`. Поле со значением `None` пропускается.
 `matches_ref` и `matches` проверяют уже полученные ссылки и записи.
 Фильтры зависимостей задаются в Graph.
 
@@ -103,8 +95,8 @@ classDiagram
 даже если CPU проверяли с 1.2. Выбор для конкретного запуска хранится в lockfile
 соответствующего проекта. SoC разрешает граф по рецептам пакетов и своему lockfile.
 
-`graph.requirements` содержит уже выбранные прямые `Ref`. Когда для результата синтеза
-важен конкретный LIB/LEF, передайте его `Ref` с revision в зависимости результата.
+`graph.requirements` содержит уже выбранные прямые `Ref`. Потребитель LIB/LEF
+получает файлы из выбранной ревизии зависимости.
 
 ## Ревизии
 
@@ -113,8 +105,8 @@ classDiagram
 
 | Ссылка | Значение |
 |---|---|
-| `soc.cpu.rtl.default/1.0` | Версия без закрепления revision; обычный способ задать зависимость |
-| `soc.cpu.rtl.default/1.0#<RREV>` | Конкретная revision этой версии; вместо `<RREV>` подставляется её хеш |
+| `soc.cpu/1.0` | Версия без закрепления revision; обычный способ задать зависимость |
+| `soc.cpu/1.0#<RREV>` | Конкретная revision этой версии; вместо `<RREV>` подставляется её хеш |
 
 При самостоятельном info/get незакреплённый Ref выбирает последнюю revision средствами
 Conan. Полученные из каталога Record и опубликованные узлы Graph содержат точные Ref.
@@ -159,7 +151,7 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 разрешает локальный `LocalRecord` или опубликованный `Ref` через явно переданный каталог.
 Публиковать локальный корень не требуется. Прямые зависимости опубликованного пакета
 доступны через `Graph(catalog, ref).dependencies()`.
-Связи снимка можно читать через `graph.networkx.edges`.
+Связи снимка можно читать через `graph.edges`.
 Стандартный manifest.yml читает ManifestFile; собственные форматы и дополнительные зависимости
 по-прежнему может определять приложение.
 
@@ -168,14 +160,14 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 | `record`, `records`, `requirements` | Корень, все метаданные и прямые Ref корня |
 | `info(ref)` | Метаданные выбранного узла без I/O |
 | `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
-| `ordered_refs(root, *, stop_at=())`, `ordered_records(...)` | Обход с корнем; у stop_at не обходятся зависимости, сами узлы включены |
+| `ordered_refs(root)`, `ordered_records(root)` | Узлы подграфа в топологическом порядке Conan, включая корень |
 | `get(refs=None, *, filters=None)`, `get_with_sources(refs=None, *, filters=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
 | `create_lockfile(path=None)`, `lockfile` | Сохранение выбора Conan и путь проектного lockfile |
-| `networkx` | Кэшируемая топология только для чтения; `.copy()` для изменений |
+| `edges` | Неизменяемые пары Ref от потребителя к зависимости |
 
 Без refs получение охватывает все опубликованные узлы, зависимости первыми;
 локальный корень исключён. Явный `()` означает пустую выборку.
-`filters=SearchQuery(view="rtl")` выбирает узлы снимка без предварительного списка Ref
+`filters=SearchQuery(namespace="shared")` выбирает узлы снимка без предварительного списка Ref
 и без дополнительного поиска на сервере.
 Полученные записи повторно используются в пределах Graph. Для всего дерева удобнее
 один вызов Graph, чем отдельный get для каждого Ref.
@@ -274,7 +266,7 @@ app.add_typer(create_workspace_app(), name="workspace")
 ```
 
 ```sh
-flow workspace open soc.cpu.rtl.default/1.0 --project-dir ./project
+flow workspace open soc.cpu/1.0 --project-dir ./project
 flow workspace add ../existing-cpu --project-dir ./project
 flow workspace list --project-dir ./project
 flow workspace remove ../existing-cpu --project-dir ./project
@@ -288,9 +280,9 @@ flow workspace remove ../existing-cpu --project-dir ./project
 подхватываются без повторной регистрации. Файл может называться произвольно. Например:
 
 ```yaml
-ref: soc.cpu.rtl.default/1.0
+ref: soc.cpu/1.0
 dependencies:
-  - soc.util.rtl.default/1.0
+  - soc.util/1.0
 ```
 
 `open --directory` задаёт точную директорию Git-копии. По умолчанию
@@ -331,13 +323,13 @@ Conan-рецептов по `PackageInput` с опциями и проектно
 `ManifestFile(path="manifest.yml")` — необязательный адаптер файла к LocalRecord и Graph.
 Чтение, редактирование, сохранение YAML и подготовка записей не требуют Catalog
 и не инициализируют Conan. Каталог передают явно только для разрешения графа и lockfile.
-Формат общий для разных представлений; конкретные flow могут полностью заменить его.
+Формат общий для разных компонентов; конкретные flow могут полностью заменить его.
 
 ```yaml
-ref: soc.top.rtl.default/1.0
+ref: soc.top/1.0
 dependencies:
-  - soc.cpu.rtl.default/1.0
-  - soc.gpio.rtl.default/2.0#exact-revision
+  - soc.cpu/1.0
+  - soc.gpio/2.0#exact-revision
   - "shared.stdlib/[>=1.0 <2.0]"
   - foundry.techlib-n5/3.2
 ```
@@ -386,8 +378,8 @@ SafeLoader: при повторении ключа сохраняется пос
 в CLI своего flow. Ниже `flow` — имя приложения, подключившего группу `deps`:
 
 ```sh
-flow deps init soc.top.rtl.default/1.0
-flow deps add soc.cpu.rtl.default/1.0
+flow deps init soc.top/1.0
+flow deps add soc.cpu/1.0
 flow deps add 'shared.stdlib/[>=1.0 <2.0]'
 flow deps list
 flow deps lock
@@ -423,5 +415,5 @@ SDK не удаляет рабочие директории при сбое: н�
 
 Неверные поля `SearchQuery` отклоняются при создании с `InvalidPackage`.
 Корректный запрос без совпадений возвращает пустой результат. Неизвестные Ref,
-несовпадающие revisions и некорректные `stop_at` в методах Graph также дают
+несовпадающие revisions в методах Graph также дают
 `InvalidPackage`, включая `ordered_refs()` и `ordered_records()`.
