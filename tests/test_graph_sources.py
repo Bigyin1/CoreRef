@@ -14,7 +14,7 @@ from coreref.api.errors import CatalogError, Conflict, InvalidPackage
 from coreref.api.packages.catalog import Catalog
 from coreref.api.packages.records import LocalRecord, Record, Ref
 from coreref.api.projects.graph import Graph
-from coreref.testing import LocalServer
+from coreref.testing import LocalServer, trace_operations
 
 
 def test_sources_and_files_are_fetched_once_without_project_lockfile(
@@ -319,3 +319,36 @@ def test_published_graph_does_not_fetch_scm_enabled_by_profile(
     graph = Graph(catalog, parent.ref)
     assert tuple(record.ref for record in graph.dependencies()) == (leaf.ref,)
     assert graph.get((leaf.ref,))[0].source is None
+
+
+def test_invalid_ref_in_mixed_batch_has_no_side_effects(
+    catalog: Catalog, conan_server: LocalServer, checkout: Path, tmp_path: Path
+) -> None:
+    artifact = tmp_path / "timing.lib"
+    artifact.write_text("timing model")
+    model = catalog.publish(LocalRecord(Ref("soc.timing/1.0"), files={"timing.lib": artifact})).ref
+    rtl = catalog.publish(LocalRecord(Ref("soc.rtl/1.0"), source=checkout)).ref
+    consumer = Catalog(conan_server.configure(tmp_path / "consumer"))
+    graph = Graph(consumer, LocalRecord(Ref("soc.top/1.0")), dependencies=(model, rtl))
+    wrong = Ref(f"{rtl.without_revision()}#different")
+
+    with trace_operations() as rejected:
+        with pytest.raises(InvalidPackage, match="Revision is not part"):
+            graph.get((model, wrong), with_sources=True)
+        with pytest.raises(InvalidPackage, match="Revision is not part"):
+            graph.get_sources((rtl, wrong))
+    assert not rejected.commands
+    assert rejected.package_downloads == rejected.source_clones == 0
+
+    with trace_operations() as fetched:
+        records = graph.get((rtl.without_revision(), model, rtl), with_sources=True)
+    assert tuple(record.ref for record in records) == (rtl, model)
+    assert records[0].source is not None and (records[0].source / "cpu.sv").is_file()
+    assert records[1].files["timing.lib"].read_text() == "timing model"
+    assert fetched.installs == fetched.source_clones == 1
+
+    with trace_operations() as cached:
+        assert graph.get((rtl, model), with_sources=True) == records
+        assert graph.get_sources((model, rtl)) == {rtl: records[0].source}
+    assert not cached.commands
+    assert cached.package_downloads == cached.source_clones == 0

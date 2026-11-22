@@ -3,6 +3,7 @@
 import json
 from importlib.metadata import version
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 from typer.testing import CliRunner
@@ -11,10 +12,10 @@ from coreref._internal.editor import ManifestFile
 from coreref._internal.snapshot import SliceInputs, Snapshot, clean_commit, committed_slice
 from coreref.api.build import Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
-from coreref.api.packages import Catalog, LocalRecord, PackageInput, Ref, Requirement
+from coreref.api.packages import Catalog, LocalRecord, PackageInput, Ref, Requirement, SearchQuery
 from coreref.api.projects import Manifest, Project
 from coreref.cli import create_deps_app
-from coreref.testing import git_repository
+from coreref.testing import git_commit, git_repository, git_upstream, trace_operations
 
 
 def test_manifest_read_and_edit_share_the_same_fields(tmp_path: Path) -> None:
@@ -178,3 +179,149 @@ def test_shared_tool_pins_check_exact_versions(tmp_path: Path) -> None:
     assert manifest.image("eda") is None
     with pytest.raises(ValueError, match="Declare"):
         manifest.command("missing")
+
+
+def test_publish_keeps_previous_revision_when_an_external_input_changes(
+    tmp_path: Path, catalog: Catalog
+) -> None:
+    directory = git_repository(
+        tmp_path / "project", {".gitignore": ".build/\n", "rtl.v": "module block; endmodule"}
+    )
+    git_upstream(directory, tmp_path / "upstream.git")
+    tuning = tmp_path / "tuning.cfg"
+    tuning.write_text("original")
+    change_during_build = False
+
+    class EmitProject(Project):
+        @property
+        def route(self) -> Route:
+            return Route([StageSpec(name="emit", outputs=("result.v",))])
+
+        def _stage(self, _spec: StageSpec) -> Stage:
+            return Stage(action=self._emit, files={"tuning": tuning}, always_run=True)
+
+        def _emit(self) -> None:
+            (self.build_dir / "result.v").write_text(tuning.read_text())
+            if change_during_build:
+                tuning.write_text("updated")
+
+    project = EmitProject(directory, Manifest(ref="demo.block/1.0"), catalog)
+    lockfile = project.lock()
+    git_commit(directory, {lockfile.name: lockfile.read_bytes()}, push=True)
+    first = project.publish("emit")
+
+    change_during_build = True
+    with trace_operations() as failed, pytest.raises(ValueError, match="inputs changed"):
+        project.publish("emit")
+    assert all(command[0] != "upload" for command in failed.commands)
+    assert catalog.info(project.record.ref).ref == first.ref
+
+    change_during_build = False
+    second = project.publish("emit")
+    assert second.ref != first.ref
+    assert project.outputs.get(first, ("result.v",))["result.v"].read_text() == "original"
+    assert project.outputs.get(second, ("result.v",))["result.v"].read_text() == "updated"
+
+
+def test_build_targets_share_prerequisites_and_leave_other_branches_idle(tmp_path: Path) -> None:
+    executed: list[str] = []
+
+    class BranchProject(Project):
+        @property
+        def route(self) -> Route:
+            return Route(
+                [
+                    StageSpec(name="rtl", outputs=("rtl.v",)),
+                    StageSpec(name="synth", needs=("rtl",), outputs=("netlist.v",)),
+                    StageSpec(name="simulate", needs=("rtl",), outputs=("trace.vcd",)),
+                    StageSpec(name="route", needs=("synth",), outputs=("routed.odb",)),
+                ]
+            )
+
+        def _stage(self, spec: StageSpec) -> Stage:
+            def emit() -> None:
+                executed.append(spec.name)
+                for name in spec.outputs:
+                    (self.build_dir / name).write_text(spec.name)
+
+            return Stage(action=emit)
+
+    project = BranchProject(tmp_path, Manifest(ref="demo.block/1.0"), Catalog(tmp_path / "home"))
+    with pytest.raises(ValueError, match="Select at least one"):
+        project.build(())
+    with pytest.raises(ValueError, match="Unknown stage"):
+        project.build(("synth", "unknown"))
+    assert not executed
+
+    artifacts = project.build(("synth", "simulate", "synth"))
+    assert artifacts.keys() == {"rtl.v", "netlist.v", "trace.vcd"}
+    assert executed[0] == "rtl"
+    assert sorted(executed) == ["rtl", "simulate", "synth"]
+
+    assert project.build(("simulate", "synth")) == artifacts
+    assert executed[0] == "rtl"
+    assert sorted(executed) == ["rtl", "simulate", "synth"]
+    assert not (project.build_dir / "routed.odb").exists()
+
+
+class ProducerProject(Project):
+    _producer_handler = "example.flow:run"
+    _output_groups = MappingProxyType({"synth": ("netlist.v",), "layout": ("layout.lef",)})
+
+    @property
+    def route(self) -> Route:
+        return Route(
+            [
+                StageSpec(name="rtl", outputs=("rtl.v",)),
+                StageSpec(name="synth", needs=("rtl",), outputs=("netlist.v",)),
+                StageSpec(name="layout", needs=("synth",), outputs=("layout.lef",)),
+            ]
+        )
+
+    def _stage(self, spec: StageSpec) -> Stage:
+        def emit() -> None:
+            if spec.name != "rtl":
+                pytest.fail(f"Publication of RTL must not run {spec.name}")
+            (self.build_dir / "rtl.v").write_text("module block; endmodule")
+
+        return Stage(action=emit, files=self._producer_files())
+
+    def _stage_ready(self, spec: StageSpec, *, for_recipe: bool) -> bool:
+        if for_recipe:
+            return all(path.is_file() for path in self._producer_files().values())
+        return super()._stage_ready(spec, for_recipe=False)
+
+    def _producer_members(self) -> dict[str, tuple[str, ...]]:
+        return {"synth": ("synth",), "layout": ("layout",)}
+
+
+def test_publish_rtl_registers_ready_recipe_groups_without_building_them(
+    tmp_path: Path, catalog: Catalog
+) -> None:
+    directory = git_repository(
+        tmp_path / "project",
+        {
+            ".gitignore": ".build/\n",
+            ".python-version": "3.13.14\n",
+            "pyproject.toml": '[project]\nname = "producer-fixture"\n',
+            "uv.lock": (
+                'version = 1\n[[package]]\nname = "producer-fixture"\nsource = {virtual = "."}\n'
+            ),
+        },
+    )
+    git_upstream(directory, tmp_path / "upstream.git")
+
+    project = ProducerProject(directory, Manifest(ref="demo.block/1.0"), catalog)
+    lockfile = project.lock()
+    git_commit(directory, {lockfile.name: lockfile.read_bytes()}, push=True)
+
+    with trace_operations() as operations:
+        release = project.publish("rtl", with_producers=True)
+
+    assert not operations.installs
+    assert set(project.outputs.links(release) or ()) == {"rtl.v", "lockfile"}
+    assert project.outputs.available(release, producer_only=True) == {"netlist.v", "layout.lef"}
+    refs = catalog.search_refs(SearchQuery(namespace="coreref-producer"))
+    assert len(refs) == 3
+    assert len([ref for ref in refs if ref.component.startswith("uv-runtime-")]) == 1
+    assert all(ref.revision is not None for ref in refs)

@@ -167,3 +167,29 @@ def test_index_rejects_inconsistent_and_corrupted_artifact(tmp_path: Path) -> No
     installed.files["data"].write_text("garbage")
     with pytest.raises(ValueError, match="Artifact verification failed"):
         store.get(original)
+
+
+def test_shared_cache_refuses_multiple_revisions_for_one_key(
+    catalog: Catalog, tmp_path: Path
+) -> None:
+    invocation = StageInvocation("synth", ("yosys",), f"tool@sha256:{'a' * 64}", "linux/amd64")
+    output = tmp_path / "netlist.v"
+
+    def build() -> None:
+        output.write_text("cached result")
+
+    StageCache(catalog, CacheMode.WRITE).run(
+        invocation, tmp_path, inputs=(), outputs=("netlist.v",), action=build
+    )
+    (entry,) = catalog.search_refs(SearchQuery(namespace="coreref-stage"))
+    catalog.publish(LocalRecord(entry.without_revision(), {"unexpected": "different revision"}))
+    output.write_text("working result")
+
+    def unexpected_build() -> None:
+        pytest.fail("Conflicting cache entries must stop the operation")
+
+    with pytest.raises(ValueError, match="Conflicting shared cache entries"):
+        StageCache(catalog, CacheMode.READ).run(
+            invocation, tmp_path, inputs=(), outputs=("netlist.v",), action=unexpected_build
+        )
+    assert output.read_text() == "working result"

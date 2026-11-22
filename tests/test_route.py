@@ -47,6 +47,14 @@ def test_imports_share_named_stages_in_a_diamond(tmp_path: Path) -> None:
             "depends on development",
         ),
         ("imports: [flow.yml]", "Cycle in flow imports"),
+        ("imports: [/other.yml]", "relative flow import"),
+        ("stages: [", "Invalid flow YAML"),
+        ("stages: [{name: build, outputs: [], needs: [missing]}]", "Unknown stage 'missing'"),
+        (
+            "stages: [{name: rtl, outputs: []}, {name: build, outputs: [], needs: [rtl, rtl]}]",
+            "Duplicate dependencies",
+        ),
+        ("stages: [{name: rtl, outputs: [rtl//top.v]}]", "relative stage output"),
         ("imports: [../elsewhere.yml]", "within the project"),
     ),
 )
@@ -87,3 +95,29 @@ def test_route_validates_handler_interface(tmp_path: Path) -> None:
         route.validate_handlers({**contracts, "report": ("other",)}, inputs={})
     with pytest.raises(ValueError, match=r"needs 'report' for report\.txt"):
         route.validate_handlers(contracts, inputs={"prepare": ("report.txt",)})
+
+
+def test_route_rejects_import_symlink_leaving_project(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    external = tmp_path / "outside.yml"
+    external.write_text("stages: [{name: rtl, outputs: [rtl.v]}]")
+    (project / "linked.yml").symlink_to(external)
+    (project / "flow.yml").write_text("imports: [linked.yml]")
+
+    with pytest.raises(ValueError, match="within the project"):
+        Route.load(project)
+
+
+def test_nested_route_imports_resolve_relative_to_the_importing_file(tmp_path: Path) -> None:
+    module = tmp_path / "module"
+    module.mkdir()
+    (tmp_path / "flow.yml").write_text("imports: [module/be.yml]")
+    (tmp_path / "shared.yml").write_text("stages: [{name: rtl, outputs: [rtl.v]}]")
+    (module / "be.yml").write_text(
+        "imports: [../shared.yml]\nstages: [{name: be, needs: [rtl], outputs: [final.gds]}]"
+    )
+
+    route = Route.load(tmp_path)
+    assert route.order == ("rtl", "be")
+    assert route["be"].needs == ("rtl",)

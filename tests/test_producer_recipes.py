@@ -150,3 +150,42 @@ def test_recipe_rejects_cycle_between_groups(catalog: Catalog, tmp_path: Path) -
             outputs={},
             external={},
         )
+
+
+@pytest.mark.parametrize("invalid_output", ["missing", "symlink"])
+def test_recipe_runner_preserves_all_old_outputs_if_one_is_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_output: str
+) -> None:
+    def emit(
+        _name: str,
+        directory: Path,
+        _log: Path,
+        _stage: Mapping[str, JSON],
+        _pipeline: Mapping[str, JSON],
+    ) -> None:
+        (directory / "first").write_text("new data")
+        if invalid_output == "symlink":
+            (directory / "second").symlink_to(directory / "first")
+
+    layout = tmp_path / "pipeline.json"
+    layout.write_text(
+        json.dumps(
+            {
+                "configuration": {},
+                "stages": [{"name": "emit", "inputs": [], "outputs": ["first", "second"]}],
+            }
+        )
+    )
+    for name in ("first", "second"):
+        (tmp_path / name).write_text(f"previous {name}")
+    monkeypatch.setattr(producer, "_test_handler", emit, raising=False)
+    monkeypatch.setattr(
+        sys, "argv", ["producer", f"{producer.__name__}:_test_handler", str(layout), str(tmp_path)]
+    )
+
+    with pytest.raises(RuntimeError, match="emit produced no second"):
+        producer.main()
+
+    assert (tmp_path / "first").read_text() == "previous first"
+    assert (tmp_path / "second").read_text() == "previous second"
+    assert not tuple(tmp_path.glob("emit-*"))

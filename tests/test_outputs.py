@@ -10,7 +10,7 @@ from coreref._internal.snapshot import SliceInputs
 from coreref._internal.variants import Variants
 from coreref.api.build import Outputs
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.packages import Catalog, LocalRecord, Ref
+from coreref.api.packages import Catalog, LocalRecord, Record, Ref
 from coreref.api.projects import Graph
 from coreref.testing import Sandbox, environment
 from coreref.testing.operations import trace_operations
@@ -128,3 +128,58 @@ def test_plain_packaged_files_remain_available(catalog: Catalog, tmp_path: Path)
     lock = graph.create_lockfile(tmp_path / "manifest.lock")
     inputs = SliceInputs(graph.record.ref, None, lock, (), {})
     assert Outputs.links(Outputs(catalog)._pack(inputs, {}, {})) == {}
+
+
+_DIGEST = "a" * 64
+_ARTIFACT = f"coreref-artifact.file/{_DIGEST}#revision"
+
+
+@pytest.mark.parametrize(
+    ("name", "ref", "message"),
+    [
+        ("../outside.lef", _ARTIFACT, "Invalid output name"),
+        ("views//cell.lef", _ARTIFACT, "Invalid output name"),
+        ("layout.lef", f"coreref-artifact.file/{_DIGEST}", "exact content-addressed reference"),
+        ("layout.lef", f"coreref-artifact.file/{'b' * 64}#revision", "content-addressed reference"),
+        ("layout.lef", f"demo.file/{_DIGEST}#revision", "content-addressed reference"),
+    ],
+)
+def test_outputs_rejects_invalid_index_before_installation(
+    tmp_path: Path, name: str, ref: str, message: str
+) -> None:
+    record = Record(
+        Ref("demo.macro/1.0#published"),
+        {
+            "output_index": {
+                "key": _DIGEST,
+                "outputs": {name: {"ref": ref, "sha256": _DIGEST, "size": 1}},
+            }
+        },
+    )
+    outputs = Outputs(Catalog(tmp_path / "home"))
+    with trace_operations() as operations, pytest.raises(ValueError, match=message):
+        outputs.get(record, (name,))
+    assert not operations.commands
+    assert operations.package_downloads == 0
+
+
+def test_indexed_output_fetch_can_be_retried_after_the_exact_artifact_is_uploaded(
+    tmp_path: Path,
+) -> None:
+    with environment(tmp_path) as env:
+        _, inputs = _project(env)
+        source = tmp_path / "layout.lef"
+        source.write_text("macro layout")
+        record = Outputs(env.catalog)._pack(inputs, {source.name: source}, {})
+        links = Outputs.links(record)
+        assert links is not None
+        artifact_ref = links[source.name]
+        consumer = Outputs(env.new_catalog())
+
+        with pytest.raises(NotFound, match="Missing indexed artifact") as missing:
+            consumer.get(record, (source.name,))
+        assert str(artifact_ref) in str(missing.value)
+
+        uploaded = env.publish(LocalRecord(artifact_ref.without_revision(), files={"data": source}))
+        assert uploaded.ref == artifact_ref
+        assert consumer.get(record, (source.name,))[source.name].read_text() == "macro layout"
