@@ -35,19 +35,25 @@ class SliceInputs:
     environment: JSON
     variants: Mapping[str, str] = field(default_factory=dict)
     local_outputs: Mapping[str, Path] = field(default_factory=dict)
+    input_files: Mapping[str, Path | None] | None = None
 
     def key(self) -> str:
         """Hash the resolved inputs, including output bytes for an unpublished worktree."""
         local_outputs = self.local_outputs if self.commit is None else {}
+        inputs: dict[str, JSON] = {
+            "project": str(self.project),
+            "local_outputs": {name: file_digest(path) for name, path in local_outputs.items()},
+            "lockfile": file_digest(self.lockfile),
+            "dependencies": tuple(sorted(map(str, self.dependencies))),
+            "variants": self.variants,
+            "environment": self.environment,
+        }
+        if self.input_files is None:
+            return fingerprint({"schema_version": 1, "commit": self.commit, **inputs})
+        files = {
+            name: file_digest(path) if path is not None else None
+            for name, path in self.input_files.items()
+        }
         return fingerprint(
-            {
-                "schema_version": 1,
-                "project": str(self.project),
-                "commit": self.commit,
-                "local_outputs": {name: file_digest(path) for name, path in local_outputs.items()},
-                "lockfile": file_digest(self.lockfile),
-                "dependencies": tuple(sorted(map(str, self.dependencies))),
-                "variants": self.variants,
-                "environment": self.environment,
-            }
+            {"schema_version": 2, "worktree": self.commit is None, "files": files, **inputs}
         )

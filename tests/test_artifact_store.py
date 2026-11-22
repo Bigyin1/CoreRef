@@ -82,6 +82,27 @@ def test_slice_key_tracks_inputs_and_ignores_output_selection_at_a_commit(tmp_pa
     assert inputs.key() != committed
 
 
+def test_content_slice_keys_separate_declared_inputs_and_dirty_outputs(tmp_path: Path) -> None:
+    lockfile = tmp_path / "manifest.lock"
+    lockfile.write_text("locked revisions")
+    rtl = tmp_path / "rtl.v"
+    rtl.write_text("RTL")
+    inputs = SliceInputs(
+        project=Ref("demo.soc/1.0"),
+        commit="first",
+        lockfile=lockfile,
+        dependencies=(),
+        environment={},
+        input_files={"rtl.v": rtl, "constraints.sdc": None},
+    )
+    assert inputs.key() == replace(inputs, commit="second").key()
+    assert inputs.key() != replace(inputs, input_files={"rtl.v": rtl}).key()
+    assert inputs.key() != replace(inputs, commit=None, local_outputs={"rtl.v": rtl}).key()
+    previous = inputs.key()
+    rtl.write_text("new RTL")
+    assert inputs.key() != previous
+
+
 def test_shared_stage_cache_and_content_deduplication(
     conan_server: LocalServer, tmp_path: Path
 ) -> None:

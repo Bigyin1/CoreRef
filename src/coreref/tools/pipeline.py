@@ -18,10 +18,12 @@ class BuildStage:
     """Declare one action, its input files, and its outputs in the build directory."""
 
     name: str
-    action: Callable[[], None]
+    action: Callable[[], object]
     inputs: tuple[str, ...]
     outputs: tuple[str, ...]
     configuration: Mapping[str, JSON] = field(default_factory=dict)
+    needs: tuple[str, ...] = ()
+    always_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -31,15 +33,19 @@ class Pipeline:
     directory: Path
     stages: tuple[BuildStage, ...]
 
-    def run(self, target: str) -> None:
-        """Bring a stage and its prerequisites up to date in this directory."""
-        if not any(stage.name == target for stage in self.stages):
-            raise ValueError(f"Unknown stage {target!r}")
+    def run(self, target: str, *additional_targets: str) -> None:
+        """Bring the requested stages and their prerequisites up to date."""
+        targets = (target, *additional_targets)
+        known = {stage.name for stage in self.stages}
+        for name in targets:
+            if name not in known:
+                raise ValueError(f"Unknown stage {name!r}")
         self.directory.mkdir(parents=True, exist_ok=True)
         loader = ModuleTaskLoader({"task_flow": self._tasks})
         runner = DoitMain(loader, config_filenames=())
         state = self.directory / "doit.db"
-        if runner.run(["run", "--db-file", str(state), f"flow:{target}"]):
+        tasks = [f"flow:{name}" for name in targets]
+        if runner.run(["run", "--db-file", str(state), *tasks]):
             raise RuntimeError(f"Build stage failed. See the output in {self.directory}.")
 
     def _tasks(self) -> Iterator[dict[str, object]]:
@@ -49,7 +55,10 @@ class Pipeline:
                 "actions": [(self._execute, [stage])],
                 "file_dep": [self.directory / name for name in stage.inputs],
                 "targets": [self.directory / name for name in stage.outputs],
-                "uptodate": [config_changed(dict(stage.configuration))],
+                "task_dep": [f"flow:{name}" for name in stage.needs],
+                "uptodate": [False]
+                if stage.always_run
+                else [config_changed(dict(stage.configuration))],
             }
 
     def _execute(self, stage: BuildStage) -> None:

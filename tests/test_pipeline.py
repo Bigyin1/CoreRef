@@ -59,3 +59,33 @@ def test_pipeline_rejects_unknown_targets_and_missing_outputs(tmp_path: Path) ->
         pipeline.run("absent")
     with pytest.raises(RuntimeError, match="Build stage failed"):
         pipeline.run("report")
+
+
+def test_pipeline_runs_multiple_targets_with_an_order_only_prerequisite(tmp_path: Path) -> None:
+    calls: list[str] = []
+    prepare = BuildStage(
+        name="prepare",
+        action=lambda: calls.append("prepare"),
+        inputs=(),
+        outputs=(),
+        always_run=True,
+    )
+    first = BuildStage(
+        name="first",
+        action=lambda: calls.append("first"),
+        inputs=(),
+        outputs=(),
+        needs=("prepare",),
+    )
+    second = BuildStage(
+        name="second",
+        action=lambda: calls.append("second"),
+        inputs=(),
+        outputs=(),
+        needs=("prepare",),
+    )
+    pipeline = Pipeline(tmp_path, (second, first, prepare))
+    pipeline.run("first", "second")
+    assert calls == ["prepare", "first", "second"]
+    pipeline.run("first", "second")
+    assert calls[3:] == ["prepare"]
