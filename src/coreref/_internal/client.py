@@ -149,6 +149,8 @@ class ConanClient:
         message = str(error)
         if "not in lockfile" in message:
             return InvalidPackage("Recipe dependency is absent from its lockfile")
+        if arguments[0] == "install" and message.startswith("Missing prebuilt package"):
+            return NotFound("A required package binary is unavailable")
         if "not found" in message.lower():
             return NotFound("A required package is unavailable")
         operation = {

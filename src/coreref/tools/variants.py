@@ -97,11 +97,16 @@ class Variants:
         self,
         package: PackageInput,
         *,
-        lockfile: Path,
+        lockfile: Path | None,
         build_missing: bool = False,
+        build_prerequisites: tuple[Ref, ...] = (),
     ) -> ConfiguredPackage:
-        """Install one variant. Explicitly allow Conan to build it when unavailable."""
-        policy = f"--build=missing:{package.requirement.package_name}/*"
+        """Install one variant and optionally build the root and specific prerequisites.
+
+        Pass None as the lockfile for a graph whose recipes pin their own dependencies.
+        """
+        policy = _build_policy(package.requirement, build_missing, build_prerequisites)
+        lock = str(lockfile.absolute()) if lockfile is not None else ""
         with TemporaryDirectory(prefix="coreref-variant-") as temporary:
             result = cast(
                 Mapping[str, object],
@@ -109,8 +114,8 @@ class Variants:
                     "install",
                     *package._arguments(),
                     "--lockfile",
-                    str(lockfile.absolute()),
-                    policy if build_missing else "--build=never",
+                    lock,
+                    *policy,
                     "--output-folder",
                     temporary,
                     "--envs-generation=false",
@@ -119,6 +124,21 @@ class Variants:
             )
         graph = cast(NativeGraph, result["graph"])
         return _selected_package(graph, package.requirement.package_name)
+
+
+def _build_policy(
+    requirement: Dependency, build_missing: bool, prerequisites: tuple[Ref, ...]
+) -> tuple[str, ...]:
+    if any(ref.revision is None for ref in prerequisites):
+        raise InvalidPackage("Build prerequisites require exact recipe revisions")
+    if not build_missing:
+        return ("--build=never",)
+    root = (
+        str(requirement)
+        if isinstance(requirement, Ref) and requirement.revision is not None
+        else f"{requirement.package_name}/*"
+    )
+    return (f"--build=missing:{root}", *(f"--build=missing:{ref}" for ref in prerequisites))
 
 
 def _selected_package(graph: NativeGraph, name: str) -> ConfiguredPackage:
