@@ -1,7 +1,6 @@
 """Exercise the common manifest, routes and release inputs used by a tool flow."""
 
 import json
-import sys
 from importlib.metadata import version
 from pathlib import Path
 
@@ -12,17 +11,23 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError
 from coreref.api.records import LocalRecord, Ref, Requirement
 from coreref.testing import git_repository
-from coreref.tools.artifacts import SliceInputs, clean_commit, committed_slice
+from coreref.tools.artifacts import (
+    SliceInputs,
+    Snapshot,
+    StageInputs,
+    clean_commit,
+    committed_slice,
+)
 from coreref.tools.cli import create_deps_app
 from coreref.tools.environment import (
     CheckedCommand,
     CommandPin,
     ImagePin,
     pinned_image,
-    python_environment,
 )
 from coreref.tools.manifest import Manifest, ManifestFile
 from coreref.tools.project import Project
+from coreref.tools.route import Route, StageSpec
 from coreref.tools.variants import PackageInput, Variants
 
 
@@ -130,22 +135,38 @@ def test_committed_slice_checks_external_inputs_and_dirty_checkout(tmp_path: Pat
         pytest.fail("A dirty checkout reached the build")
 
 
-def test_environment_fingerprints_receipt_and_selected_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(sys, "prefix", str(tmp_path))
-    source = tmp_path / "flow"
-    source.mkdir()
-    path = source / "flow.py"
-    path.write_text("print('flow')")
-    before = python_environment(("coreref",), source_roots=(source,))
-    (source / "README.md").write_text("documentation")
-    assert python_environment(("coreref",), source_roots=(source,)) == before
-    (tmp_path / ".coreref-requirements.txt").write_text("package==1")
-    with_receipt = python_environment(("coreref",), source_roots=(source,))
-    assert with_receipt != before
-    path.write_text("print('changed')")
-    assert python_environment(("coreref",), source_roots=(source,)) != with_receipt
+def test_snapshot_tracks_inputs_of_release_stages(tmp_path: Path, catalog: Catalog) -> None:
+    project = Project(tmp_path, Manifest(ref="demo.project/1.0", flow_version="1.0"), catalog)
+    project.lock()
+    route = Route(
+        [
+            StageSpec(name="emit", outputs=("payload.out",)),
+            StageSpec(name="inspect", outputs=("note.txt",), purpose="development"),
+        ]
+    )
+    source, optional = tmp_path / "model.src", tmp_path / "tuning.cfg"
+    source.write_text("initial")
+    flags = ["one"]
+
+    def stage_inputs(stage: StageSpec) -> StageInputs:
+        assert stage.name == "emit"
+        return StageInputs(
+            files={"source": source, "optional": optional},
+            configuration={"flags": tuple(flags)},
+        )
+
+    snapshot = Snapshot(project, route, stage_inputs=stage_inputs)
+    original = snapshot.inputs("first")
+    before = original.key()
+    assert snapshot.metadata(original)["commit"] == "first"
+    (tmp_path / "unrelated.py").write_text("unrelated")
+    assert snapshot.inputs("another").key() == before
+
+    optional.write_text("enabled")
+    configured = snapshot.inputs("another")
+    assert configured.key() != before
+    flags.append("two")
+    assert snapshot.inputs("another").key() != configured.key()
 
 
 def test_shared_tool_pins_check_exact_versions(tmp_path: Path) -> None:

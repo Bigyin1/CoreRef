@@ -1,19 +1,13 @@
-"""Capture the Python environment and resolve pinned tools for a flow."""
+"""Resolve tools selected by the project manifest."""
 
 from __future__ import annotations
 
 import re
 import subprocess
-import sys
 from dataclasses import dataclass
-from importlib.metadata import version
-from pathlib import Path
 from shutil import which
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from ..api.records import JSON
-from .artifacts import file_digest
 
 
 class ImagePin(BaseModel):
@@ -63,28 +57,3 @@ class CheckedCommand:
             actual = output.splitlines()[0] if output else "no version output"
             raise ValueError(f"{name} must be {pin.version!r}. {executable} reports {actual!r}")
         return cls(executable, pin.version)
-
-
-def python_environment(
-    packages: tuple[str, ...],
-    *,
-    source_roots: tuple[Path, ...],
-    suffixes: tuple[str, ...] = (".py",),
-) -> JSON:
-    """Describe installed versions, the environment receipt and implementation files."""
-    versions = {name: version(name) for name in packages}
-    versions["python"] = sys.version
-    receipt = Path(sys.prefix) / ".coreref-requirements.txt"
-    sources = {
-        root.name: {
-            path.relative_to(root).as_posix(): file_digest(path)
-            for path in sorted(root.rglob("*"))
-            if path.is_file() and path.suffix in suffixes
-        }
-        for root in source_roots
-    }
-    return {
-        "versions": versions,
-        "requirements": file_digest(receipt) if receipt.is_file() else None,
-        "sources": sources,
-    }
