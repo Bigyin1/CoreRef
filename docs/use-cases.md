@@ -123,24 +123,20 @@ flow может попросить обновить lockfile до выпуска
 
 ## Публиковать результаты по мере готовности
 
-В репозитории CPU маршрут выполняет те стадии, которые зарегистрировал проект.
-Первый выпуск может содержать только RTL из SCM. Позднее публикуется ревизия с
-netlist, а после физической реализации — с netlist, Liberty, LEF и GDS.
+Первый выпуск CPU может содержать только RTL из SCM. Позднее flow публикует
+ревизию с netlist, а после физической реализации добавляет Liberty, LEF и GDS.
+Flow запускает нужные стадии и передаёт CoreRef готовые файлы по именам.
 
 ```python
-from coreref.tools.route import Route
+from collections.abc import Mapping
 
 
 def publish_cpu(
-    catalog: Catalog, manifest: ManifestFile, route: Route, target: str
+    catalog: Catalog, manifest: ManifestFile, outputs: Mapping[str, Path]
 ) -> InstalledRecord:
-    graph = manifest.resolve(catalog)
-    manifest.record.files.update(route.run(target))
-    return catalog.publish(graph)
+    manifest.record.files.update(outputs)
+    return catalog.publish(manifest.resolve(catalog))
 ```
 
-`Route` импортируется из `coreref.tools.route`. Проект определяет стадии,
-инструменты и полный набор файлов очередного снимка. Исходники и манифест
-относятся к одному проекту. Внешние зависимости фиксируются его lockfile.
-`Ref` с revision позволяет получить конкретный опубликованный снимок независимо
-от последующих выпусков.
+Зависимости выпуска фиксирует lockfile проекта. `Ref` с revision позволяет
+получить конкретный выпуск после следующих публикаций.

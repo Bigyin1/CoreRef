@@ -23,11 +23,9 @@ dependencies = [
 [project.optional-dependencies]
 cli = ["typer>=0.24,<1"]
 testing = ["conan-server>=2.34,<2.35", "dulwich>=1.2.18,<2", "pytest>=8.4,<10"]
-route = ["doit>=0.37,<0.38"]
 
 [dependency-groups]
 dev = [
-    "doit>=0.37,<0.38",
     "typer>=0.24,<1",
     "pytest>=8.4",
     "pytest-cov>=6",
