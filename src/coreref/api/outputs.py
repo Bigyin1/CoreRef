@@ -10,12 +10,12 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 
 from .._internal.artifacts import ArtifactStore, OutputIndex
-from ..api.catalog import Catalog
-from ..api.errors import InvalidPackage, NotFound
-from ..api.graph import Graph
-from ..api.query import SearchQuery
-from ..api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
 from .artifacts import SliceInputs
+from .catalog import Catalog
+from .errors import InvalidPackage, NotFound
+from .graph import Graph
+from .query import SearchQuery
+from .records import JSON, InstalledRecord, LocalRecord, Record, Ref
 from .variants import PackageInput, Variants
 
 PRODUCER_NAMESPACE = "coreref-producer"

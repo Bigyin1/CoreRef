@@ -10,9 +10,9 @@ import pytest
 from coreref.api.catalog import Catalog
 from coreref.api.errors import Conflict
 from coreref.api.graph import Graph
+from coreref.api.manifest import ManifestFile
 from coreref.api.records import LocalRecord, Ref
 from coreref.testing import git_commit
-from coreref.tools.manifest import ManifestFile
 from tests.test_models import UserPayload
 
 pytestmark = pytest.mark.conan_remote

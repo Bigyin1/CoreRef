@@ -10,7 +10,7 @@ from doit.cmd_base import ModuleTaskLoader  # type: ignore[import-untyped]
 from doit.doit_cmd import DoitMain  # type: ignore[import-untyped]
 from doit.tools import config_changed  # type: ignore[import-untyped]
 
-from ..api.records import JSON
+from .records import JSON
 
 
 @dataclass(frozen=True, kw_only=True)

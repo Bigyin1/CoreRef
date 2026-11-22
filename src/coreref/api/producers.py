@@ -11,10 +11,10 @@ from shutil import copyfile
 from tempfile import TemporaryDirectory
 
 from .._internal.recipe import _RECIPE_ENV
-from ..api.catalog import Catalog
-from ..api.records import JSON, Ref
 from .artifacts import fingerprint
+from .catalog import Catalog
 from .outputs import PRODUCER_NAMESPACE, Producer
+from .records import JSON, Ref
 from .route import StageSpec
 from .variants import Variants
 

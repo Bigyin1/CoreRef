@@ -8,9 +8,9 @@ import pytest
 from dulwich.objects import Commit, Tree
 from dulwich.repo import Repo
 
+from coreref.api.manifest import ManifestFile
 from coreref.api.records import LocalRecord, Ref
 from coreref.testing import LocalServer, Sandbox, environment, git_repository
-from coreref.tools.manifest import ManifestFile
 
 PROJECTS = Path(__file__).with_name("test_projects")
 pytestmark = pytest.mark.conan_remote

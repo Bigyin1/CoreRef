@@ -10,10 +10,10 @@ from pathlib import Path
 from shutil import copyfile
 
 from .._internal.artifacts import ArtifactStore, OutputIndex
-from ..api.catalog import Catalog
-from ..api.query import SearchQuery
-from ..api.records import JSON, LocalRecord, Ref
 from .artifacts import file_digest, fingerprint
+from .catalog import Catalog
+from .query import SearchQuery
+from .records import JSON, LocalRecord, Ref
 
 
 class CacheMode(str, Enum):

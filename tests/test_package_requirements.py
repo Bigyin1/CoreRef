@@ -8,11 +8,11 @@ from typer.testing import CliRunner
 
 from coreref.api.errors import InvalidPackage
 from coreref.api.graph import Graph
+from coreref.api.manifest import ManifestFile
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Record, Ref, Requirement
+from coreref.cli import create_deps_app
 from coreref.testing import LocalServer, Sandbox
-from coreref.tools.cli import create_deps_app
-from coreref.tools.manifest import ManifestFile
 
 
 def test_short_name_has_no_representation_fields() -> None:

@@ -7,8 +7,8 @@ import pytest
 from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
 from coreref.api.records import Ref
+from coreref.api.variants import PackageInput, Variants
 from coreref.testing import LocalServer
-from coreref.tools.variants import PackageInput, Variants
 
 
 def test_missing_variant_builds_only_allowed_exact_prerequisites(

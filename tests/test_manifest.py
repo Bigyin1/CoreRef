@@ -9,9 +9,9 @@ import pytest
 
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
+from coreref.api.manifest import ManifestFile
 from coreref.api.records import InstalledRecord, LocalRecord, Ref
 from coreref.api.workspace import Workspace
-from coreref.tools.manifest import ManifestFile
 
 
 @pytest.fixture

@@ -10,7 +10,7 @@ from typing import Literal
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
-from coreref.api.records import JSON
+from .records import JSON
 
 
 class StageSpec(BaseModel):

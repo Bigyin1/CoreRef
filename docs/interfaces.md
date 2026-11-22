@@ -243,7 +243,7 @@ local = [record for record in ready if record.is_editable]
 
 ```python
 import typer
-from coreref.tools.cli import create_workspace_app
+from coreref.cli import create_workspace_app
 
 app = typer.Typer()
 app.add_typer(create_workspace_app(), name="workspace")
@@ -256,7 +256,7 @@ flow workspace list --project-dir ./project
 flow workspace remove ../existing-cpu --project-dir ./project
 ```
 
-Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/manifest.yml`, если рецепта ещё нет:
+Готовая команда `add DIRECTORY` из `coreref.cli` читает `DIRECTORY/manifest.yml`, если рецепта ещё нет:
 достаточно валидного YAML с `ref`. Класс Workspace от этого формата не зависит.
 `dependencies`, `files` и `payload` необязательны; пути считаются от директории YAML.
 Для Python-надстройки это `ManifestFile(path).add_to_workspace(workspace)`.
@@ -284,7 +284,7 @@ dependencies:
 
 ## Варианты компонентов
 
-`coreref.tools.variants.Variants` устанавливает бинарные варианты нативных
+`coreref.api.variants.Variants` устанавливает бинарные варианты нативных
 Conan-рецептов по `PackageInput` с опциями и проектному lockfile. Обычные
 зависимости проекта можно сначала зафиксировать через `Graph.create_lockfile()`,
 а затем дополнить тот же файл через `Variants.extend_lockfile()`. Для двух
@@ -312,7 +312,7 @@ Conan-рецептов по `PackageInput` с опциями и проектно
 
 ## Проект и стадии
 
-`coreref.tools.project.Project` связывает манифест, рабочую директорию и каталог.
+`coreref.api.project.Project` связывает манифест, рабочую директорию и каталог.
 Он создаёт `LocalRecord`, разрешает граф по `manifest.lock` и обновляет lockfile
 вместе с именованными вариантами. `run_route()` передаёт исполнителю замыкание
 запрошенных стадий. `pack_build()` и `publish_build()` сохраняют
@@ -331,20 +331,20 @@ lockfile, точные зависимости, выбранные вариант
 чистоту Git и сверяет отпечаток этих входов до и после сборки.
 
 
-`coreref.tools.pipeline.BuildStage` задаёт имя, действие, входные и выходные
+`coreref.api.pipeline.BuildStage` задаёт имя, действие, входные и выходные
 файлы и конфигурацию стадии. `needs` задаёт дополнительные связи порядка.
 `Pipeline(directory, stages).run(target, *additional_targets)` запускает выбранные
 стадии и их предпосылки. Изменения входных файлов определяют пересборку,
 а `always_run=True` запускает действие при каждом выборе стадии. Состояние сохраняется в директории сборки. Flow задаёт сами команды EDA
 и способ их запуска.
 
-`coreref.tools.route.Route.load(project, path)` читает граф стадий и его локальные
+`coreref.api.route.Route.load(project, path)` читает граф стадий и его локальные
 YAML-импорты. `StageSpec` задаёт имя, `needs`, `outputs` и назначение стадии.
 Flow проверяет объявления через `validate_handlers()` и реализует действия
 через `BuildStage`. `Route.ready()` отбирает ветви выпуска по признаку готовности,
 который передаёт Flow.
 
-`coreref.tools.producers.ProducerRecipes` экспортирует группы стадий с
+`coreref.api.producers.ProducerRecipes` экспортирует группы стадий с
 назначенными входами и выходами в Conan. Flow передаёт описания `RecipeStage`,
 упаковываемые группы и Python-файл с функцией
 `run_pipeline(configuration, stages, directory)`. Эта функция выполняет
@@ -352,7 +352,7 @@ Flow проверяет объявления через `validate_handlers()` и
 
 ## Именованные выходы и общий кэш стадий
 
-`coreref.tools.outputs.Outputs` позволяет упаковать выходы локально (`pack`),
+`coreref.api.outputs.Outputs` позволяет упаковать выходы локально (`pack`),
 опубликовать их для разрешённого проекта (`publish`) и получить нужные файлы
 закреплённой ревизии по именам (`get`). Публикация загружает файлы перед
 оглавлением и добавляет новые выходы к предыдущим выходам того же среза.
@@ -399,7 +399,7 @@ dependencies:
 и именованные конфигурации вида `{name: cache, ref: demo.sram/1.0, options: {depth: 4}}`.
 Сами допустимые значения генератора задаются в `options` проекта, например
 `options: {depth: [4, 8], width: [4, 8]}`. Все flow используют одну схему
-`coreref.tools.manifest.Manifest`. Поле `type` задаёт тип проекта, а
+`coreref.api.manifest.Manifest`. Поле `type` задаёт тип проекта, а
 `release_through` ссылается на стадию выпуска из flow.yml. В `tools` можно
 закрепить образ по SHA-256 или версию исполняемой команды. При загрузке с
 `flow_package=` CoreRef проверяет установленную версию flow по `flow_version`.
@@ -466,7 +466,7 @@ flow deps install
 
 ```python
 import typer
-from coreref.tools.cli import create_deps_app
+from coreref.cli import create_deps_app
 
 app = typer.Typer()
 app.add_typer(create_deps_app(), name="deps")

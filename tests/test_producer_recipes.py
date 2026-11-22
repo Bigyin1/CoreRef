@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 
 from coreref.api.catalog import Catalog
+from coreref.api.producers import ProducerRecipes, RecipeStage
 from coreref.api.records import Ref
+from coreref.api.route import StageSpec
+from coreref.api.variants import PackageInput, Variants
 from coreref.testing import Sandbox, environment
-from coreref.tools.producers import ProducerRecipes, RecipeStage
-from coreref.tools.route import StageSpec
-from coreref.tools.variants import PackageInput, Variants
 
 
 def _runner(env: Sandbox) -> ProducerRecipes:

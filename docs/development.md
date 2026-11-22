@@ -26,10 +26,10 @@ CI проверяет обе группы тестов с общим порог�
 
 | Модуль | Ответственность |
 |---|---|
-| `tools/cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
+| `cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
 | `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
-| `tools/pipeline.py`, `outputs.py` | Локальное исполнение стадий и именованные результаты |
-| `tools/manifest.py` | Необязательный стандарт YAML, пути и прямые объявления зависимостей |
+| `api/pipeline.py`, `api/outputs.py` | Локальное исполнение стадий и именованные результаты |
+| `api/manifest.py` | Стандартный манифест, пути и прямые объявления зависимостей |
 | `api/graph.py`, `workspace.py` | Разрешённые зависимости, рабочий LocalRecord и Git-копии |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
 | `_internal/recipe.py`, `templates/` | Чтение метаданных и Jinja-шаблоны временных рецептов |
@@ -62,8 +62,8 @@ Ruff ограничивает сложность: 6, аргументы: 5 (по
 
 Workspace делегирует init/add/remove и SCM open Conan. Только conanfile.py добавляется
 в директорию зависимости из LocalRecord/зависимостей или опубликованных метаданных.
-Workspace не импортирует tools и не читает манифесты. YAML-адаптер ManifestFile.add_to_workspace
-готовит рецепт, читающий выбранный YAML; соответствующий CLI также находится в tools.
+`Workspace` управляет рабочими копиями. `ManifestFile.add_to_workspace()` готовит
+рецепт из выбранного YAML. Подключаемая команда находится в `coreref.cli`.
 Состояние workspace хранит Conan; дополнительных метаданных в checkout SDK не создаёт.
 Ref содержит только координаты; Catalog и Graph получают контекст операций явно.
 Имя содержит два сегмента `namespace.component`.
@@ -81,7 +81,8 @@ Manifest описывает стандартный формат manifest.yml. Ma
 lockfile, отдельный lock разрешает объявления заново. CLI не добавляет зависимости,
 которые flow находит динамически; такой flow сохраняет lockfile итогового Graph сам.
 
-`tools/` содержит стандартный манифест, инфраструктуру проектов и подключаемые команды CLI. Основные операции
+`api/` содержит стандартный манифест и инфраструктуру проектов.
+`coreref.cli` предоставляет подключаемые команды Typer. Основные операции
 API принимают LocalRecord и Ref; собственные форматы flow остаются возможны.
 Workspace.add(directory, record=..., dependencies=...) принимает данные собственного flow.
 ManifestFile.add_to_workspace(workspace) — надстройка для стандартного YAML.
@@ -306,7 +307,7 @@ tests/
 ```python
 from pathlib import Path
 from coreref.testing import environment
-from coreref.tools.manifest import ManifestFile
+from coreref.api.manifest import ManifestFile
 
 
 def test_soc(tmp_path):

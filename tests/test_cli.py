@@ -14,7 +14,7 @@ from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError
 from coreref.api.records import LocalRecord, Ref
 from coreref.api.workspace import Workspace
-from coreref.tools.cli import create_deps_app, create_workspace_app
+from coreref.cli import create_deps_app, create_workspace_app
 
 runner = CliRunner()
 

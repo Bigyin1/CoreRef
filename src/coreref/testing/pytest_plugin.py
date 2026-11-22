@@ -7,7 +7,7 @@ from typing import TypedDict
 import pytest
 
 from ..api.catalog import Catalog
-from ..tools.manifest import ManifestFile
+from ..api.manifest import ManifestFile
 from .sandbox import Sandbox, environment
 from .server import LocalServer
 

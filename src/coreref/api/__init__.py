@@ -1,1 +1,1 @@
-"""Public catalog, project graphs, editable workspaces, records and queries."""
+"""Public CoreRef interfaces for packages, projects and build routes."""

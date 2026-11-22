@@ -7,15 +7,15 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..api.graph import Graph
-from ..api.records import JSON, InstalledRecord, Record
 from .artifacts import SliceInputs, clean_commit, committed_slice
+from .graph import Graph
 from .outputs import Outputs, Producer
 from .pipeline import BuildStage, Pipeline
+from .records import JSON, InstalledRecord, Record
 from .variants import ConfiguredPackage, PackageInput, Variants
 
 if TYPE_CHECKING:
-    from ..api.catalog import Catalog
+    from .catalog import Catalog
     from .manifest import Manifest
     from .route import Route, StageSpec
 

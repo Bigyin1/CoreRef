@@ -10,9 +10,9 @@ import pytest
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage
 from coreref.api.graph import Graph
+from coreref.api.manifest import ManifestFile
 from coreref.api.records import LocalRecord, Ref
 from coreref.api.workspace import Workspace
-from coreref.tools.manifest import ManifestFile
 
 pytestmark = pytest.mark.conan_remote
 

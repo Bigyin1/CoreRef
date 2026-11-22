@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
+from coreref.api.artifacts import SliceInputs
 from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
 from coreref.api.graph import Graph
+from coreref.api.outputs import Outputs, Producer, read_producers
 from coreref.api.records import LocalRecord, Ref
+from coreref.api.variants import Variants
 from coreref.testing import Sandbox, environment
 from coreref.testing.operations import trace_operations
-from coreref.tools.artifacts import SliceInputs
-from coreref.tools.outputs import Outputs, Producer, read_producers
-from coreref.tools.variants import Variants
 
 
 def _project(env: Sandbox) -> tuple[Graph, SliceInputs]:

@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING, cast
 from .._internal.recipe import _RECIPE_ENV
 from .._internal.references import from_conan_reference
 from .._internal.types import NativeGraph
-from ..api.errors import InvalidPackage
-from ..api.graph import Graph
-from ..api.records import Dependency, LocalRecord, Ref
+from .errors import InvalidPackage
+from .graph import Graph
+from .records import Dependency, LocalRecord, Ref
 
 if TYPE_CHECKING:
-    from ..api.catalog import Catalog
+    from .catalog import Catalog
 
 
 _OptionValue = str | int | bool

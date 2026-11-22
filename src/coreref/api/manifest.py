@@ -12,15 +12,15 @@ import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
 
 from .._internal.recipe import LocalRecipe
-from ..api.errors import Conflict, InvalidPackage, NotFound
-from ..api.graph import Graph
-from ..api.records import JSON, Dependency, LocalRecord, Ref, Requirement, parse_dependency
 from .environment import ToolPins
+from .errors import Conflict, InvalidPackage, NotFound
+from .graph import Graph
+from .records import JSON, Dependency, LocalRecord, Ref, Requirement, parse_dependency
 from .variants import PackageInput, Variants
 
 if TYPE_CHECKING:
-    from ..api.catalog import Catalog
-    from ..api.workspace import Workspace
+    from .catalog import Catalog
+    from .workspace import Workspace
 
 
 _OptionValue = str | int | bool

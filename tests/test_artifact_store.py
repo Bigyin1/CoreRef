@@ -6,13 +6,13 @@ from pathlib import Path
 import pytest
 
 from coreref._internal.artifacts import ArtifactStore, OutputIndex
+from coreref.api.artifacts import SliceInputs, file_digest
 from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Ref
+from coreref.api.stage_cache import CacheMode, StageCache, StageInvocation
 from coreref.testing import LocalServer, configured_home
-from coreref.tools.artifacts import SliceInputs, file_digest
-from coreref.tools.stage_cache import CacheMode, StageCache, StageInvocation
 
 
 def test_pack_is_local_and_upload_requires_exact_cached_ref(

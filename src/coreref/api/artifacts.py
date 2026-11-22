@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..api.records import JSON, Ref
+from .records import JSON, Ref
 
 if TYPE_CHECKING:
     from .project import Project

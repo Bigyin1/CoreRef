@@ -10,12 +10,12 @@ from typing import Annotated
 
 import typer
 
-from ..api.catalog import Catalog
-from ..api.errors import CatalogError
-from ..api.records import Ref
-from ..api.workspace import Workspace
-from .manifest import ManifestFile
-from .variants import Variants
+from .api.catalog import Catalog
+from .api.errors import CatalogError
+from .api.manifest import ManifestFile
+from .api.records import Ref
+from .api.variants import Variants
+from .api.workspace import Workspace
 
 ProjectDir = Annotated[Path, typer.Option(help="Project containing conanws.yml.")]
 Manifest = Annotated[Path, typer.Option("--file", "-f", help="Project YAML manifest.")]

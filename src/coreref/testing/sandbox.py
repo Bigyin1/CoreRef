@@ -12,9 +12,9 @@ import networkx as nx
 
 from ..api.catalog import Catalog
 from ..api.graph import Graph
+from ..api.manifest import ManifestFile
 from ..api.records import Dependency, InstalledRecord, LocalRecord, Ref
 from ..api.workspace import Workspace
-from ..tools.manifest import ManifestFile
 from .catalog import _RecordingCatalog
 from .git import FixtureFile, git_repository, git_upstream, write_files
 from .projects import copy_projects

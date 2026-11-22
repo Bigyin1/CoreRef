@@ -55,10 +55,10 @@ dependencies:
 from pathlib import Path
 
 from coreref.api.catalog import Catalog
-from coreref.tools.manifest import ManifestFile
+from coreref.api.manifest import ManifestFile
 from coreref.api.graph import Graph
 from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
-from coreref.tools.outputs import Outputs
+from coreref.api.outputs import Outputs
 
 
 def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
@@ -138,7 +138,7 @@ Flow запускает нужные стадии и передаёт CoreRef г
 ```python
 from collections.abc import Mapping
 
-from coreref.tools.artifacts import SliceInputs
+from coreref.api.artifacts import SliceInputs
 
 
 def publish_cpu(

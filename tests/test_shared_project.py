@@ -7,28 +7,28 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from coreref.api.catalog import Catalog
-from coreref.api.errors import CatalogError
-from coreref.api.records import LocalRecord, Ref, Requirement
-from coreref.testing import git_repository
-from coreref.tools.artifacts import (
+from coreref.api.artifacts import (
     SliceInputs,
     Snapshot,
     StageInputs,
     clean_commit,
     committed_slice,
 )
-from coreref.tools.cli import create_deps_app
-from coreref.tools.environment import (
+from coreref.api.catalog import Catalog
+from coreref.api.environment import (
     CheckedCommand,
     CommandPin,
     ImagePin,
     pinned_image,
 )
-from coreref.tools.manifest import Manifest, ManifestFile
-from coreref.tools.project import Project
-from coreref.tools.route import Route, StageSpec
-from coreref.tools.variants import PackageInput, Variants
+from coreref.api.errors import CatalogError
+from coreref.api.manifest import Manifest, ManifestFile
+from coreref.api.project import Project
+from coreref.api.records import LocalRecord, Ref, Requirement
+from coreref.api.route import Route, StageSpec
+from coreref.api.variants import PackageInput, Variants
+from coreref.cli import create_deps_app
+from coreref.testing import git_repository
 
 
 def test_manifest_read_and_edit_share_the_same_fields(tmp_path: Path) -> None:
