@@ -1,5 +1,10 @@
 import json
+{% if runtime %}
+import os
+import subprocess
+{% else %}
 import runpy
+{% endif %}
 from pathlib import Path
 from shutil import copyfile, copytree
 
@@ -10,7 +15,7 @@ class StageProducer(ConanFile):
     name = {{ name | tojson }}
     version = {{ version | tojson }}
     revision_mode = "hash"
-    exports_sources = "inputs/*", "pipeline.json", "stage_runner.py"
+    exports_sources = "inputs/*", "pipeline.json"{% if not runtime %}, "stage_runner.py"{% endif %}
 
     def requirements(self):
         for reference in {{ dependencies | tojson }}:
@@ -29,8 +34,29 @@ class StageProducer(ConanFile):
             destination = directory / target
             destination.parent.mkdir(parents=True, exist_ok=True)
             copyfile(Path(dependency.package_folder) / filename, destination)
+{% if runtime %}
+        self._run_producer(source / "pipeline.json", directory)
+
+    def _run_producer(self, layout, directory):
+        package = self.dependencies[{{ runtime | tojson }}]
+        environment = directory.parent / "producer-environment"
+        copytree(Path(package.package_folder) / "artifacts", environment, dirs_exist_ok=True)
+        python = (environment / ".python-version").read_text(encoding="utf-8").strip()
+        env = {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
+        env["UV_PROJECT_ENVIRONMENT"] = str(environment / ".venv")
+        subprocess.run(
+            [
+                "uv", "run", "--locked", "--no-dev", "--managed-python", "--python", python,
+                "python", "-I", "-m", {{ module | tojson }}, str(layout), str(directory),
+            ],
+            cwd=environment,
+            env=env,
+            check=True,
+        )
+{% else %}
         runner = runpy.run_path(str(source / "stage_runner.py"))
         runner["run_pipeline"](layout["configuration"], layout["stages"], directory)
+{% endif %}
 
     def package(self):
         layout = json.loads((Path(self.source_folder) / "pipeline.json").read_bytes())

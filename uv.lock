@@ -341,6 +341,7 @@ dependencies = [
     { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typing-extensions" },
 ]
 
@@ -381,6 +382,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.4,<10" },
     { name = "pyyaml", specifier = ">=6,<7" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2,<3" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.24,<1" },
     { name = "typing-extensions", specifier = ">=4.12,<5" },
 ]

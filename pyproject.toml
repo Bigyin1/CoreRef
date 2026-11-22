@@ -19,6 +19,7 @@ dependencies = [
  "edify>=0.3,<1; python_version < '3.11'",
  "edify>=1.1.2,<2; python_version >= '3.11'",
  "typing-extensions>=4.12,<5",
+ "tomli>=2,<3; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]

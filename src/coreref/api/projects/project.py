@@ -16,6 +16,7 @@ from .graph import Graph
 
 if TYPE_CHECKING:
     from ..build.route import RecipeStage, Route, StageInputs, StageSpec
+    from ..build.runtime import ProducerRuntime
     from ..packages.catalog import Catalog
     from .manifest import Manifest
 
@@ -85,7 +86,7 @@ class Project:
         self,
         stages: tuple[RecipeStage, ...],
         *,
-        runner: Path,
+        runner: Path | ProducerRuntime,
         configuration: Mapping[str, JSON],
         members: Mapping[str, tuple[str, ...]],
         external: Mapping[str, tuple[Producer, str]],

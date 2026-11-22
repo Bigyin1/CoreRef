@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from shutil import copyfile
@@ -11,15 +12,22 @@ from tempfile import TemporaryDirectory
 
 from ..api.build.outputs import PRODUCER_NAMESPACE, Producer
 from ..api.build.route import RecipeStage
+from ..api.build.runtime import ProducerRuntime
 from ..api.packages.catalog import Catalog
-from ..api.packages.records import JSON, Ref
+from ..api.packages.records import JSON, LocalRecord, Ref
 from ..api.packages.variants import Variants
-from .hashing import fingerprint
+from .hashing import file_digest, fingerprint
 from .recipe import _RECIPE_ENV
 
 # Staged name -> exact producer and filename in its binary package.
 Bindings = Mapping[str, tuple[Producer, str]]
 _PRODUCER_TEMPLATE = _RECIPE_ENV.get_template("producer.py.j2")
+
+
+@dataclass(frozen=True)
+class _RecipeDependencies:
+    producers: Mapping[str, Producer]
+    runtime: Ref | None
 
 
 class ProducerRecipes:
@@ -30,9 +38,10 @@ class ProducerRecipes:
         catalog: Catalog,
         prepared: Path,
         *,
-        runner: Path,
+        runner: Path | ProducerRuntime,
         configuration: Mapping[str, JSON],
     ) -> None:
+        self._catalog = catalog
         self._variants = Variants(catalog)
         self._prepared = prepared
         self._runner = runner
@@ -51,15 +60,31 @@ class ProducerRecipes:
         component = fingerprint(project.package_name)
         published: dict[str, Producer] = {}
         plan = _groups(stages, members)
+        runtime = self._publish_runtime() if plan else None
         for group, dependencies, commands in plan:
             ref = Ref(f"{PRODUCER_NAMESPACE}.{component}-{group}/{project.version}")
             bindings = _bindings(commands, published, outputs, external)
             required = {published[name].ref: published[name] for name in dependencies}
             required.update((producer.ref, producer) for producer, _ in bindings.values())
+            if runtime is not None:
+                required[str(runtime)] = Producer(ref=str(runtime))
             published[group] = self._publish_group(
-                ref, commands, outputs=outputs[group], bindings=bindings, required=required
+                ref,
+                commands,
+                outputs=outputs[group],
+                bindings=bindings,
+                dependencies=_RecipeDependencies(required, runtime),
             )
         return published
+
+    def _publish_runtime(self) -> Ref | None:
+        if not isinstance(self._runner, ProducerRuntime):
+            return None
+        self._runner.validate()
+        files = self._runner.files
+        digest = fingerprint({name: file_digest(path) for name, path in files.items()})
+        ref = Ref(f"{PRODUCER_NAMESPACE}.uv-runtime-{digest}/1.0")
+        return self._catalog.publish(LocalRecord(ref, files=files)).ref
 
     def _publish_group(
         self,
@@ -68,10 +93,10 @@ class ProducerRecipes:
         *,
         outputs: tuple[str, ...],
         bindings: Bindings,
-        required: Mapping[str, Producer],
+        dependencies: _RecipeDependencies,
     ) -> Producer:
-        closure = set(required)
-        for producer in required.values():
+        closure = set(dependencies.producers)
+        for producer in dependencies.producers.values():
             closure.update(producer.prerequisites)
 
         with TemporaryDirectory(prefix="coreref-producer-") as temporary:
@@ -89,9 +114,15 @@ class ProducerRecipes:
             (directory / "pipeline.json").write_text(
                 json.dumps(layout, sort_keys=True), encoding="utf-8"
             )
-            copyfile(self._runner, directory / "stage_runner.py")
+            if isinstance(self._runner, Path):
+                copyfile(self._runner, directory / "stage_runner.py")
+            runtime = dependencies.runtime
             recipe = _PRODUCER_TEMPLATE.render(
-                name=ref.package_name, version=ref.version, dependencies=sorted(required)
+                name=ref.package_name,
+                version=ref.version,
+                dependencies=sorted(dependencies.producers),
+                runtime=runtime.package_name if runtime is not None else None,
+                module=self._runner.module if isinstance(self._runner, ProducerRuntime) else None,
             )
             (directory / "conanfile.py").write_text(recipe, encoding="utf-8")
             exact = self._variants.publish_recipe(directory)
@@ -117,6 +148,7 @@ class ProducerRecipes:
                     "command": stage.command,
                     "inputs": stage.inputs,
                     "outputs": tuple(sorted(stage.spec.outputs)),
+                    **({"configuration": stage.configuration} if stage.configuration else {}),
                 }
             )
         return commands

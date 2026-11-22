@@ -334,9 +334,13 @@ lockfile, точные зависимости, выбранные вариант
 готовности от flow.
 
 `Project.publish_producers()` экспортирует группы `RecipeStage` для последующей
-пересборки. Flow передаёт файл с функцией
-`run_pipeline(configuration, stages, directory)`, которая выполняет стадии
-и записывает объявленные результаты.
+пересборки. `ProducerRuntime(project, module)` из `coreref.api.build.runtime`
+публикует файлы окружения uv в одном пакете. Рецепты требуют его точную
+ревизию и запускают `python -m module <pipeline.json> <рабочая директория>`
+в окружении производителя. Flow определяет команды по именам стадий и может
+использовать `RecipeStage.configuration` для параметров каждой стадии.
+Исполнитель в виде файла с `run_pipeline(configuration, stages, directory)`
+тоже поддерживается.
 
 ## Именованные выходы и общий кэш стадий
 

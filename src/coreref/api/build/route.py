@@ -52,6 +52,7 @@ class RecipeStage:
     spec: StageSpec
     inputs: tuple[str, ...]
     command: tuple[str, ...]
+    configuration: Mapping[str, JSON] = field(default_factory=dict)
 
 
 class _Document(BaseModel):
