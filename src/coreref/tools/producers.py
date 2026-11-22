@@ -1,0 +1,188 @@
+"""Generate Conan producer recipes from groups of prepared stages."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from graphlib import CycleError, TopologicalSorter
+from pathlib import Path
+from shutil import copyfile
+from tempfile import TemporaryDirectory
+
+from .._internal.recipe import _RECIPE_ENV
+from ..api.catalog import Catalog
+from ..api.records import JSON, Ref
+from .artifacts import fingerprint
+from .outputs import PRODUCER_NAMESPACE, Producer
+from .route import StageSpec
+from .variants import Variants
+
+# Staged name -> exact producer and filename in its binary package.
+Bindings = Mapping[str, tuple[Producer, str]]
+_PRODUCER_TEMPLATE = _RECIPE_ENV.get_template("producer.py.j2")
+
+
+@dataclass(frozen=True)
+class RecipeStage:
+    """A stage declaration with the inputs and arguments its runner accepts."""
+
+    spec: StageSpec
+    inputs: tuple[str, ...]
+    command: tuple[str, ...]
+
+
+class ProducerRecipes:
+    """Package prepared inputs, stage groups, and a self-contained Python runner."""
+
+    def __init__(
+        self,
+        catalog: Catalog,
+        prepared: Path,
+        *,
+        runner: Path,
+        configuration: Mapping[str, JSON],
+    ) -> None:
+        self._variants = Variants(catalog)
+        self._prepared = prepared
+        self._runner = runner
+        self._configuration = dict(configuration)
+
+    def publish(
+        self,
+        project: Ref,
+        stages: tuple[RecipeStage, ...],
+        *,
+        members: Mapping[str, tuple[str, ...]],
+        outputs: Mapping[str, tuple[str, ...]],
+        external: Bindings,
+    ) -> dict[str, Producer]:
+        """Publish complete groups from topologically ordered, prepared stages."""
+        component = fingerprint(project.package_name)
+        published: dict[str, Producer] = {}
+        plan = _groups(stages, members)
+        for group, dependencies, commands in plan:
+            ref = Ref(f"{PRODUCER_NAMESPACE}.{component}-{group}/{project.version}")
+            bindings = _bindings(commands, published, outputs, external)
+            required = {published[name].ref: published[name] for name in dependencies}
+            required.update((producer.ref, producer) for producer, _ in bindings.values())
+            published[group] = self._publish_group(
+                ref, commands, outputs=outputs[group], bindings=bindings, required=required
+            )
+        return published
+
+    def _publish_group(
+        self,
+        ref: Ref,
+        stages: tuple[RecipeStage, ...],
+        *,
+        outputs: tuple[str, ...],
+        bindings: Bindings,
+        required: Mapping[str, Producer],
+    ) -> Producer:
+        closure = set(required)
+        for producer in required.values():
+            closure.update(producer.prerequisites)
+
+        with TemporaryDirectory(prefix="coreref-producer-") as temporary:
+            directory = Path(temporary)
+            commands = self._stage_inputs(directory, stages, bindings)
+            layout = {
+                "configuration": self._configuration,
+                "stages": commands,
+                "outputs": outputs,
+                "bindings": {
+                    target: (Ref(producer.ref).package_name, filename)
+                    for target, (producer, filename) in bindings.items()
+                },
+            }
+            (directory / "pipeline.json").write_text(
+                json.dumps(layout, sort_keys=True), encoding="utf-8"
+            )
+            copyfile(self._runner, directory / "stage_runner.py")
+            recipe = _PRODUCER_TEMPLATE.render(
+                name=ref.package_name, version=ref.version, dependencies=sorted(required)
+            )
+            (directory / "conanfile.py").write_text(recipe, encoding="utf-8")
+            exact = self._variants.publish_recipe(directory)
+        return Producer(ref=str(exact), prerequisites=tuple(sorted(closure)))
+
+    def _stage_inputs(
+        self, directory: Path, stages: tuple[RecipeStage, ...], bindings: Bindings
+    ) -> list[JSON]:
+        staged = directory / "inputs"
+        staged.mkdir()
+        available = set(bindings)
+        commands: list[JSON] = []
+        for stage in stages:
+            for name in sorted(set(stage.inputs) - available):
+                target = staged / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                copyfile(self._prepared / name, target)
+            available.update(stage.inputs)
+            available.update(stage.spec.outputs)
+            commands.append(
+                {
+                    "name": stage.spec.name,
+                    "command": stage.command,
+                    "inputs": stage.inputs,
+                    "outputs": tuple(sorted(stage.spec.outputs)),
+                }
+            )
+        return commands
+
+
+def _groups(
+    stages: tuple[RecipeStage, ...], members: Mapping[str, tuple[str, ...]]
+) -> list[tuple[str, tuple[str, ...], tuple[RecipeStage, ...]]]:
+    names = {stage.spec.name for stage in stages}
+    stage_groups = {
+        stage: group for group, group_members in members.items() for stage in group_members
+    }
+    complete = {
+        group: tuple(stage for stage in stages if stage.spec.name in group_members)
+        for group, group_members in members.items()
+        if set(group_members) <= names
+    }
+    edges = {
+        group: tuple(sorted(_group_needs(group, group_stages, stage_groups)))
+        for group, group_stages in complete.items()
+    }
+    try:
+        ordered = tuple(TopologicalSorter(edges).static_order())
+    except CycleError as exc:
+        raise ValueError(f"Cycle between Conan producer groups: {exc.args[1]}") from exc
+    selected: dict[str, tuple[RecipeStage, ...]] = {}
+    for group in ordered:
+        if group in complete and all(name in selected for name in edges[group]):
+            selected[group] = complete[group]
+    return [(group, edges[group], commands) for group, commands in selected.items()]
+
+
+def _group_needs(
+    group: str, stages: tuple[RecipeStage, ...], stage_groups: Mapping[str, str]
+) -> set[str]:
+    return {
+        stage_groups[required]
+        for stage in stages
+        for required in stage.spec.needs
+        if required in stage_groups and stage_groups[required] != group
+    }
+
+
+def _bindings(
+    stages: tuple[RecipeStage, ...],
+    published: Mapping[str, Producer],
+    outputs: Mapping[str, tuple[str, ...]],
+    external: Bindings,
+) -> dict[str, tuple[Producer, str]]:
+    inputs = {name for stage in stages for name in stage.inputs}
+    produced = {name for stage in stages for name in stage.spec.outputs}
+    bindings = {name: external[name] for name in sorted(inputs & external.keys())}
+    for group, producer in published.items():
+        for name in sorted((inputs & set(outputs[group])) - produced):
+            bindings[name] = (producer, name)
+    return bindings
+
+
+__all__ = ["ProducerRecipes", "RecipeStage"]

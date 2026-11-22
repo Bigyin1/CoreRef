@@ -1,0 +1,42 @@
+import json
+import runpy
+from pathlib import Path
+from shutil import copyfile, copytree
+
+from conan import ConanFile
+
+
+class StageProducer(ConanFile):
+    name = {{ name | tojson }}
+    version = {{ version | tojson }}
+    revision_mode = "hash"
+    exports_sources = "inputs/*", "pipeline.json", "stage_runner.py"
+
+    def requirements(self):
+        for reference in {{ dependencies | tojson }}:
+            self.requires(reference, headers=False, libs=False, run=False, package_id_mode="full_mode")
+
+    def build(self):
+        source = Path(self.source_folder)
+        layout = json.loads((source / "pipeline.json").read_bytes())
+        directory = Path(self.build_folder) / "pipeline"
+        directory.mkdir(parents=True, exist_ok=True)
+        inputs = source / "inputs"
+        if inputs.is_dir():
+            copytree(inputs, directory, dirs_exist_ok=True)
+        for target, (package, filename) in layout["bindings"].items():
+            dependency = self.dependencies[package]
+            destination = directory / target
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            copyfile(Path(dependency.package_folder) / filename, destination)
+        runner = runpy.run_path(str(source / "stage_runner.py"))
+        runner["run_pipeline"](layout["configuration"], layout["stages"], directory)
+
+    def package(self):
+        layout = json.loads((Path(self.source_folder) / "pipeline.json").read_bytes())
+        directory = Path(self.package_folder)
+        directory.mkdir(parents=True, exist_ok=True)
+        for name in layout["outputs"]:
+            output = directory / name
+            output.parent.mkdir(parents=True, exist_ok=True)
+            copyfile(Path(self.build_folder) / "pipeline" / name, output)
