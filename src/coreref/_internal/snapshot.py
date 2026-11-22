@@ -12,7 +12,7 @@ from ..api.build.outputs import SliceInputs
 from ..api.packages.records import JSON
 
 if TYPE_CHECKING:
-    from ..api.build.route import Route, StageInputs, StageSpec
+    from ..api.build.route import Route, Stage, StageSpec
     from ..api.packages.variants import ConfiguredPackage
     from ..api.projects.project import Project
 
@@ -59,7 +59,7 @@ class Snapshot:
         project: Project,
         route: Route,
         *,
-        stage_inputs: Callable[[StageSpec], StageInputs],
+        stage_inputs: Callable[[StageSpec], Stage],
         variants: Callable[[], Mapping[str, ConfiguredPackage]],
     ) -> None:
         self._project = project
@@ -70,7 +70,7 @@ class Snapshot:
     def inputs(self, commit: str | None, outputs: Mapping[str, Path] | None = None) -> SliceInputs:
         """Read the complete release route independently of the current build target."""
         project = self._project
-        stages = {stage.name: self._stage_inputs(stage) for stage in self._route.release()}
+        stages = {stage.name: self._stage_inputs(stage) for stage in self._route._release()}
         files: dict[str, Path | None] = {
             f"packaged/{name}": path for name, path in project.record.files.items()
         }
@@ -88,7 +88,7 @@ class Snapshot:
                 "manifest": project.manifest.model_dump(
                     mode="json", exclude={"ref", "dependencies", "files", "payload"}
                 ),
-                "route": self._route.release_document(),
+                "route": self._route._release_document(),
                 "stages": {name: inputs.configuration for name, inputs in stages.items()},
             },
             variants={name: package.binary_reference for name, package in self._variants().items()},

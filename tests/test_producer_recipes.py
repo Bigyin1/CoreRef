@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from coreref._internal.producers import ProducerRecipes
+from coreref._internal.producers import ProducerRecipes, RecipeStage
 from coreref.api.build import producer
-from coreref.api.build.route import RecipeStage, StageSpec
+from coreref.api.build.route import StageSpec
 from coreref.api.packages.catalog import Catalog
 from coreref.api.packages.records import Ref
 from coreref.api.packages.variants import PackageInput, Variants

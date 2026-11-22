@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path, PurePosixPath
@@ -11,7 +11,6 @@ from typing import Literal
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..._internal.pipeline import Pipeline
 from ..packages.records import JSON
 
 
@@ -25,34 +24,16 @@ class StageSpec(BaseModel):
 
 
 @dataclass(frozen=True, kw_only=True)
-class BuildStage:
-    """Declare one action, its input files, and its outputs in the build directory."""
+class Stage:
+    """Bind a stage to its action, input files and parameters."""
 
-    name: str
     action: Callable[[], object]
-    inputs: tuple[str, ...]
-    outputs: tuple[str, ...]
-    configuration: Mapping[str, JSON] = field(default_factory=dict)
-    needs: tuple[str, ...] = ()
-    always_run: bool = False
-
-
-@dataclass(frozen=True)
-class StageInputs:
-    """External files and configuration that identify a stage before its outputs exist."""
-
+    inputs: tuple[str, ...] = ()
     files: Mapping[str, Path] = field(default_factory=dict)
-    configuration: JSON = None
-
-
-@dataclass(frozen=True)
-class RecipeStage:
-    """A stage declaration with the inputs and arguments its runner accepts."""
-
-    spec: StageSpec
-    inputs: tuple[str, ...]
-    command: tuple[str, ...]
     configuration: Mapping[str, JSON] = field(default_factory=dict)
+    local_configuration: Mapping[str, JSON] = field(default_factory=dict)
+    bundled_inputs: tuple[str, ...] = ()
+    always_run: bool = False
 
 
 class _Document(BaseModel):
@@ -129,7 +110,10 @@ class Route:
         except KeyError as exc:
             raise ValueError(f"Unknown stage {name!r}") from exc
 
-    def closure(self, targets: tuple[str, ...]) -> tuple[StageSpec, ...]:
+    def __contains__(self, name: str) -> bool:
+        return name in self._stages
+
+    def _closure(self, targets: Iterable[str]) -> tuple[StageSpec, ...]:
         pending = list(targets)
         selected: set[str] = set()
         while pending:
@@ -140,48 +124,37 @@ class Route:
                 pending.extend(stage.needs)
         return tuple(self[name] for name in self.order if name in selected)
 
-    def run(
-        self,
-        directory: Path,
-        targets: tuple[str, ...],
-        bind: Callable[[tuple[StageSpec, ...]], tuple[BuildStage, ...]],
-    ) -> dict[str, Path]:
-        """Execute the selected stages and return the paths of their outputs."""
-        stages = self.closure(targets)
-        Pipeline(directory, bind(stages)).run(*targets)
-        return {name: directory / name for stage in stages for name in stage.outputs}
-
-    def release(self, cap: str | None = None) -> tuple[StageSpec, ...]:
+    def _release(self, cap: str | None = None) -> tuple[StageSpec, ...]:
         if cap is not None:
             if self[cap].purpose != "release":
                 raise ValueError(f"Expected a release stage, got {cap!r}")
-            return self.closure((cap,))
+            return self._closure((cap,))
         return tuple(self[name] for name in self.order if self[name].purpose == "release")
 
-    def ready(
-        self, accepts: Callable[[str], bool], *, cap: str | None = None
+    def _ready(
+        self, accepts: Callable[[StageSpec], bool], *, cap: str | None = None
     ) -> tuple[StageSpec, ...]:
         """Return release stages whose prerequisites and own inputs are available."""
         ready: dict[str, StageSpec] = {}
-        for stage in self.release(cap):
-            if all(name in ready for name in stage.needs) and accepts(stage.name):
+        for stage in self._release(cap):
+            if all(name in ready for name in stage.needs) and accepts(stage):
                 ready[stage.name] = stage
         return tuple(ready.values())
 
     @staticmethod
-    def targets(stages: tuple[StageSpec, ...]) -> tuple[str, ...]:
+    def _targets(stages: tuple[StageSpec, ...]) -> tuple[str, ...]:
         """Find the terminal stages of a selected, dependency-closed subgraph."""
         upstream = {name for stage in stages for name in stage.needs}
         return tuple(stage.name for stage in stages if stage.name not in upstream)
 
-    def release_document(self) -> JSON:
+    def _release_document(self) -> JSON:
         return [
             {
                 "name": stage.name,
                 "needs": tuple(sorted(stage.needs)),
                 "outputs": tuple(sorted(stage.outputs)),
             }
-            for stage in sorted(self.release(), key=lambda stage: stage.name)
+            for stage in sorted(self._release(), key=lambda stage: stage.name)
         ]
 
 
@@ -241,4 +214,4 @@ def _output_path(name: str) -> PurePosixPath:
     return path
 
 
-__all__ = ["BuildStage", "RecipeStage", "Route", "StageInputs", "StageSpec"]
+__all__ = ["Route", "Stage", "StageSpec"]

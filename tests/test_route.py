@@ -17,7 +17,7 @@ def test_imports_share_named_stages_in_a_diamond(tmp_path: Path) -> None:
     )
     (tmp_path / "flow.yml").write_text("imports: [be.yml, dft.yml]\n")
     route = Route.load(tmp_path)
-    assert tuple(stage.name for stage in route.closure(("synth",))) == ("rtl", "dft", "synth")
+    assert tuple(stage.name for stage in route._closure(("synth",))) == ("rtl", "dft", "synth")
 
 
 @pytest.mark.parametrize(
@@ -65,8 +65,8 @@ def test_ready_branches_can_stop_independently(tmp_path: Path) -> None:
         "  - {name: check, outputs: [report], purpose: development}\n"
     )
     route = Route.load(tmp_path)
-    assert route.targets(route.ready(lambda name: name != "build")) == ("source", "data")
-    assert route.targets(route.ready(lambda _: True, cap="build")) == ("build",)
+    assert route._targets(route._ready(lambda stage: stage.name != "build")) == ("source", "data")
+    assert route._targets(route._ready(lambda _: True, cap="build")) == ("build",)
 
 
 def test_route_validates_handler_interface(tmp_path: Path) -> None:
@@ -77,7 +77,7 @@ def test_route_validates_handler_interface(tmp_path: Path) -> None:
     route = Route.load(tmp_path)
     contracts = {"prepare": ("data",), "report": ("report.txt",)}
     route.validate_handlers(contracts, inputs={"report": ("data",)})
-    assert route.release_document() == [
+    assert route._release_document() == [
         {"name": "prepare", "needs": (), "outputs": ("data",)},
         {"name": "report", "needs": ("prepare",), "outputs": ("report.txt",)},
     ]

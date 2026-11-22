@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from coreref._internal.pipeline import Pipeline
-from coreref.api.build.route import BuildStage
+from coreref._internal.pipeline import BuildStage, Pipeline
 
 
 def test_pipeline_tracks_dependencies_files_and_configuration(tmp_path: Path) -> None:

@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from doit.cmd_base import ModuleTaskLoader  # type: ignore[import-untyped]
 from doit.doit_cmd import DoitMain  # type: ignore[import-untyped]
 from doit.tools import config_changed  # type: ignore[import-untyped]
 
-if TYPE_CHECKING:
-    from ..api.build.route import BuildStage
+from ..api.packages.records import JSON
+
+
+@dataclass(frozen=True, kw_only=True)
+class BuildStage:
+    name: str
+    action: Callable[[], object]
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
+    configuration: Mapping[str, JSON] = field(default_factory=dict)
+    needs: tuple[str, ...] = ()
+    always_run: bool = False
 
 
 @dataclass(frozen=True)

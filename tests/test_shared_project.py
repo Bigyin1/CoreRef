@@ -15,7 +15,7 @@ from coreref.api.build.environment import (
     pinned_image,
 )
 from coreref.api.build.outputs import SliceInputs
-from coreref.api.build.route import Route, StageInputs, StageSpec
+from coreref.api.build.route import Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
 from coreref.api.packages.catalog import Catalog
 from coreref.api.packages.records import LocalRecord, Ref, Requirement
@@ -143,9 +143,10 @@ def test_snapshot_tracks_inputs_of_release_stages(tmp_path: Path, catalog: Catal
     source.write_text("initial")
     flags = ["one"]
 
-    def stage_inputs(stage: StageSpec) -> StageInputs:
+    def stage_inputs(stage: StageSpec) -> Stage:
         assert stage.name == "emit"
-        return StageInputs(
+        return Stage(
+            action=lambda: None,
             files={"source": source, "optional": optional},
             configuration={"flags": tuple(flags)},
         )

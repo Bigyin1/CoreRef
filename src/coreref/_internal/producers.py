@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from shutil import copyfile
 from tempfile import TemporaryDirectory
 
 from ..api.build.outputs import PRODUCER_NAMESPACE, Producer
-from ..api.build.route import RecipeStage
+from ..api.build.route import StageSpec
 from ..api.build.runtime import ProducerRuntime
 from ..api.packages.catalog import Catalog
 from ..api.packages.records import JSON, LocalRecord, Ref
@@ -22,6 +22,14 @@ from .recipe import _RECIPE_ENV
 # Staged name -> exact producer and filename in its binary package.
 Bindings = Mapping[str, tuple[Producer, str]]
 _PRODUCER_TEMPLATE = _RECIPE_ENV.get_template("producer.py.j2")
+
+
+@dataclass(frozen=True)
+class RecipeStage:
+    spec: StageSpec
+    inputs: tuple[str, ...]
+    command: tuple[str, ...] = ()
+    configuration: Mapping[str, JSON] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
