@@ -38,16 +38,16 @@ class Producer(ConanFile):
     wrong = Ref(f"{prerequisite.without_revision()}#other")
 
     with pytest.raises(NotFound, match="package binary"):
-        reader.get(target, lockfile=None, build_missing=True, build_prerequisites=(wrong,))
+        reader._get(target, lockfile=None, build_missing=True, build_prerequisites=(wrong,))
     with pytest.raises(InvalidPackage, match="exact recipe revisions"):
-        reader.get(
+        reader._get(
             target,
             lockfile=None,
             build_missing=True,
             build_prerequisites=(prerequisite.without_revision(),),
         )
 
-    installed = reader.get(
+    installed = reader._get(
         target, lockfile=None, build_missing=True, build_prerequisites=(prerequisite,)
     )
     assert (installed.directory / "result").read_text() == "output"

@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from shutil import copyfile
 
+from .._internal.artifacts import ArtifactStore, OutputIndex
 from ..api.catalog import Catalog
 from ..api.query import SearchQuery
 from ..api.records import JSON, LocalRecord, Ref
-from .artifacts import ArtifactStore, OutputIndex, file_digest, fingerprint
+from .artifacts import file_digest, fingerprint
 
 
 class CacheMode(str, Enum):
@@ -43,7 +45,7 @@ class StageInvocation:
             "command": self.command,
         }
 
-    def key(self, directory: Path, inputs: tuple[str, ...]) -> str:
+    def _key(self, directory: Path, inputs: tuple[str, ...]) -> str:
         """Hash the named bytes staged for execution, independent of checkout path."""
         return fingerprint(
             {
@@ -57,15 +59,33 @@ class StageCache:
     """Restore or upload verified outputs for an exact build invocation."""
 
     def __init__(self, catalog: Catalog, mode: CacheMode) -> None:
-        self.catalog = catalog
+        self._catalog = catalog
         self.mode = mode
-        self.artifacts = ArtifactStore(catalog)
+        self._artifacts = ArtifactStore(catalog)
 
-    def restore(self, stage: str, key: str, directory: Path, *, outputs: tuple[str, ...]) -> bool:
-        """Return False for a missing entry and reject inconsistent or damaged entries."""
+    def run(
+        self,
+        invocation: StageInvocation,
+        directory: Path,
+        *,
+        inputs: tuple[str, ...],
+        outputs: tuple[str, ...],
+        action: Callable[[], None],
+    ) -> str | None:
+        """Run the action on a cache miss. Return the key only when restored."""
         if self.mode is CacheMode.OFF:
-            return False
-        refs = self.catalog.search_refs(
+            action()
+            return None
+        key = invocation._key(directory, inputs)
+        if self._restore(invocation.name, key, directory, outputs):
+            return key
+        action()
+        if self.mode is CacheMode.WRITE:
+            self._publish(invocation.name, key, directory, outputs)
+        return None
+
+    def _restore(self, stage: str, key: str, directory: Path, outputs: tuple[str, ...]) -> bool:
+        refs = self._catalog.search_refs(
             SearchQuery(namespace="coreref-stage", component=stage, version=key),
             all_revisions=True,
         )
@@ -73,21 +93,18 @@ class StageCache:
             return False
         if len(refs) != 1:
             raise ValueError(f"Conflicting shared cache entries for {stage}/{key}")
-        index = OutputIndex.from_record(self.catalog.info(refs[0]))
+        index = OutputIndex.from_record(self._catalog.info(refs[0]))
         if index is None or index.key != key or set(index.outputs) != set(outputs):
             raise ValueError(f"Invalid shared cache index {refs[0]}")
         for name, artifact in index.outputs.items():
             output = directory / name
             output.parent.mkdir(parents=True, exist_ok=True)
-            copyfile(self.artifacts.get(artifact), output)
+            copyfile(self._artifacts.get(artifact), output)
         return True
 
-    def publish(self, stage: str, key: str, directory: Path, *, outputs: tuple[str, ...]) -> None:
-        """Publish verified files before exposing their output index in write mode."""
-        if self.mode is not CacheMode.WRITE:
-            return
-        index = self.artifacts.pack_index(key, {name: directory / name for name in outputs})
-        self.artifacts.upload(index.outputs)
-        self.catalog.publish(
+    def _publish(self, stage: str, key: str, directory: Path, outputs: tuple[str, ...]) -> None:
+        index = self._artifacts.pack_index(key, {name: directory / name for name in outputs})
+        self._artifacts.upload(index.outputs)
+        self._catalog.publish(
             LocalRecord(Ref(f"coreref-stage.{stage}/{key}"), {"output_index": index.document()})
         )

@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from .._internal.recipe import LocalRecipe
 from ..api.errors import Conflict, InvalidPackage, NotFound
 from ..api.graph import Graph
-from ..api.records import JSON, Dependency, LocalRecord, Ref, Requirement
+from ..api.records import JSON, Dependency, LocalRecord, Ref, Requirement, parse_dependency
 
 if TYPE_CHECKING:
     from ..api.catalog import Catalog
@@ -55,7 +55,7 @@ class ManifestFile:
             raise InvalidPackage("A local package root must not specify a revision")
         self._dependencies: list[Dependency] = []
         for value in data.dependencies:
-            ref = self._dependency(value)
+            ref = parse_dependency(value)
             if any(current.package_name == ref.package_name for current in self._dependencies):
                 raise InvalidPackage("Duplicate package in dependencies")
             self.add(ref)
@@ -120,15 +120,9 @@ class ManifestFile:
         """Resolve current declarations afresh, then save their exact revision selection."""
         return self.resolve(catalog, update=True).create_lockfile(self.lockfile)
 
-    @staticmethod
-    def _dependency(value: Dependency | str) -> Dependency:
-        if not isinstance(value, str):
-            return value
-        return Requirement(value) if value.partition("/")[2].startswith("[") else Ref(value)
-
     def add(self, value: Dependency | str) -> None:
         """Add or replace a dependency declaration; changes are saved explicitly."""
-        ref = self._dependency(value)
+        ref = parse_dependency(value) if isinstance(value, str) else value
         if ref.package_name == self.record.ref.package_name:
             raise InvalidPackage("A package cannot depend on itself")
         for index, current in enumerate(self._dependencies):
@@ -139,7 +133,7 @@ class ManifestFile:
 
     def remove(self, value: Dependency | str) -> None:
         """Remove a matching range or logical Ref; an explicit revision must match."""
-        ref = self._dependency(value)
+        ref = parse_dependency(value) if isinstance(value, str) else value
         if isinstance(ref, Requirement):
             if ref not in self._dependencies:
                 raise NotFound(f"Dependency is not declared: {ref}")

@@ -105,8 +105,8 @@ def test_file_then_source_upgrade_survives_new_revision_and_lost_publisher(
         assert snapshot.get((history.first.ref,))[0] is ready
         assert snapshot.records == before
         assert sum(call.args[0] == "install" for call in run.call_args_list) == 2
-    latest = snapshot.catalog.get_with_sources(
-        Ref.from_fields(**second.ref.without_revision().to_dict())
+    latest = snapshot.catalog.get(
+        Ref.from_fields(**second.ref.without_revision().to_dict()), with_sources=True
     )
     assert latest.ref == second.ref and latest.source is not None
     assert "updated" in (latest.source / "cpu.sv").read_text()

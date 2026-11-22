@@ -50,7 +50,7 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
     assert published.has_source
     assert manifest.path.read_bytes() == original
     assert manifest.record.ref.revision is None
-    installed = catalog.get_with_sources(published.ref)
+    installed = catalog.get(published.ref, with_sources=True)
     assert installed.source is not None
     assert (installed.source / "manifest.yml").read_bytes() == original
 

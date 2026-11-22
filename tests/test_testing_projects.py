@@ -38,7 +38,7 @@ def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
         assert not (PROJECTS / "cpu/.git").exists()
         # The server records SCM pointing at independent bare origins.
         shutil.rmtree(env.projects / "cpu")
-        assert env.new_catalog().get_with_sources(published["cpu"].ref).source is not None
+        assert env.new_catalog().get(published["cpu"].ref, with_sources=True).source is not None
 
 
 def test_project_copy_preserves_custom_manifest_and_can_be_editable(

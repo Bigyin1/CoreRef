@@ -65,13 +65,13 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
     artifacts = packages.get(record.ref)
     assert artifacts.source is None
     assert artifacts.files == {}
-    fetched = packages.get_with_sources(record.ref)
+    fetched = packages.get(record.ref, with_sources=True)
     assert fetched.source is not None
     assert _commit(fetched.source) == _commit(checkout)
     assert (fetched.source / "cpu.sv").read_text() == "module cpu; endmodule\n"
     assert fetched.source.is_relative_to(packages._client.home)
     shutil.rmtree(checkout)
-    assert packages.get_with_sources(record.ref).source == fetched.source
+    assert packages.get(record.ref, with_sources=True).source == fetched.source
     assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["has_source"] is True
     assert "source" not in record.to_dict()
 
@@ -86,12 +86,12 @@ def test_pinned_source_round_trip_uses_conan_scm(checkout: Path, *, catalog: Cat
     assert "scm" not in json.loads((folder / "record.json").read_text())
     assert "scm" in (folder / "conandata.yml").read_text()
     assert str(checkout) not in (folder / "conanfile.py").read_text()
-    fetched = catalog.get_with_sources(record.ref)
+    fetched = catalog.get(record.ref, with_sources=True)
     assert fetched.source is not None
     assert (fetched.source / "cpu.sv").is_file()
     changed = catalog.publish(local_record(description))
     assert changed.ref != record.ref
-    assert catalog.get_with_sources(record.ref).source == fetched.source
+    assert catalog.get(record.ref, with_sources=True).source == fetched.source
 
 
 def test_dirty_source_fails_before_publication(checkout: Path, *, catalog: Catalog) -> None:
@@ -178,7 +178,7 @@ def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
     assert result.source is None
     assert result.files == {}
     with pytest.raises(CatalogError):
-        packages.get_with_sources(record.ref)
+        packages.get(record.ref, with_sources=True)
 
 
 def _commit(checkout: Path) -> str:
@@ -206,7 +206,7 @@ def test_recipe_declares_requires_and_conandata_tracks_scm(
     assert recipe.has_source
     assert Graph(catalog, parent.ref).dependencies() == (dependency,)
     assert str(dependency.ref) in (recipe.directory / "conanfile.py").read_text()
-    assert catalog.get_with_sources(parent.ref).source is not None
+    assert catalog.get(parent.ref, with_sources=True).source is not None
 
 
 def test_legacy_conandata_requirements_can_still_be_inspected(
@@ -248,7 +248,7 @@ def test_conan_reports_missing_scm_coordinates_when_sources_are_requested(
     (folder / "conandata.yml").write_text(yaml.safe_dump({"scm": {"commit": "HEAD"}}))
     assert catalog.get(record.ref) == record
     with pytest.raises(CatalogError, match="Could not retrieve package contents") as error:
-        catalog.get_with_sources(record.ref)
+        catalog.get(record.ref, with_sources=True)
     assert error.value.__cause__ is not None
 
 
@@ -285,5 +285,5 @@ def test_exported_recipe_omits_publisher_paths_and_has_stable_revision(
     assert stored.has_source and git_origin.is_dir()
     shutil.rmtree(checkout)
     shutil.rmtree(relocated)
-    fetched = catalog.get_with_sources(ref)
+    fetched = catalog.get(ref, with_sources=True)
     assert fetched.source is not None and (fetched.source / "cpu.sv").is_file()

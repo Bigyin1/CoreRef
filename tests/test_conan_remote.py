@@ -139,10 +139,10 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     git_origin.rename(offline)
     try:
         with pytest.raises(CatalogError):
-            reader.get_with_sources(Ref.from_fields(**published.ref.to_dict()))
+            reader.get(Ref.from_fields(**published.ref.to_dict()), with_sources=True)
     finally:
         offline.rename(git_origin)
-    fetched = reader.get_with_sources(Ref.from_fields(**published.ref.to_dict()))
+    fetched = reader.get(Ref.from_fields(**published.ref.to_dict()), with_sources=True)
     assert fetched.files == installed.files
     assert fetched.source is not None
     assert (fetched.source / "cpu.sv").read_text() == "module cpu; endmodule\n"
@@ -320,7 +320,7 @@ def test_remote_sources_and_files_belong_to_the_requested_revision(
     reader = Catalog(home)
     shutil.rmtree(checkout)
     for record, text in ((first, "first"), (second, "second")):
-        fetched = reader.get_with_sources(Ref.from_fields(**record.ref.to_dict()))
+        fetched = reader.get(Ref.from_fields(**record.ref.to_dict()), with_sources=True)
         assert fetched.ref == record.ref
         assert fetched.files["report"].read_text() == text
         assert fetched.source is not None

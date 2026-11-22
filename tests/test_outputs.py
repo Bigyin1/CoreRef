@@ -10,7 +10,8 @@ from coreref.api.errors import InvalidPackage, NotFound
 from coreref.api.graph import Graph
 from coreref.api.records import LocalRecord, Ref
 from coreref.testing import Sandbox, environment
-from coreref.tools.artifacts import OutputIndex, SliceInputs
+from coreref.testing.operations import trace_operations
+from coreref.tools.artifacts import SliceInputs
 from coreref.tools.outputs import Outputs, Producer, read_producers
 from coreref.tools.variants import Variants
 
@@ -38,8 +39,11 @@ def test_publish_extends_same_slice_across_other_revisions(tmp_path: Path) -> No
         store.publish(graph, replace(inputs, commit="other"), {"timing.lib": output}, {})
         assert env.new_catalog().info(first.ref.without_revision()).ref != first.ref
         updated = store.publish(graph, inputs, {"timing.lib": output}, {})
-        index = OutputIndex.from_record(updated)
-        assert index is not None and set(index.outputs) == {"abstract.lef", "timing.lib"}
+        with trace_operations() as operations:
+            links = store.links(updated)
+        assert links is not None and set(links) == {"abstract.lef", "timing.lib"}
+        assert all(ref.revision is not None for ref in links.values())
+        assert not operations.commands
         consumer = Outputs(env.new_catalog())
         assert consumer.get(first, ()) == {}
         paths = consumer.get(updated, ("timing.lib", "abstract.lef"))
@@ -87,7 +91,7 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         output.write_text("LEF")
         store = Outputs(env.catalog)
         index = store.publish(
-            graph, inputs, {"abstract.lef": output}, {"producers": {"layout": producer.document()}}
+            graph, inputs, {"abstract.lef": output}, {}, producers={"layout": producer}
         )
         assert read_producers(index) == {"layout": producer}
         assert store.publish(graph, inputs, {}, {}).ref == index.ref
@@ -95,20 +99,17 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         reader = env.new_catalog()
         groups = {"layout": ("abstract.lef", "timing.lib", "unproduced")}
         with pytest.raises(NotFound, match="Producer binary unavailable"):
-            Outputs(reader).get(index, ("timing.lib",), groups=groups)
+            Outputs(reader, groups=groups).get(index, ("timing.lib",))
         with pytest.raises(ValueError, match="missing outputs"):
             Outputs(reader).get(index, ("unknown",))
-        outputs = Outputs(reader, build_missing=True)
-        assert (
-            outputs.get(index, ("timing.lib",), groups=groups)["timing.lib"].read_text()
-            == "Liberty"
-        )
+        outputs = Outputs(reader, groups=groups, build_missing=True)
+        assert outputs.get(index, ("timing.lib",))["timing.lib"].read_text() == "Liberty"
         with pytest.raises(ValueError, match="did not produce"):
-            outputs.get(index, ("unproduced",), groups=groups)
+            outputs.get(index, ("unproduced",))
 
         different = Producer(ref=str(producer.ref).replace("layout", "different"))
         with pytest.raises(ValueError, match="Producer recipes changed"):
-            store.publish(graph, inputs, {}, {"producers": {"layout": different.document()}})
+            store.publish(graph, inputs, {}, {}, producers={"layout": different})
 
 
 def test_plain_packaged_files_remain_available(catalog: Catalog, tmp_path: Path) -> None:
@@ -117,3 +118,8 @@ def test_plain_packaged_files_remain_available(catalog: Catalog, tmp_path: Path)
     package = catalog.publish(LocalRecord(Ref("demo.macro/1.0"), files={path.name: path}))
     files = Outputs(catalog).get(catalog.info(package.ref), (path.name,))
     assert files[path.name].read_text() == "liberty"
+    assert Outputs.links(package) is None
+    graph = Graph(catalog, LocalRecord(Ref("demo.local/1.0")))
+    lock = graph.create_lockfile(tmp_path / "manifest.lock")
+    inputs = SliceInputs(graph.record.ref, None, lock, (), {})
+    assert Outputs.links(Outputs(catalog).pack(inputs, {}, {})) == {}

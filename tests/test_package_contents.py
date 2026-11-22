@@ -100,7 +100,7 @@ def test_source_presence_and_source_readiness_are_distinct(
     metadata = catalog.info(record.ref)
     assert type(metadata) is Record and metadata.has_source
     assert record.has_source and record.source is None and not record._sources_ready
-    fetched = catalog.get_with_sources(record.ref)
+    fetched = catalog.get(record.ref, with_sources=True)
     assert fetched.has_source and fetched.source is not None and fetched._sources_ready
     assert (fetched.source / "cpu.sv").is_file()
     empty = catalog.publish(LocalRecord(Ref.from_fields("soc", "empty--be--lib-lef", "1.0")))

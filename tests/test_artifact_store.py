@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from coreref._internal.artifacts import ArtifactStore, OutputIndex
 from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
 from coreref.api.query import SearchQuery
 from coreref.api.records import LocalRecord, Ref
 from coreref.testing import LocalServer, configured_home
-from coreref.tools.artifacts import ArtifactStore, OutputIndex, SliceInputs, file_digest
+from coreref.tools.artifacts import SliceInputs, file_digest
 from coreref.tools.stage_cache import CacheMode, StageCache, StageInvocation
 
 
@@ -50,13 +51,13 @@ def test_stage_keys_use_staged_bytes_and_tool_identity(tmp_path: Path) -> None:
     tool = StageInvocation(
         "synth", ("yosys", "-c", "stage.tcl"), f"tool@sha256:{'a' * 64}", "linux/amd64"
     )
-    key = tool.key(first, ("rtl.v", "stage.tcl"))
+    key = tool._key(first, ("rtl.v", "stage.tcl"))
     (second / "downstream.tcl").write_text("change only post-synthesis processing")
-    assert key == tool.key(second, ("stage.tcl", "rtl.v"))
-    assert key != replace(tool, platform="linux/arm64").key(first, ("rtl.v", "stage.tcl"))
-    assert key != replace(tool, image=f"tool@sha256:{'b' * 64}").key(first, ("rtl.v", "stage.tcl"))
+    assert key == tool._key(second, ("stage.tcl", "rtl.v"))
+    assert key != replace(tool, platform="linux/arm64")._key(first, ("rtl.v", "stage.tcl"))
+    assert key != replace(tool, image=f"tool@sha256:{'b' * 64}")._key(first, ("rtl.v", "stage.tcl"))
     (second / "stage.tcl").write_text("synth; opt")
-    assert key != tool.key(second, ("rtl.v", "stage.tcl"))
+    assert key != tool._key(second, ("rtl.v", "stage.tcl"))
 
 
 def test_slice_key_tracks_inputs_and_ignores_output_selection_at_a_commit(tmp_path: Path) -> None:
@@ -89,25 +90,39 @@ def test_shared_stage_cache_and_content_deduplication(
     (tmp_path / "netlist.v").write_text("netlist")
     (tmp_path / "another-name.v").write_text("netlist")
     files = {"netlist.v": tmp_path / "netlist.v", "other.v": tmp_path / "another-name.v"}
-    key = "1" * 64
-    store = ArtifactStore(catalog)
-    index = store.pack_index(key, files)
+    index = ArtifactStore(catalog).pack_index("1" * 64, files)
     assert index.outputs["netlist.v"] == index.outputs["other.v"]
 
     restored = tmp_path / "restored"
     restored.mkdir()
     outputs = ("netlist.v",)
+    invocation = StageInvocation("synth", ("yosys",), f"tool@sha256:{'a' * 64}", "linux/amd64")
     read = StageCache(reader, CacheMode.READ)
-    assert not read.restore("synth", key, restored, outputs=outputs)
-    read.publish("synth", key, tmp_path, outputs=outputs)
-    assert not read.restore("synth", key, restored, outputs=outputs)
-    StageCache(catalog, CacheMode.WRITE).publish("synth", key, tmp_path, outputs=outputs)
+    write = StageCache(catalog, CacheMode.WRITE)
 
-    assert read.restore("synth", key, restored, outputs=outputs)
+    def build() -> None:
+        (restored / "netlist.v").write_text("netlist")
+
+    def fail() -> None:
+        raise RuntimeError("build failed")
+
+    with pytest.raises(RuntimeError, match="build failed"):
+        write.run(invocation, restored, inputs=(), outputs=outputs, action=fail)
+    assert read.run(invocation, restored, inputs=(), outputs=outputs, action=build) is None
+    assert not reader.search_refs(SearchQuery(namespace="coreref-stage"))
+    assert write.run(invocation, restored, inputs=(), outputs=outputs, action=build) is None
+
+    (restored / "netlist.v").unlink()
+    assert read.run(invocation, restored, inputs=(), outputs=outputs, action=fail)
     assert (restored / "netlist.v").read_text() == "netlist"
-    assert not read.restore("synth", "2" * 64, restored, outputs=outputs)
+    assert (
+        StageCache(reader, CacheMode.OFF).run(
+            invocation, restored, inputs=("absent",), outputs=outputs, action=build
+        )
+        is None
+    )
     with pytest.raises(ValueError, match="Invalid shared cache index"):
-        read.restore("synth", key, restored, outputs=("some-other-path",))
+        read.run(invocation, restored, inputs=(), outputs=("some-other-path",), action=fail)
     assert reader.search_refs(SearchQuery(namespace="coreref-artifact")) == (
         Ref(index.outputs["netlist.v"].ref),
     )

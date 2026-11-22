@@ -11,7 +11,6 @@ import pytest
 from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage
 from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
 from coreref.api.records import InstalledRecord, LocalRecord, Ref, Requirement
 from coreref.api.workspace import Workspace
 
@@ -62,7 +61,7 @@ def test_open_keeps_declared_version_range_in_editable_recipe(
 def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cached = catalog.get_with_sources(rtl.ref)
+    cached = catalog.get(rtl.ref, with_sources=True)
     assert not cached.is_editable and cached.source is not None
     assert cached.source.is_relative_to(catalog._client.cache_directory)
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -72,7 +71,7 @@ def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     installed = graph.get(with_sources=True)[0]
     assert installed.is_editable and installed.source == source
     assert not installed.source.is_relative_to(catalog._client.cache_directory)
-    assert catalog.get_with_sources(rtl.ref).source == source
+    assert catalog.get(rtl.ref, with_sources=True).source == source
     output = json.loads(json.dumps(installed.to_dict()))
     assert output["is_editable"] is True and output["source"] == str(source)
     with pytest.raises(AttributeError):
@@ -82,7 +81,7 @@ def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     assert ready_source is not None and (ready_source / "cpu.sv").read_text() == "working version"
     workspace.remove(source)
     assert (source / "conanfile.py").is_file()
-    assert not catalog.get_with_sources(rtl.ref).is_editable
+    assert not catalog.get(rtl.ref, with_sources=True).is_editable
     workspace.add(source)
     assert catalog.get(rtl.ref).is_editable
 
@@ -104,7 +103,7 @@ def test_mixed_graph_batches_only_cached_packages_and_supports_filters(
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, parent.ref)
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
-        selected = graph.get(filters=SearchQuery(component="cpu"), with_sources=True)
+        selected = graph.get((rtl.ref.without_revision(),), with_sources=True)
         assert len(selected) == 1 and selected[0].source == source
         assert selected[0].is_editable
         assert not commands.call_args_list
@@ -204,7 +203,7 @@ def test_a_cached_snapshot_does_not_silently_switch_to_new_editables(
     monkeypatch.chdir(workspace.path.parent)
     with pytest.raises(Conflict, match="Workspace changed"):
         snapshot.get(with_sources=True)
-    ready = Graph(catalog, parent.ref).get(filters=SearchQuery(component="cpu"), with_sources=True)
+    ready = Graph(catalog, parent.ref).get((rtl.ref.without_revision(),), with_sources=True)
     assert ready[0].is_editable and ready[0].source == source
 
 

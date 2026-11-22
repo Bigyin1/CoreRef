@@ -125,16 +125,13 @@ class Graph:
         refs: tuple[Ref, ...] | None = None,
         *,
         with_sources: bool = False,
-        filters: SearchQuery | None = None,
     ) -> tuple[InstalledRecord, ...]:
         """Fetch files for selected nodes, optionally including their Git sources."""
         if refs is None:
             refs = self._ordered_refs(self._root_ref)
             if self._local is not None:
                 refs = refs[:-1]
-        if filters is not None:
-            refs = tuple(ref for ref in refs if filters.matches(self.info(ref)))
-        return self._package.get_with_sources(refs) if with_sources else self._package.get(refs)
+        return self._package.get(refs, with_sources=with_sources)
 
     def get_sources(self, refs: tuple[Ref, ...]) -> dict[Ref, Path]:
         """Fetch Git sources only, keyed by exact refs. Omit packages without sources."""

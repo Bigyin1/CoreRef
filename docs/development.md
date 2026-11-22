@@ -159,7 +159,7 @@ def test_flow(tmp_path, monkeypatch):
         cpu.payload = {"flow": "example"}
         published = sandbox.publish(cpu)
         reader = sandbox.new_catalog()  # Независимый cache, тот же сервер.
-        assert reader.get_with_sources(published.ref).files["config.json"].exists()
+        assert reader.get(published.ref, with_sources=True).files["config.json"].exists()
 
         workspace = sandbox.workspace()
         workspace.add(cpu.source, record=cpu)

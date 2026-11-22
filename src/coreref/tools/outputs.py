@@ -9,12 +9,13 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 
+from .._internal.artifacts import ArtifactStore, OutputIndex
 from ..api.catalog import Catalog
 from ..api.errors import InvalidPackage, NotFound
 from ..api.graph import Graph
 from ..api.query import SearchQuery
 from ..api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
-from .artifacts import ArtifactStore, OutputIndex, SliceInputs
+from .artifacts import SliceInputs
 from .variants import PackageInput, Variants
 
 PRODUCER_NAMESPACE = "coreref-producer"
@@ -34,15 +35,13 @@ class Producer(BaseModel):
                 raise ValueError(f"Expected an exact producer reference, got {value}")
         return self
 
-    def document(self) -> JSON:
+    def _document(self) -> JSON:
         return {"ref": self.ref, "prerequisites": self.prerequisites}
 
 
 def read_producers(record: Record) -> dict[str, Producer]:
-    return _parse_producers(record.payload)
-
-
-def _parse_producers(payload: JSON) -> dict[str, Producer]:
+    """Read the registered producers of an exact project revision."""
+    payload = record.payload
     if not isinstance(payload, Mapping) or "producers" not in payload:
         return {}
     return TypeAdapter(dict[str, Producer]).validate_json(json.dumps(payload["producers"]))
@@ -56,23 +55,46 @@ def _merge_producers(
     return dict(older) | dict(newer)
 
 
+def _metadata(
+    index: OutputIndex, payload: Mapping[str, JSON], producers: Mapping[str, Producer]
+) -> dict[str, JSON]:
+    if payload.keys() & {"output_index", "producers"}:
+        raise InvalidPackage("Output metadata is managed by Outputs; use the producers argument")
+    result: dict[str, JSON] = {**payload, "output_index": index.document()}
+    if producers:
+        result["producers"] = {name: producer._document() for name, producer in producers.items()}
+    return result
+
+
 class Outputs:
     """Store named files under the resolved project and recover missing outputs on demand."""
 
-    def __init__(self, catalog: Catalog, *, build_missing: bool = False) -> None:
+    def __init__(
+        self,
+        catalog: Catalog,
+        *,
+        groups: Mapping[str, tuple[str, ...]] | None = None,
+        build_missing: bool = False,
+    ) -> None:
         self._catalog = catalog
         self._store = ArtifactStore(catalog)
         self._variants = Variants(catalog)
         self._build_missing = build_missing
+        self._groups = dict(groups or {})
 
     def pack(
-        self, inputs: SliceInputs, files: Mapping[str, Path], payload: Mapping[str, JSON]
+        self,
+        inputs: SliceInputs,
+        files: Mapping[str, Path],
+        payload: Mapping[str, JSON],
+        *,
+        producers: Mapping[str, Producer] | None = None,
     ) -> InstalledRecord:
         """Pack files and an index into the local cache."""
         index = self._store.pack_index(inputs.key(), files)
         record = LocalRecord(
             Ref(f"coreref-snapshot.index/{index.key}"),
-            {**payload, "output_index": index.document()},
+            _metadata(index, payload, producers or {}),
         )
         return self._catalog._pack(record)
 
@@ -82,6 +104,8 @@ class Outputs:
         inputs: SliceInputs,
         files: Mapping[str, Path],
         payload: Mapping[str, JSON],
+        *,
+        producers: Mapping[str, Producer] | None = None,
     ) -> InstalledRecord:
         """Publish files before exposing the index, extending previous outputs of that slice."""
         if graph.catalog is not self._catalog or not isinstance(graph.record, LocalRecord):
@@ -90,15 +114,10 @@ class Outputs:
             raise InvalidPackage("Publishing outputs requires a matching, committed project")
         self._catalog._client.require_remote()
         current = self._store.pack_index(inputs.key(), files)
-        previous, producers = self._previous(inputs.project, current.key)
+        previous, registered = self._previous(inputs.project, current.key)
         index = current.extend(previous) if previous is not None else current
-        producers = _merge_producers(producers, _parse_producers(payload))
-        metadata: dict[str, JSON] = {**payload, "output_index": index.document()}
-        if producers:
-            metadata["producers"] = {
-                name: producer.document() for name, producer in producers.items()
-            }
-        record = replace(graph.record, payload=metadata, files={})
+        merged = _merge_producers(registered, producers or {})
+        record = replace(graph.record, payload=_metadata(index, payload, merged), files={})
         self._store.upload(current.outputs)
         return self._catalog._publish_graph(graph, record)
 
@@ -125,13 +144,15 @@ class Outputs:
                 producers = _merge_producers(producers, read_producers(record))
         return merged, producers
 
-    def get(
-        self,
-        record: Record,
-        names: tuple[str, ...],
-        *,
-        groups: Mapping[str, tuple[str, ...]] | None = None,
-    ) -> dict[str, Path]:
+    @staticmethod
+    def links(record: Record) -> dict[str, Ref] | None:
+        """Read exact references for ready outputs, or None for ordinary packages."""
+        index = OutputIndex.from_record(record)
+        if index is None:
+            return None
+        return {name: Ref(artifact.ref) for name, artifact in index.outputs.items()}
+
+    def get(self, record: Record, names: tuple[str, ...]) -> dict[str, Path]:
         """Retrieve selected files from this revision, optionally using declared producers."""
         if not names:
             return {}
@@ -144,7 +165,7 @@ class Outputs:
         }
         missing = set(names) - ready.keys()
         if missing:
-            ready.update(self._resolve(record, index, missing, groups or {}))
+            ready.update(self._resolve(record, index, missing))
         return {name: ready[name] for name in names}
 
     def _resolve(
@@ -152,12 +173,11 @@ class Outputs:
         record: Record,
         index: OutputIndex,
         missing: set[str],
-        groups: Mapping[str, tuple[str, ...]],
     ) -> dict[str, Path]:
         declared = read_producers(record)
         selected = {
             group: missing.intersection(names)
-            for group, names in groups.items()
+            for group, names in self._groups.items()
             if group in declared and missing.intersection(names)
         }
         unavailable = missing - set().union(*selected.values())
@@ -165,7 +185,7 @@ class Outputs:
             raise ValueError(f"{record.ref} is missing outputs: {', '.join(sorted(unavailable))}")
         files: dict[str, Path] = {}
         for group, names in selected.items():
-            files.update(self._get_group(declared[group], index, names, groups[group]))
+            files.update(self._get_group(declared[group], index, names, self._groups[group]))
         return files
 
     def _get_group(
@@ -173,7 +193,7 @@ class Outputs:
     ) -> dict[str, Path]:
         ref = Ref(producer.ref)
         try:
-            package = self._variants.get(
+            package = self._variants._get(
                 PackageInput(ref, {}),
                 lockfile=None,
                 build_missing=self._build_missing,

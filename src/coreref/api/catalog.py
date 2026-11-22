@@ -40,13 +40,9 @@ class Catalog:
         """Read recipe metadata without installing package contents."""
         return self._package(ref).info()
 
-    def get(self, ref: Ref) -> InstalledRecord:
-        """Get package files; an unpinned reference selects the latest recipe revision."""
-        return self._package(ref).get()
-
-    def get_with_sources(self, ref: Ref) -> InstalledRecord:
-        """Get package files and the Git checkout when the recipe declares one."""
-        return self._package(ref).get_with_sources()
+    def get(self, ref: Ref, *, with_sources: bool = False) -> InstalledRecord:
+        """Get package files and optionally Git sources, resolving an unpinned revision."""
+        return self._package(ref).get(with_sources=with_sources)
 
     def publish(
         self,

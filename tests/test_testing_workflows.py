@@ -42,7 +42,7 @@ def test_existing_source_incremental_publish_and_executable_update(
     assert first.ref != second.ref
     reader = env.new_catalog()
     for published, content in ((first, "first"), (second, "second")):
-        installed = reader.get_with_sources(published.ref)
+        installed = reader.get(published.ref, with_sources=True)
         assert installed.source is not None
         assert (installed.source / "run.sh").read_text() == content
         assert (installed.source / "run.sh").stat().st_mode & 0o111
@@ -115,7 +115,7 @@ def test_local_server_defaults_allow_local_git_sources(
     env = Sandbox(conan_server, tmp_path / "fixtures")
     catalog = Catalog(conan_server.configure(tmp_path / "client"))
     published = catalog.publish(env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"}))
-    assert catalog.get_with_sources(published.ref).source is not None
+    assert catalog.get(published.ref, with_sources=True).source is not None
 
 
 def test_profile_uses_native_detection_and_preserves_existing_profile(tmp_path: Path) -> None:

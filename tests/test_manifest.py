@@ -270,7 +270,7 @@ def test_resolve_preserves_explicit_scm_in_snapshot_and_publication(
     document.record.payload = {"generation": 2}
     published = catalog.publish(graph)
     assert published.has_source and published.payload == {"generation": 2}
-    installed = catalog.get_with_sources(published.ref)
+    installed = catalog.get(published.ref, with_sources=True)
     assert installed.source is not None and installed.source != checkout
     assert (installed.source / "cpu.sv").read_bytes() == (checkout / "cpu.sv").read_bytes()
     assert document.path.read_bytes() == manifest_before

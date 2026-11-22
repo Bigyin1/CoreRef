@@ -46,12 +46,6 @@ class StoredPackage:
     def info(self) -> Record:
         return self.recipe().record
 
-    def get(self) -> InstalledRecord:
-        return self._get(with_sources=False)
-
-    def get_with_sources(self) -> InstalledRecord:
-        return self._get(with_sources=True)
-
     def resolved_graph(self, lockfile: Path | None) -> PackageGraph:
         """Resolve the stored root itself, retaining its exact revision and metadata."""
         with TemporaryDirectory(prefix="coreref-resolve-") as temporary:
@@ -78,14 +72,10 @@ class StoredPackage:
         self._resolved[self.ref.without_revision()] = record.ref
         return PackageGraph(self._catalog, record, graph, packages={record.ref: self})
 
-    def _get(self, *, with_sources: bool) -> InstalledRecord:
+    def get(self, *, with_sources: bool = False) -> InstalledRecord:
         if self._client.editable(str(self.ref)) is not None:
             working_graph = self.resolved_graph(None)
-            return (
-                working_graph.get_with_sources((self.ref,))
-                if with_sources
-                else working_graph.get((self.ref,))
-            )[0]
+            return working_graph.get((self.ref,), with_sources=with_sources)[0]
         recipe = self.recipe()
         fetch_source = with_sources and recipe.has_source
         if not recipe.record.file_names and not fetch_source:
@@ -179,12 +169,6 @@ class PackageGraph:
         self._client.save_lockfile(self.graph.native, output)
         return output
 
-    def get(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
-        return self._get(refs, with_sources=False)
-
-    def get_with_sources(self, refs: tuple[Ref, ...]) -> tuple[InstalledRecord, ...]:
-        return self._get(refs, with_sources=True)
-
     def get_sources(self, refs: tuple[Ref, ...]) -> dict[Ref, Path]:
         selected = self._select(refs)
         missing = tuple(
@@ -208,7 +192,9 @@ class PackageGraph:
             raise InvalidPackage("Only published dependencies of this graph can be fetched")
         return selected
 
-    def _get(self, refs: tuple[Ref, ...], *, with_sources: bool) -> tuple[InstalledRecord, ...]:
+    def get(
+        self, refs: tuple[Ref, ...], *, with_sources: bool = False
+    ) -> tuple[InstalledRecord, ...]:
         selected = self._select(refs)
         missing = tuple(
             ref for ref in selected if self._needs_fetch(ref, with_sources=with_sources)

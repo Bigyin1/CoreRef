@@ -99,6 +99,16 @@ class Variants:
         *,
         lockfile: Path | None,
         build_missing: bool = False,
+    ) -> ConfiguredPackage:
+        """Install one variant, optionally building it when the binary is unavailable."""
+        return self._get(package, lockfile=lockfile, build_missing=build_missing)
+
+    def _get(
+        self,
+        package: PackageInput,
+        *,
+        lockfile: Path | None,
+        build_missing: bool,
         build_prerequisites: tuple[Ref, ...] = (),
     ) -> ConfiguredPackage:
         """Install one variant and optionally build the root and specific prerequisites.

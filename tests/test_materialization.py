@@ -31,7 +31,7 @@ def test_files_are_available_on_fetch_and_source_is_optional(
     assert published.files["timing.lib"].read_text() == artifact.read_text()
     fetched = catalog.get(published.ref)
     assert fetched.files["timing.lib"].read_text() == artifact.read_text()
-    materialized = catalog.get_with_sources(fetched.ref)
+    materialized = catalog.get(fetched.ref, with_sources=True)
     assert isinstance(materialized, Record)
     assert materialized.source is not None
     assert (materialized.source / "cpu.sv").is_file()
@@ -59,8 +59,8 @@ def test_payload_only_record_does_not_install_a_binary(
         return run(*arguments)
 
     monkeypatch.setattr(catalog._client, "run", track)
-    for fetch in (catalog.get, catalog.get_with_sources):
-        local = fetch(record.ref)
+    for with_sources in (False, True):
+        local = catalog.get(record.ref, with_sources=with_sources)
         assert local.payload == {"paths": paths}
         assert local.files == {}
         assert local.source is None

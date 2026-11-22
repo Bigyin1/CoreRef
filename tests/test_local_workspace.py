@@ -143,7 +143,7 @@ def test_workspace_and_its_packages_can_move(
     workspace = Workspace(catalog, moved / "project/conanws.yml")
     monkeypatch.chdir(workspace.path.parent)
     assert workspace.members == {document.record.ref: moved / "cpu"}
-    assert catalog.get_with_sources(document.record.ref).source == moved / "cpu"
+    assert catalog.get(document.record.ref, with_sources=True).source == moved / "cpu"
 
 
 def test_local_consumer_gets_editable_dependencies_automatically(
@@ -232,7 +232,7 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     document.record.payload = {"edited": True}
     document.save()
     monkeypatch.chdir(workspace.path.parent)
-    installed = catalog.get_with_sources(document.record.ref)
+    installed = catalog.get(document.record.ref, with_sources=True)
     assert installed.source == directory and installed.payload == {"edited": True}
     assert not (directory / "manifest.yml").exists()
 

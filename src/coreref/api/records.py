@@ -163,6 +163,11 @@ class Requirement:
 Dependency: TypeAlias = Ref | Requirement
 
 
+def parse_dependency(text: str) -> Dependency:
+    """Read either an exact version or a Conan version range."""
+    return Requirement(text) if text.partition("/")[2].startswith("[") else Ref(text)
+
+
 @dataclass
 class LocalRecord:
     """Mutable metadata and file paths prepared during one CLI command."""
@@ -309,4 +314,5 @@ __all__ = [
     "Record",
     "Ref",
     "Requirement",
+    "parse_dependency",
 ]
