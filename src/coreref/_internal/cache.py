@@ -5,21 +5,15 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from shutil import copyfile
 
-from ..._internal.artifacts import ArtifactStore, OutputIndex
-from ..._internal.hashing import file_digest, fingerprint
-from ..packages.catalog import Catalog
-from ..packages.query import SearchQuery
-from ..packages.records import JSON, LocalRecord, Ref
-
-
-class CacheMode(str, Enum):
-    OFF = "off"
-    READ = "read"
-    WRITE = "write"
+from ..api.build.route import CacheMode
+from ..api.packages.catalog import Catalog
+from ..api.packages.query import SearchQuery
+from ..api.packages.records import JSON, LocalRecord, Ref
+from .artifacts import ArtifactStore, OutputIndex
+from .hashing import file_digest, fingerprint
 
 
 @dataclass(frozen=True)

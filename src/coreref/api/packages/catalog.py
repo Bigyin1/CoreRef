@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from ..._internal.client import ConanClient
-from ..._internal.package import LocalPackage, StoredPackage
 from ..._internal.references import from_conan_reference
 from ..errors import InvalidPackage
-from ..projects.graph import Graph
 from .query import SearchQuery
-from .records import Dependency, InstalledRecord, LocalRecord, Record, Ref
+from .records import (
+    ConfiguredPackage,
+    Dependency,
+    InstalledRecord,
+    LocalRecord,
+    PackageInput,
+    Record,
+    Ref,
+)
+
+if TYPE_CHECKING:
+    from ..._internal.package import LocalPackage, StoredPackage
+    from ..projects.graph import Graph
 
 
 class Catalog:
@@ -19,7 +30,11 @@ class Catalog:
     def __init__(
         self, home: str | Path | None = None, *, remote: str | None = None, timeout: float = 60
     ) -> None:
+        from ..._internal.client import ConanClient
+        from ..._internal.variants import Variants
+
         self._client = ConanClient(Path(home) if home is not None else None, remote, timeout)
+        self._variants = Variants(self)
 
     def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
         """Find exact coordinates without downloading recipes or reading payloads."""
@@ -44,6 +59,29 @@ class Catalog:
         """Get package files and optionally Git sources, resolving an unpinned revision."""
         return self._package(ref).get(with_sources=with_sources)
 
+    def get_variant(
+        self, package: PackageInput, *, lockfile: Path | None = None, build_missing: bool = False
+    ) -> ConfiguredPackage:
+        """Install one configured package from the lockfile and optionally build it."""
+        return self._variants._get(package, lockfile=lockfile, build_missing=build_missing)
+
+    def publish_variant_recipe(
+        self,
+        ref: Ref,
+        *,
+        options: Mapping[str, tuple[str | int | bool, ...]],
+        inputs: Mapping[str, Path],
+        runner: Path,
+    ) -> Ref:
+        """Publish a generator-backed recipe with these option domains and named inputs."""
+        return self._variants.publish_generated_recipe(
+            ref, options=options, inputs=inputs, runner=runner
+        )
+
+    def publish_variant(self, package: ConfiguredPackage) -> None:
+        """Upload the exact installed variant to this catalog."""
+        self._variants.publish(package)
+
     def publish(
         self,
         record: LocalRecord | Graph,
@@ -65,6 +103,8 @@ class Catalog:
         lockfile: Path | None = None,
     ) -> InstalledRecord:
         """Export a package to the local cache and return its exact reference."""
+        from ..projects.graph import Graph
+
         if isinstance(record, Graph):
             if dependencies or lockfile is not None:
                 raise InvalidPackage(
@@ -92,6 +132,8 @@ class Catalog:
         return installed
 
     def _package(self, ref: Ref) -> StoredPackage:
+        from ..._internal.package import StoredPackage
+
         return StoredPackage(self, ref)
 
     def _local_package(
@@ -100,6 +142,8 @@ class Catalog:
         dependencies: tuple[Dependency, ...],
         lockfile: Path | None,
     ) -> LocalPackage:
+        from ..._internal.package import LocalPackage
+
         return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)
 
 

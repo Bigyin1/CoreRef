@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..._internal.artifacts import Producer
+from ..._internal.cache import StageCache, StageInvocation
 from ..._internal.pipeline import BuildStage, Pipeline
 from ..._internal.producers import ProducerRecipes, RecipeStage
+from ..._internal.runtime import ProducerRuntime, producer_files
 from ..._internal.snapshot import Snapshot, clean_commit, committed_slice
-from ..build.outputs import Outputs, Producer, SliceInputs
-from ..packages.records import JSON, InstalledRecord, Record
-from ..packages.variants import ConfiguredPackage, PackageInput, Variants
+from ..build.outputs import Outputs
+from ..build.route import CacheMode
+from ..packages.records import JSON, ConfiguredPackage, InstalledRecord, PackageInput, Record
 from .graph import Graph
 
 if TYPE_CHECKING:
     from ..build.route import Route, Stage, StageSpec
-    from ..build.runtime import ProducerRuntime
     from ..packages.catalog import Catalog
     from .manifest import Manifest
 
@@ -25,14 +27,18 @@ if TYPE_CHECKING:
 class Project:
     """Bind a manifest to a checkout, its lockfile and a catalog for one command."""
 
+    _output_groups: Mapping[str, tuple[str, ...]] = {}
+
+    _producer_handler: str | None = None
+
     def __init__(
         self,
         directory: Path,
         manifest: Manifest,
         catalog: Catalog,
         *,
-        groups: Mapping[str, tuple[str, ...]] | None = None,
         build_missing: bool = False,
+        cache_mode: CacheMode = CacheMode.OFF,
     ) -> None:
         self.source = directory.resolve()
         self.manifest = manifest
@@ -40,10 +46,14 @@ class Project:
         self.record = manifest.local_record(self.source)
         self.lockfile = self.source / "manifest.lock"
         self.build_dir = self.source / ".build"
-        self.outputs = Outputs(catalog, groups=groups, build_missing=build_missing)
-        self.variants = Variants(catalog)
+        self.outputs = Outputs(catalog, groups=self._output_groups, build_missing=build_missing)
+        self._stage_cache = StageCache(catalog, cache_mode)
 
-    def require_lockfile(self) -> Path:
+    @property
+    def cache_mode(self) -> CacheMode:
+        return self._stage_cache.mode
+
+    def _require_lockfile(self) -> Path:
         """Get the project lockfile used for reproducible builds."""
         if not self.lockfile.is_file():
             raise FileNotFoundError(f"Run the lock command and commit {self.lockfile}")
@@ -55,17 +65,13 @@ class Project:
             self.catalog,
             self.record,
             dependencies=self.manifest.requirements,
-            lockfile=self.require_lockfile(),
+            lockfile=self._require_lockfile(),
         )
-
-    @cached_property
-    def dependencies(self) -> tuple[Record, ...]:
-        return self.graph.dependencies(transitive=True)
 
     def lock(self, *additional_inputs: PackageInput) -> Path:
         """Refresh the project lock with all ordinary and configured requirements."""
         configured = (*self.manifest.configured_dependencies.values(), *additional_inputs)
-        return self.variants.create_lockfile(
+        return self.catalog._variants.create_lockfile(
             self.record,
             requirements=self.manifest.requirements,
             inputs=configured,
@@ -74,7 +80,7 @@ class Project:
 
     def install_variants(self, *, build_missing: bool = False) -> dict[str, ConfiguredPackage]:
         """Fetch the named configurations in the manifest using their locked recipes."""
-        return self.variants.get_many(
+        return self.catalog._variants.get_many(
             self.manifest.configured_dependencies,
             lockfile=self.lockfile,
             build_missing=build_missing,
@@ -103,6 +109,22 @@ class Project:
         tasks = tuple(self._task(spec) for spec in stages)
         Pipeline(self.build_dir, tasks).run(*targets)
         return {name: self.build_dir / name for stage in stages for name in stage.outputs}
+
+    def _run_cached_stage(
+        self,
+        invocation: tuple[str, tuple[str, ...], str, str],
+        directory: Path,
+        *,
+        inputs: tuple[str, ...],
+        outputs: tuple[str, ...],
+        action: Callable[[], None],
+    ) -> str | None:
+        if self.cache_mode is CacheMode.OFF:
+            action()
+            return None
+        return self._stage_cache.run(
+            StageInvocation(*invocation), directory, inputs=inputs, outputs=outputs, action=action
+        )
 
     def _task(self, spec: StageSpec) -> BuildStage:
         stage = self._stage(spec)
@@ -151,26 +173,41 @@ class Project:
     def _announce_release(self, targets: tuple[str, ...]) -> None:
         """Report automatically selected targets before the build starts."""
 
-    def _export_recipes(
+    def _producer_files(self) -> dict[str, Path]:
+        return {f"producer/{name}": path for name, path in producer_files(self.source).items()}
+
+    def _producer_members(self) -> Mapping[str, tuple[str, ...]]:
+        return {}
+
+    def _prepare_producers(self, _stages: tuple[StageSpec, ...], /) -> Mapping[str, JSON]:
+        return {}
+
+    def _producer_dependencies(self) -> Mapping[str, tuple[Record, str]]:
+        return {}
+
+    def _publish_ready_recipes(
         self,
         stages: tuple[StageSpec, ...],
-        *,
-        runner: Path | ProducerRuntime,
-        configuration: Mapping[str, JSON],
-        members: Mapping[str, tuple[str, ...]],
-        external: Mapping[str, tuple[Producer, str]],
     ) -> dict[str, Producer]:
-        """Export the selected stage descriptions as grouped Conan recipes."""
-        recipes = ProducerRecipes(
-            self.catalog, self.build_dir, runner=runner, configuration=configuration
-        )
+        if self._producer_handler is None:
+            return {}
+        members = self._producer_members()
         names = {name for group in members.values() for name in group}
+        selected = tuple(spec for spec in stages if spec.name in names)
+        if not selected:
+            return {}
+        recipes = ProducerRecipes(
+            self.catalog,
+            self.build_dir,
+            runner=ProducerRuntime(self.source, self._producer_handler),
+            configuration=self._prepare_producers(selected),
+        )
         return recipes.publish(
             self.record.ref,
-            tuple(self._recipe(spec) for spec in stages if spec.name in names),
+            tuple(self._recipe(spec) for spec in selected),
             members=members,
             outputs=self.outputs._groups,
-            external=external,
+            external=self.outputs._producer_inputs(self._producer_dependencies()),
         )
 
     def _recipe(self, spec: StageSpec) -> RecipeStage:
@@ -181,14 +218,11 @@ class Project:
             configuration={**stage.configuration, "bundled": stage.bundled_inputs},
         )
 
-    def _publish_ready_recipes(self, _stages: tuple[StageSpec, ...], /) -> Mapping[str, Producer]:
-        return {}
-
     def _output_files(self, outputs: Mapping[str, Path]) -> dict[str, Path]:
         """Combine declared files, build outputs and the lockfile for a project slice."""
-        return {**self.record.files, **outputs, "lockfile": self.require_lockfile()}
+        return {**self.record.files, **outputs, "lockfile": self._require_lockfile()}
 
-    def _slice_metadata(self, _inputs: SliceInputs, /) -> Mapping[str, JSON]:
+    def _slice_metadata(self, _variants: Mapping[str, str], /) -> Mapping[str, JSON]:
         return {}
 
     def _snapshot(self) -> Snapshot:
@@ -201,8 +235,8 @@ class Project:
         snapshot = self._snapshot()
         files = self._output_files(self.build(targets))
         inputs = snapshot.inputs(clean_commit(self.source), files)
-        return self.outputs.pack(
-            inputs, files, {**snapshot.metadata(inputs), **self._slice_metadata(inputs)}
+        return self.outputs._pack(
+            inputs, files, {**snapshot.metadata(inputs), **self._slice_metadata(inputs.variants)}
         )
 
     def publish(
@@ -227,10 +261,10 @@ class Project:
                 if with_producers
                 else {}
             )
-        return self.outputs.publish(
+        return self.outputs._publish(
             self.graph,
             inputs,
             files,
-            {**snapshot.metadata(inputs), **self._slice_metadata(inputs)},
+            {**snapshot.metadata(inputs), **self._slice_metadata(inputs.variants)},
             producers=recipes,
         )

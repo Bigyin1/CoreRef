@@ -133,3 +133,24 @@ class ArtifactStore:
     def upload(self, outputs: Mapping[str, Artifact]) -> None:
         for ref in sorted({Ref(item.ref) for item in outputs.values()}):
             self.catalog._upload(ref)
+
+
+PRODUCER_NAMESPACE = "coreref-producer"
+
+
+class Producer(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ref: str
+    prerequisites: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _check_refs(self) -> Producer:
+        for value in (self.ref, *self.prerequisites):
+            ref = Ref(value)
+            if ref.namespace != PRODUCER_NAMESPACE or ref.revision is None:
+                raise ValueError(f"Expected an exact producer reference, got {value}")
+        return self
+
+    def _document(self) -> JSON:
+        return {"ref": self.ref, "prerequisites": self.prerequisites}

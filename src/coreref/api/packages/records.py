@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import ClassVar, Protocol, TypeAlias, runtime_checkable
 
 from frozendict import deepfreeze, frozendict
@@ -16,7 +17,7 @@ JSON: TypeAlias = (
 
 
 @runtime_checkable
-class JSONSerializable(Protocol):
+class _JSONSerializable(Protocol):
     """A consumer-owned payload that can serialize itself to a JSON document."""
 
     def to_json(self) -> str: ...
@@ -163,7 +164,7 @@ class Requirement:
 Dependency: TypeAlias = Ref | Requirement
 
 
-def parse_dependency(text: str) -> Dependency:
+def _parse_dependency(text: str) -> Dependency:
     """Read either an exact version or a Conan version range."""
     return Requirement(text) if text.partition("/")[2].startswith("[") else Ref(text)
 
@@ -174,14 +175,14 @@ class LocalRecord:
 
     _format: ClassVar[int] = 7
     ref: Ref
-    payload: JSON | JSONSerializable = None
+    payload: JSON | _JSONSerializable = None
     source: Path | None = None
     files: dict[str, Path] = field(default_factory=dict)
 
     def to_json(self) -> str:
         """Prepare portable package metadata, excluding local source and artifact paths."""
         payload = self.payload
-        if isinstance(payload, JSONSerializable):
+        if isinstance(payload, _JSONSerializable):
             payload = json.loads(payload.to_json())
         value: dict[str, JSON] = {
             "format": self._format,
@@ -199,12 +200,12 @@ class Record:
     def __init__(
         self,
         ref: Ref,
-        payload: JSON | JSONSerializable = None,
+        payload: JSON | _JSONSerializable = None,
         *,
         file_names: tuple[str, ...] = (),
         has_source: bool = False,
     ) -> None:
-        if isinstance(payload, JSONSerializable):
+        if isinstance(payload, _JSONSerializable):
             payload = json.loads(payload.to_json())
         self._ref = ref
         self._payload: JSON = deepfreeze(json.loads(json.dumps(payload, allow_nan=False)))
@@ -305,14 +306,49 @@ class InstalledRecord(Record):
         return value
 
 
+@dataclass(frozen=True)
+class PackageInput:
+    """A recipe requirement and options for one named input of the flow."""
+
+    requirement: Dependency
+    options: Mapping[str, str | int | bool]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
+
+    def _arguments(self) -> tuple[str, ...]:
+        options = (
+            argument
+            for name, value in sorted(self.options.items())
+            for argument in ("--options:host", f"{self.requirement.package_name}/*:{name}={value}")
+        )
+        return ("--requires", str(self.requirement), *options)
+
+
+@dataclass(frozen=True)
+class ConfiguredPackage:
+    """The selected Conan recipe and binary, with the installed package directory."""
+
+    ref: Ref
+    package_id: str
+    package_revision: str
+    directory: Path
+    metadata: Mapping[str, object]
+
+    @property
+    def binary_reference(self) -> str:
+        """Return the exact Conan address of the installed binary."""
+        return f"{self.ref}:{self.package_id}#{self.package_revision}"
+
+
 __all__ = [
     "JSON",
+    "ConfiguredPackage",
     "Dependency",
     "InstalledRecord",
-    "JSONSerializable",
     "LocalRecord",
+    "PackageInput",
     "Record",
     "Ref",
     "Requirement",
-    "parse_dependency",
 ]

@@ -144,8 +144,8 @@ uv run --frozen pytest tests/performance -m performance --benchmark-compare
 cache без публичных remotes. Окружение процесса и пользовательский cache не меняются.
 
 ```python
-from coreref.api.projects.graph import Graph
-from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects import Graph
+from coreref.api.packages import LocalRecord, Ref
 from coreref.testing import environment
 
 
@@ -232,7 +232,7 @@ with environment(tmp_path / "infra", namespace="soc") as env:
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
     published = env.publish(cpu)
 
-    # Обычный ManifestFile: можно менять зависимости через add/remove/save.
+    # Рабочий манифест теста: зависимости можно менять через add/remove/save.
     project = env.project(env.ref("top"), path=tmp_path / "top/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
@@ -307,7 +307,7 @@ tests/
 ```python
 from pathlib import Path
 from coreref.testing import environment
-from coreref.api.projects.manifest import ManifestFile
+from coreref.api.projects import Graph, Manifest
 
 
 def test_soc(tmp_path):
@@ -316,11 +316,13 @@ def test_soc(tmp_path):
         catalog = env.catalog
         # Flow сам читает манифесты и выполняет нужные команды.
         for name in ("stdlib", "cpu"):
-            project = ManifestFile(env.projects / name / "manifest.yml")
-            record = project.record
-            catalog.publish(record, dependencies=project.dependencies)
-        soc = ManifestFile(env.projects / "soc/manifest.yml")
-        assert len(soc.resolve(env.catalog).get(with_sources=True)) == 2
+            directory = env.projects / name
+            manifest = Manifest.load(directory / "manifest.yml")
+            catalog.publish(manifest.local_record(directory), dependencies=manifest.requirements)
+        directory = env.projects / "soc"
+        manifest = Manifest.load(directory / "manifest.yml")
+        graph = Graph(catalog, manifest.local_record(directory), dependencies=manifest.requirements)
+        assert len(graph.get(with_sources=True)) == 2
 ```
 
 `projects` указывает на исходное дерево; `env.projects` — отдельная рабочая копия

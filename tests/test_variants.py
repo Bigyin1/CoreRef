@@ -5,17 +5,15 @@ from pathlib import Path
 import pytest
 
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.records import Ref
-from coreref.api.packages.variants import PackageInput, Variants
+from coreref.api.packages import Catalog, PackageInput, Ref
 from coreref.testing import LocalServer
 
 
 def test_missing_variant_builds_only_allowed_exact_prerequisites(
     conan_server: LocalServer, tmp_path: Path
 ) -> None:
-    writer = Variants(Catalog(conan_server.configure(tmp_path / "writer")))
-    reader = Variants(Catalog(conan_server.configure(tmp_path / "reader")))
+    writer = Catalog(conan_server.configure(tmp_path / "writer"))
+    reader = Catalog(conan_server.configure(tmp_path / "reader"))
     source = tmp_path / "producer"
     source.mkdir()
     recipe = source / "conanfile.py"
@@ -32,33 +30,35 @@ class Producer(ConanFile):
         save(self, self.package_folder + "/result", "output")
 """
     recipe.write_text(template.format(name="stages.input", requires=()))
-    prerequisite = writer.publish_recipe(source)
+    prerequisite = writer._variants.publish_recipe(source)
     recipe.write_text(template.format(name="stages.output", requires=(str(prerequisite),)))
-    target = PackageInput(writer.publish_recipe(source), {})
+    target = PackageInput(writer._variants.publish_recipe(source), {})
     wrong = Ref(f"{prerequisite.without_revision()}#other")
 
     with pytest.raises(NotFound, match="package binary"):
-        reader._get(target, lockfile=None, build_missing=True, build_prerequisites=(wrong,))
+        reader._variants._get(
+            target, lockfile=None, build_missing=True, build_prerequisites=(wrong,)
+        )
     with pytest.raises(InvalidPackage, match="exact recipe revisions"):
-        reader._get(
+        reader._variants._get(
             target,
             lockfile=None,
             build_missing=True,
             build_prerequisites=(prerequisite.without_revision(),),
         )
 
-    installed = reader._get(
+    installed = reader._variants._get(
         target, lockfile=None, build_missing=True, build_prerequisites=(prerequisite,)
     )
     assert (installed.directory / "result").read_text() == "output"
-    assert reader.get(target, lockfile=None).binary_reference == installed.binary_reference
+    assert reader.get_variant(target, lockfile=None).binary_reference == installed.binary_reference
 
 
 def test_generated_recipe_builds_configurations_from_exported_inputs(
     conan_server: LocalServer, tmp_path: Path
 ) -> None:
-    writer = Variants(Catalog(conan_server.configure(tmp_path / "writer")))
-    reader = Variants(Catalog(conan_server.configure(tmp_path / "reader")))
+    writer = Catalog(conan_server.configure(tmp_path / "writer"))
+    reader = Catalog(conan_server.configure(tmp_path / "reader"))
     input_file = tmp_path / "input.txt"
     input_file.write_text("result", encoding="utf-8")
     runner = tmp_path / "generate.py"
@@ -72,7 +72,7 @@ def test_generated_recipe_builds_configurations_from_exported_inputs(
         encoding="utf-8",
     )
 
-    ref = writer.publish_generated_recipe(
+    ref = writer.publish_variant_recipe(
         Ref("tools.generated/1.0"),
         options={"size": (8, 4), "label": ("fast", "slow"), "enabled": (True, False)},
         inputs={"config/input.txt": input_file},
@@ -81,8 +81,8 @@ def test_generated_recipe_builds_configurations_from_exported_inputs(
     runner.unlink()
     input_file.unlink()
 
-    default = reader.get(PackageInput(ref, {}), lockfile=None, build_missing=True)
-    custom = reader.get(
+    default = reader.get_variant(PackageInput(ref, {}), lockfile=None, build_missing=True)
+    custom = reader.get_variant(
         PackageInput(ref, {"size": 4, "label": "slow", "enabled": False}),
         lockfile=None,
         build_missing=True,
@@ -96,10 +96,10 @@ def test_generated_recipe_builds_configurations_from_exported_inputs(
 
 @pytest.mark.parametrize("name", [".", "/absolute", "../outside", "directory//input"])
 def test_generated_recipe_rejects_unsafe_names(name: str, tmp_path: Path) -> None:
-    variants = Variants(Catalog(tmp_path / "home"))
+    variants = Catalog(tmp_path / "home")
     runner = Path(__file__)
     with pytest.raises(InvalidPackage, match="Invalid recipe input path"):
-        variants.publish_generated_recipe(
+        variants.publish_variant_recipe(
             Ref("tools.generated/1.0"), options={}, inputs={name: runner}, runner=runner
         )
 
@@ -114,8 +114,8 @@ def test_generated_recipe_rejects_unsafe_names(name: str, tmp_path: Path) -> Non
 def test_generated_recipe_rejects_invalid_configuration(
     reference: str, values: tuple[int, ...], message: str, tmp_path: Path
 ) -> None:
-    variants = Variants(Catalog(tmp_path / "home"))
+    variants = Catalog(tmp_path / "home")
     with pytest.raises(InvalidPackage, match=message):
-        variants.publish_generated_recipe(
+        variants.publish_variant_recipe(
             Ref(reference), options={"size": values}, inputs={}, runner=Path(__file__)
         )

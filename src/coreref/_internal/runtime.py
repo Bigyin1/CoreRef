@@ -10,7 +10,10 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-_ENVIRONMENT_FILES = ("pyproject.toml", "uv.lock", ".python-version")
+
+def producer_files(project: Path) -> dict[str, Path]:
+    """Return the files needed to recreate the producer's Python environment."""
+    return {name: project / name for name in ("pyproject.toml", "uv.lock", ".python-version")}
 
 
 @dataclass(frozen=True)
@@ -22,12 +25,12 @@ class ProducerRuntime:
 
     def _arguments(self) -> tuple[str, ...]:
         if ":" in self.module:
-            return ("-m", "coreref.api.build.producer", self.module)
+            return ("-m", "coreref._internal.producer", self.module)
         return ("-m", self.module)
 
     @property
     def files(self) -> dict[str, Path]:
-        return {name: self.project / name for name in _ENVIRONMENT_FILES}
+        return producer_files(self.project)
 
     def validate(self) -> None:
         for path in self.files.values():

@@ -6,11 +6,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from coreref._internal.editor import ManifestFile
 from coreref.api.errors import InvalidPackage
-from coreref.api.packages.query import SearchQuery
-from coreref.api.packages.records import LocalRecord, Record, Ref, Requirement
-from coreref.api.projects.graph import Graph
-from coreref.api.projects.manifest import ManifestFile
+from coreref.api.packages import LocalRecord, Record, Ref, Requirement, SearchQuery
+from coreref.api.projects import Graph
 from coreref.cli import create_deps_app
 from coreref.testing import LocalServer, Sandbox
 

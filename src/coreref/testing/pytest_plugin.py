@@ -6,8 +6,8 @@ from typing import TypedDict
 
 import pytest
 
+from .._internal.editor import ManifestFile
 from ..api.packages.catalog import Catalog
-from ..api.projects.manifest import ManifestFile
 from .sandbox import Sandbox, environment
 from .server import LocalServer
 

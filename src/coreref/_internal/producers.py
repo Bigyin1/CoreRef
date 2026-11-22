@@ -10,14 +10,13 @@ from pathlib import Path
 from shutil import copyfile
 from tempfile import TemporaryDirectory
 
-from ..api.build.outputs import PRODUCER_NAMESPACE, Producer
 from ..api.build.route import StageSpec
-from ..api.build.runtime import ProducerRuntime
 from ..api.packages.catalog import Catalog
 from ..api.packages.records import JSON, LocalRecord, Ref
-from ..api.packages.variants import Variants
+from .artifacts import PRODUCER_NAMESPACE, Producer
 from .hashing import file_digest, fingerprint
 from .recipe import _RECIPE_ENV
+from .runtime import ProducerRuntime
 
 # Staged name -> exact producer and filename in its binary package.
 Bindings = Mapping[str, tuple[Producer, str]]
@@ -50,7 +49,7 @@ class ProducerRecipes:
         configuration: Mapping[str, JSON],
     ) -> None:
         self._catalog = catalog
-        self._variants = Variants(catalog)
+        self._variants = catalog._variants
         self._prepared = prepared
         self._runner = runner
         self._configuration = dict(configuration)

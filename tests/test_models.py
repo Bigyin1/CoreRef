@@ -9,9 +9,8 @@ from dataclasses import dataclass
 import pytest
 
 from coreref.api.errors import InvalidPackage
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.query import SearchQuery
-from coreref.api.packages.records import JSON, JSONSerializable, LocalRecord, Record, Ref
+from coreref.api.packages import JSON, Catalog, LocalRecord, Record, Ref, SearchQuery
+from coreref.api.packages.records import _JSONSerializable
 from tests.helpers import local_record
 
 
@@ -42,7 +41,7 @@ def test_any_json_payload_roundtrips(catalog: Catalog, value: JSON) -> None:
     record = catalog.publish(local_record(record))
     stored = catalog.get(Ref.from_fields(**record.ref.to_dict()))
     assert stored == record
-    assert not isinstance(stored.payload, JSONSerializable)
+    assert not isinstance(stored.payload, _JSONSerializable)
 
 
 def test_custom_payload_is_serialized_once_and_frozen(catalog: Catalog) -> None:

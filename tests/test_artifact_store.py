@@ -6,13 +6,12 @@ from pathlib import Path
 import pytest
 
 from coreref._internal.artifacts import ArtifactStore, OutputIndex
+from coreref._internal.cache import StageCache, StageInvocation
 from coreref._internal.hashing import file_digest
-from coreref.api.build.outputs import SliceInputs
-from coreref.api.build.stage_cache import CacheMode, StageCache, StageInvocation
+from coreref._internal.snapshot import SliceInputs
+from coreref.api.build import CacheMode
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.query import SearchQuery
-from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.packages import Catalog, LocalRecord, Ref, SearchQuery
 from coreref.testing import LocalServer, configured_home
 
 

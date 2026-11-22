@@ -2,30 +2,34 @@
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
+from coreref._internal import producer
 from coreref._internal.producers import ProducerRecipes, RecipeStage
-from coreref.api.build import producer
-from coreref.api.build.route import StageSpec
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.records import Ref
-from coreref.api.packages.variants import PackageInput, Variants
+from coreref._internal.variants import Variants
+from coreref.api.build import StageSpec
+from coreref.api.packages import JSON, Catalog, PackageInput, Ref
 from coreref.testing import Sandbox, environment
 
 
 def test_shared_executor_stages_only_declared_nested_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def emit(stage: producer.ProducerStage) -> None:
-        assert sorted(path.name for path in stage.directory.iterdir()) == ["inputs"]
-        data = (stage.directory / "inputs/source").read_text()
-        target = stage.directory / "outputs/result"
+    def emit(
+        _name: str,
+        directory: Path,
+        _log: Path,
+        stage: Mapping[str, JSON],
+        pipeline: Mapping[str, JSON],
+    ) -> None:
+        assert sorted(path.name for path in directory.iterdir()) == ["inputs"]
+        data = (directory / "inputs/source").read_text()
+        target = directory / "outputs/result"
         target.parent.mkdir()
-        target.write_text(
-            f"{stage.pipeline_configuration['prefix']}:{stage.configuration['tag']}:{data}"
-        )
+        target.write_text(f"{pipeline['prefix']}:{stage['tag']}:{data}")
 
     source = tmp_path / "inputs/source"
     source.parent.mkdir()

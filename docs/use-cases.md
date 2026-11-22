@@ -6,14 +6,14 @@ Ref задаёт координаты компонента или библиот
 `shared.stdlib/2.0`. Опубликованная ревизия объединяет исходники и готовые
 артефакты. Flow использует из неё входы нужной стадии.
 
-В примерах `ManifestFile` читает стандартный манифест CoreRef и создаёт рабочий
-`LocalRecord` и список зависимостей.
+В примерах `Manifest` читает стандартный YAML, а `Project` связывает его с рабочей
+директорией, каталогом и lockfile.
 
 Graph строится и для неопубликованного локального проекта. Его lockfile сохраняют
 в репозитории или workspace проекта для повторения выбора версий и revisions.
 Для работы над зависимостью используют `workspace.open(ref)` или
 `workspace.add(directory, record=local_record, dependencies=refs)`. По манифесту
-рабочая копия добавляется через `ManifestFile.add_to_workspace(workspace)`.
+рабочая копия добавляется командой `flow workspace add`.
 Conan сам выбирает рабочие копии из workspace текущего проекта; Graph не требует
 особых параметров. SDK добавляет в рабочую копию только conanfile.py, если его ещё нет.
 `InstalledRecord.is_editable` отличает такую запись от кэшовой. Локальные files могут
@@ -54,18 +54,15 @@ dependencies:
 ```python
 from pathlib import Path
 
-from coreref.api.packages.catalog import Catalog
-from coreref.api.projects.manifest import ManifestFile
-from coreref.api.projects.graph import Graph
-from coreref.api.packages.records import InstalledRecord, LocalRecord, Record, Ref
-from coreref.api.build.outputs import Outputs
+from coreref.api.build import Outputs
+from coreref.api.packages import Catalog, InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.projects import Graph, Manifest, Project
 
 
 def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
     """Прочитать YAML и учесть существующий manifest.lock, не изменяя его."""
-    manifest = ManifestFile(root / "manifest.yml")
-    # Стандартный манифест находится в корне проекта; source уже указывает туда.
-    return manifest.resolve(catalog)
+    manifest = Manifest.load(root / "manifest.yml")
+    return Project(root, manifest, catalog).graph
 
 
 def collect_rtl_sources(graph: Graph) -> list[Path]:
@@ -133,20 +130,15 @@ flow может попросить обновить lockfile до выпуска
 
 Первый выпуск CPU может содержать только RTL из SCM. Позднее flow публикует
 ревизию с netlist, а после физической реализации добавляет Liberty, LEF и GDS.
-Flow запускает нужные стадии и передаёт CoreRef готовые файлы по именам.
+Flow реализует этот маршрут в своём подклассе `Project`.
 
 ```python
-from collections.abc import Mapping
-
-from coreref.api.build.outputs import SliceInputs
-
-
-def publish_cpu(
-    catalog: Catalog, graph: Graph, inputs: SliceInputs, files: Mapping[str, Path]
-) -> InstalledRecord:
-    return Outputs(catalog).publish(graph, inputs, files, {"type": "macro"})
+def publish_cpu(project: Project, through: str) -> InstalledRecord:
+    """Собрать стадию с её предшественниками и опубликовать выходы."""
+    return project.publish(through)
 ```
 
-Flow формирует `SliceInputs` из Git-коммита, lockfile, зависимостей и
-конфигурации сборки. Файлы публикуются по отдельности. Оглавление связывает
-их с ревизией проекта, поэтому потребитель может запросить только нужные выходы.
+В CI команда может вызвать `project.publish()`, чтобы SDK выбрал готовые стадии
+по правилам flow. CoreRef вычисляет идентификатор среза и публикует файлы по
+отдельности. Оглавление закрепляет их за ревизией проекта, поэтому потребитель
+может загрузить только нужные выходы.

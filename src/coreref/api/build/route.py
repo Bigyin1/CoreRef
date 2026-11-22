@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -12,6 +13,14 @@ import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..packages.records import JSON
+
+
+class CacheMode(str, Enum):
+    """Whether to reuse and publish shared stage results."""
+
+    OFF = "off"
+    READ = "read"
+    WRITE = "write"
 
 
 class StageSpec(BaseModel):
@@ -212,6 +221,3 @@ def _output_path(name: str) -> PurePosixPath:
     if not path.parts or path.is_absolute() or ".." in path.parts or str(path) != name:
         raise ValueError(f"Expected a relative stage output, got {name!r}")
     return path
-
-
-__all__ = ["Route", "Stage", "StageSpec"]

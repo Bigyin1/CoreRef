@@ -3,28 +3,15 @@
 import argparse
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from shutil import copyfile
 from tempfile import TemporaryDirectory
 from typing import TypedDict, cast
 
-from ..packages.records import JSON
+from ..api.packages.records import JSON
 
-
-@dataclass(frozen=True)
-class ProducerStage:
-    """The stage's inputs are already present in its working directory."""
-
-    name: str
-    directory: Path
-    log: Path
-    configuration: Mapping[str, JSON]
-    pipeline_configuration: Mapping[str, JSON]
-
-
-_Handler = Callable[[ProducerStage], None]
+_Handler = Callable[[str, Path, Path, Mapping[str, JSON], Mapping[str, JSON]], None]
 
 
 class _Stage(TypedDict):
@@ -58,7 +45,7 @@ def _run_stage(
             target = work / filename
             target.parent.mkdir(parents=True, exist_ok=True)
             copyfile(directory / filename, target)
-        handler(ProducerStage(name, work, log, stage.get("configuration", {}), configuration))
+        handler(name, work, log, stage.get("configuration", {}), configuration)
         check_outputs(work, stage["outputs"], log)
         for filename in stage["outputs"]:
             target = directory / filename

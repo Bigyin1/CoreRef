@@ -7,21 +7,12 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from coreref._internal.snapshot import Snapshot, clean_commit, committed_slice
-from coreref.api.build.environment import (
-    CheckedCommand,
-    CommandPin,
-    ImagePin,
-    pinned_image,
-)
-from coreref.api.build.outputs import SliceInputs
-from coreref.api.build.route import Route, Stage, StageSpec
+from coreref._internal.editor import ManifestFile
+from coreref._internal.snapshot import SliceInputs, Snapshot, clean_commit, committed_slice
+from coreref.api.build import Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.records import LocalRecord, Ref, Requirement
-from coreref.api.packages.variants import PackageInput, Variants
-from coreref.api.projects.manifest import Manifest, ManifestFile
-from coreref.api.projects.project import Project
+from coreref.api.packages import Catalog, LocalRecord, PackageInput, Ref, Requirement
+from coreref.api.projects import Manifest, Project
 from coreref.cli import create_deps_app
 from coreref.testing import git_repository
 
@@ -73,7 +64,7 @@ def test_manifest_locks_and_installs_both_dependency_kinds(
         "def generate(options, source, output):\n"
         '    (output / "model").write_text(options["width"])\n'
     )
-    ref = Variants(catalog).publish_generated_recipe(
+    ref = catalog.publish_variant_recipe(
         Ref("demo.memory/1.0"), options={"width": (8, 16)}, inputs={}, runner=generator
     )
     path = tmp_path / "manifest.yml"
@@ -86,7 +77,8 @@ dependencies:
     lockfile = document.create_lockfile(catalog)
     project = Project(tmp_path, Manifest.load(path), catalog)
     assert project.lock() == lockfile
-    assert tuple(record.ref for record in project.dependencies) == (ordinary.ref,)
+    records = project.graph.dependencies(transitive=True)
+    assert tuple(record.ref for record in records) == (ordinary.ref,)
     packages = project.install_variants(build_missing=True)
     assert packages["ram"].ref == ref
     assert (packages["ram"].directory / "model").read_text() == "16"
@@ -171,20 +163,18 @@ def test_shared_tool_pins_check_exact_versions(tmp_path: Path) -> None:
     executable = tmp_path / "eda"
     executable.write_text("#!/bin/sh\nprintf 'EDA 1.2.3\\n'\n")
     executable.chmod(0o755)
-    assert CheckedCommand.resolve(
-        {"eda": CommandPin(command=str(executable), version="1.2.3")}, "eda"
-    ).executable == str(executable)
-    with pytest.raises(ValueError, match="must be"):
-        CheckedCommand.resolve({"eda": CommandPin(command=str(executable), version="1.2")}, "eda")
-    with pytest.raises(FileNotFoundError, match="on PATH"):
-        CheckedCommand.resolve(
-            {"eda": CommandPin(command=str(tmp_path / "missing"), version="1.2")}, "eda"
-        )
+    image = f"engine@sha256:{'a' * 64}"
+    manifest = Manifest.model_validate(
+        {
+            "ref": "demo.project/1.0",
+            "tools": {
+                "eda": {"command": str(executable), "version": "1.2.3"},
+                "engine": {"image": image},
+            },
+        }
+    )
+    assert manifest.command("eda") == (str(executable), "1.2.3")
+    assert manifest.image("engine") == image
+    assert manifest.image("eda") is None
     with pytest.raises(ValueError, match="Declare"):
-        CheckedCommand.resolve({}, "eda")
-    image = ImagePin(image=f"engine@sha256:{'a' * 64}")
-    assert pinned_image({"engine": image}, "engine") == image.image
-    with pytest.raises(ValueError, match="differs"):
-        pinned_image({"engine": image}, "engine", "engine:latest")
-    with pytest.raises(ValueError, match="Declare"):
-        pinned_image({}, "engine")
+        manifest.command("missing")

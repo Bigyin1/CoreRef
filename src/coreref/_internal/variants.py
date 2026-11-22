@@ -3,61 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from shutil import copyfile
 from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
-from ..._internal.recipe import _RECIPE_ENV
-from ..._internal.references import from_conan_reference
-from ..._internal.types import NativeGraph
-from ..errors import InvalidPackage
-from ..projects.graph import Graph
-from .records import Dependency, LocalRecord, Ref
+from ..api.errors import InvalidPackage
+from ..api.packages.records import ConfiguredPackage, Dependency, LocalRecord, PackageInput, Ref
+from .recipe import _RECIPE_ENV
+from .references import from_conan_reference
+from .types import NativeGraph
 
 if TYPE_CHECKING:
-    from .catalog import Catalog
+    from ..api.packages.catalog import Catalog
 
 
 _OptionValue = str | int | bool
 _GENERATED_TEMPLATE = _RECIPE_ENV.get_template("generated.py.j2")
-
-
-@dataclass(frozen=True)
-class PackageInput:
-    """A recipe requirement and options for one named input of the flow."""
-
-    requirement: Dependency
-    options: Mapping[str, _OptionValue]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
-
-    def _arguments(self) -> tuple[str, ...]:
-        options = (
-            argument
-            for name, value in sorted(self.options.items())
-            for argument in ("--options:host", f"{self.requirement.package_name}/*:{name}={value}")
-        )
-        return ("--requires", str(self.requirement), *options)
-
-
-@dataclass(frozen=True)
-class ConfiguredPackage:
-    """The selected Conan recipe and binary, with the installed package directory."""
-
-    ref: Ref
-    package_id: str
-    package_revision: str
-    directory: Path
-    metadata: Mapping[str, object]
-
-    @property
-    def binary_reference(self) -> str:
-        """Return the exact Conan address of the installed binary."""
-        return f"{self.ref}:{self.package_id}#{self.package_revision}"
 
 
 class Variants:
@@ -120,24 +83,13 @@ class Variants:
         """Resolve plain and configured requirements afresh, then replace the project lock."""
         path = path.expanduser().absolute()
         path.parent.mkdir(parents=True, exist_ok=True)
+        from ..api.projects.graph import Graph
+
         graph = Graph(self._catalog, record, dependencies=requirements)
         with TemporaryDirectory(prefix=".coreref-lock-", dir=path.parent) as temporary:
             candidate = graph.create_lockfile(Path(temporary) / "conan.lock")
             self._lock_inputs(inputs, candidate)
             return candidate.replace(path)
-
-    def extend_lockfile(self, inputs: Iterable[PackageInput], path: Path) -> Path:
-        """Add configurable inputs to a project lock using Conan's lock commands."""
-        path = path.absolute()
-        with TemporaryDirectory(prefix=".coreref-lock-", dir=path.parent) as temporary:
-            candidate = Path(temporary) / "conan.lock"
-            if path.is_file():
-                candidate.write_bytes(path.read_bytes())
-            self._lock_inputs(inputs, candidate)
-            if not candidate.is_file():
-                raise InvalidPackage("A project lockfile requires at least one package input")
-            candidate.replace(path)
-        return path
 
     def _lock_inputs(self, inputs: Iterable[PackageInput], path: Path) -> None:
         for package in inputs:
@@ -165,19 +117,9 @@ class Variants:
                 f"Create the project lockfile before installing variants: {lockfile}"
             )
         return {
-            name: self.get(package, lockfile=lockfile, build_missing=build_missing)
+            name: self._catalog.get_variant(package, lockfile=lockfile, build_missing=build_missing)
             for name, package in inputs.items()
         }
-
-    def get(
-        self,
-        package: PackageInput,
-        *,
-        lockfile: Path | None,
-        build_missing: bool = False,
-    ) -> ConfiguredPackage:
-        """Install one variant, optionally building it when the binary is unavailable."""
-        return self._get(package, lockfile=lockfile, build_missing=build_missing)
 
     def _get(
         self,

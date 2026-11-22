@@ -10,10 +10,10 @@ from pathlib import Path
 
 import networkx as nx
 
+from .._internal.editor import ManifestFile
 from ..api.packages.catalog import Catalog
 from ..api.packages.records import Dependency, InstalledRecord, LocalRecord, Ref
 from ..api.projects.graph import Graph
-from ..api.projects.manifest import ManifestFile
 from ..api.projects.workspace import Workspace
 from .catalog import _RecordingCatalog
 from .git import FixtureFile, git_repository, git_upstream, write_files

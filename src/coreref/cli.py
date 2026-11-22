@@ -10,11 +10,10 @@ from typing import Annotated
 
 import typer
 
+from ._internal.editor import ManifestFile
 from .api.errors import CatalogError
 from .api.packages.catalog import Catalog
 from .api.packages.records import Ref
-from .api.packages.variants import Variants
-from .api.projects.manifest import ManifestFile
 from .api.projects.workspace import Workspace
 
 ProjectDir = Annotated[Path, typer.Option(help="Project containing conanws.yml.")]
@@ -159,7 +158,7 @@ class _DepsCommands:
             refs = tuple(record.ref for record in graph.dependencies(transitive=True))
             records = graph.get(refs, with_sources=sources)
             installed = [record.to_dict() for record in records]
-            variants = Variants(catalog).get_many(
+            variants = catalog._variants.get_many(
                 document.configured_dependencies, lockfile=document.lockfile, build_missing=True
             )
             installed.extend(

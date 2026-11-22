@@ -5,9 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.records import LocalRecord, Ref
-from coreref.api.projects.graph import Graph
+from coreref.api.packages import Catalog, LocalRecord, Ref
+from coreref.api.projects import Graph
 from coreref.testing import local_server
 
 

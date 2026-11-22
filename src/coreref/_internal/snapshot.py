@@ -5,16 +5,54 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..api.build.outputs import SliceInputs
-from ..api.packages.records import JSON
+from ..api.packages.records import JSON, Ref
+from .hashing import file_digest, fingerprint
 
 if TYPE_CHECKING:
     from ..api.build.route import Route, Stage, StageSpec
-    from ..api.packages.variants import ConfiguredPackage
+    from ..api.packages.records import ConfiguredPackage
     from ..api.projects.project import Project
+
+
+@dataclass(frozen=True)
+class SliceInputs:
+    """Inputs that identify a project slice independently of the requested stage."""
+
+    project: Ref
+    commit: str | None
+    lockfile: Path
+    dependencies: tuple[Ref, ...]
+    environment: JSON
+    variants: Mapping[str, str] = field(default_factory=dict)
+    local_outputs: Mapping[str, Path] = field(default_factory=dict)
+    input_files: Mapping[str, Path | None] | None = None
+
+    def key(self) -> str:
+        """Hash the resolved inputs, including output bytes for an unpublished worktree."""
+        local_outputs = self.local_outputs if self.commit is None else {}
+        inputs: dict[str, JSON] = {
+            "project": str(self.project),
+            "local_outputs": {name: file_digest(path) for name, path in local_outputs.items()},
+            "lockfile": file_digest(self.lockfile),
+            "dependencies": tuple(sorted(map(str, self.dependencies))),
+            "variants": self.variants,
+            "environment": self.environment,
+        }
+        if self.input_files is None:
+            return fingerprint({"schema_version": 1, "commit": self.commit, **inputs})
+        files = _input_digests(self.input_files)
+        return fingerprint(
+            {"schema_version": 2, "worktree": self.commit is None, "files": files, **inputs}
+        )
+
+
+def _input_digests(files: Mapping[str, Path | None]) -> dict[str, str | None]:
+    digests = {path: file_digest(path) for path in set(files.values()) if path is not None}
+    return {name: digests[path] if path is not None else None for name, path in files.items()}
 
 
 def _git(source: Path, *arguments: str) -> str:
@@ -82,8 +120,10 @@ class Snapshot:
         return SliceInputs(
             project=project.record.ref,
             commit=commit,
-            lockfile=project.require_lockfile(),
-            dependencies=tuple(record.ref for record in project.dependencies),
+            lockfile=project._require_lockfile(),
+            dependencies=tuple(
+                record.ref for record in project.graph.dependencies(transitive=True)
+            ),
             environment={
                 "manifest": project.manifest.model_dump(
                     mode="json", exclude={"ref", "dependencies", "files", "payload"}

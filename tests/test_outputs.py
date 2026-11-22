@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.build.outputs import Outputs, Producer, SliceInputs
+from coreref._internal.artifacts import Producer
+from coreref._internal.snapshot import SliceInputs
+from coreref._internal.variants import Variants
+from coreref.api.build import Outputs
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.records import LocalRecord, Ref
-from coreref.api.packages.variants import Variants
-from coreref.api.projects.graph import Graph
+from coreref.api.packages import Catalog, LocalRecord, Ref
+from coreref.api.projects import Graph
 from coreref.testing import Sandbox, environment
 from coreref.testing.operations import trace_operations
 
@@ -27,17 +28,17 @@ def test_publish_extends_same_slice_across_other_revisions(tmp_path: Path) -> No
         output = tmp_path / "output"
         output.write_text("LEF")
         store = Outputs(env.catalog)
-        local = store.pack(inputs, {"abstract.lef": output}, {})
+        local = store._pack(inputs, {"abstract.lef": output}, {})
         assert store.get(local, ("abstract.lef",))["abstract.lef"].read_text() == "LEF"
-        first = store.publish(graph, inputs, {"abstract.lef": output}, {"type": "macro"})
+        first = store._publish(graph, inputs, {"abstract.lef": output}, {"type": "macro"})
         assert graph.record.payload == {"author": "flow"}
         assert isinstance(graph.record, LocalRecord) and not graph.record.files
         assert str(first.ref) in env.diagnostics()
 
         output.write_text("Liberty")
-        store.publish(graph, replace(inputs, commit="other"), {"timing.lib": output}, {})
+        store._publish(graph, replace(inputs, commit="other"), {"timing.lib": output}, {})
         assert env.new_catalog().info(first.ref.without_revision()).ref != first.ref
-        updated = store.publish(graph, inputs, {"timing.lib": output}, {})
+        updated = store._publish(graph, inputs, {"timing.lib": output}, {})
         with trace_operations() as operations:
             links = store.links(updated)
         assert links is not None and set(links) == {"abstract.lef", "timing.lib"}
@@ -48,7 +49,7 @@ def test_publish_extends_same_slice_across_other_revisions(tmp_path: Path) -> No
         paths = consumer.get(updated, ("timing.lib", "abstract.lef"))
         assert list(map(Path.read_text, paths.values())) == ["Liberty", "LEF"]
         with pytest.raises(ValueError, match="Previously published"):
-            store.publish(graph, inputs, {"abstract.lef": output}, {})
+            store._publish(graph, inputs, {"abstract.lef": output}, {})
 
 
 def test_outputs_reject_uncommitted_or_mismatched_project(tmp_path: Path, catalog: Catalog) -> None:
@@ -57,13 +58,13 @@ def test_outputs_reject_uncommitted_or_mismatched_project(tmp_path: Path, catalo
     lock = graph.create_lockfile(tmp_path / "lock")
     inputs = SliceInputs(local.ref, None, lock, (), {})
     with pytest.raises(InvalidPackage, match="matching, committed project"):
-        Outputs(catalog).publish(graph, inputs, {}, {})
+        Outputs(catalog)._publish(graph, inputs, {}, {})
     with pytest.raises(InvalidPackage, match="local graph for this catalog"):
-        Outputs(Catalog(tmp_path / "another-home")).publish(graph, inputs, {}, {})
+        Outputs(Catalog(tmp_path / "another-home"))._publish(graph, inputs, {}, {})
     release = catalog.publish(local)
     installed = Graph(catalog, release.ref)
     with pytest.raises(InvalidPackage, match="local graph"):
-        Outputs(catalog).publish(installed, inputs, {}, {})
+        Outputs(catalog)._publish(installed, inputs, {}, {})
 
 
 def _producer(env: Sandbox) -> Producer:
@@ -89,11 +90,11 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         output = tmp_path / "output"
         output.write_text("LEF")
         store = Outputs(env.catalog)
-        index = store.publish(
+        index = store._publish(
             graph, inputs, {"abstract.lef": output}, {}, producers={"layout": producer}
         )
-        assert Outputs.producers(index) == {"layout": producer}
-        assert store.publish(graph, inputs, {}, {}).ref == index.ref
+        assert Outputs._producers(index) == {"layout": producer}
+        assert store._publish(graph, inputs, {}, {}).ref == index.ref
 
         reader = env.new_catalog()
         groups = {"layout": ("abstract.lef", "timing.lib", "unproduced")}
@@ -113,7 +114,7 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
 
         different = Producer(ref=str(producer.ref).replace("layout", "different"))
         with pytest.raises(ValueError, match="Producer recipes changed"):
-            store.publish(graph, inputs, {}, {}, producers={"layout": different})
+            store._publish(graph, inputs, {}, {}, producers={"layout": different})
 
 
 def test_plain_packaged_files_remain_available(catalog: Catalog, tmp_path: Path) -> None:
@@ -126,4 +127,4 @@ def test_plain_packaged_files_remain_available(catalog: Catalog, tmp_path: Path)
     graph = Graph(catalog, LocalRecord(Ref("demo.local/1.0")))
     lock = graph.create_lockfile(tmp_path / "manifest.lock")
     inputs = SliceInputs(graph.record.ref, None, lock, (), {})
-    assert Outputs.links(Outputs(catalog).pack(inputs, {}, {})) == {}
+    assert Outputs.links(Outputs(catalog)._pack(inputs, {}, {})) == {}
