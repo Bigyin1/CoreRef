@@ -128,7 +128,7 @@ def test_full_tree_is_batched_and_lock_refresh_is_explicit(
     graph = document.resolve(catalog)
     assert graph.info(parent.ref.without_revision()).ref == parent.ref
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
-        installed = graph.get_with_sources()
+        installed = graph.get(with_sources=True)
         assert sum(call.args[0] == "install" for call in commands.call_args_list) == 1
     assert len(installed) == 3
     assert (
@@ -164,10 +164,10 @@ def test_yaml_graph_uses_native_workspace_from_current_directory(
     source = Workspace(catalog, document.path.parent / "conanws.yml").open(scm_package.ref)
     monkeypatch.chdir(document.path.parent)
     graph = document.resolve(catalog)
-    editable = graph.get_with_sources()[0]
+    editable = graph.get(with_sources=True)[0]
     assert editable.is_editable and editable.source == source
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected install")):
-        assert graph.get_with_sources() == (editable,)
+        assert graph.get(with_sources=True) == (editable,)
 
 
 @pytest.mark.parametrize("name", ["input.lock", "input.json", "input"])

@@ -19,7 +19,7 @@ def snapshot_operation(graph: Graph, operation: Operation) -> object:
     if operation == "edges":
         return graph.edges
     if operation == "order":
-        return graph.ordered_refs(graph.record.ref)
+        return tuple(record.ref for record in graph.dependencies(transitive=True))
     return graph.dependencies(transitive=True)
 
 

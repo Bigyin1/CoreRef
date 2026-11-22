@@ -85,5 +85,5 @@ def test_publish_without_remote_fails_before_preparing_inputs(tmp_path: Path) ->
         with pytest.raises(CatalogError, match="requires a configured registry remote"):
             catalog._client.upload(str(record.ref))
     assert payload.calls == 0
-    assert catalog.search(SearchQuery()) == ()
+    assert catalog.search_refs(SearchQuery()) == ()
     assert tuple(sorted(Graph(catalog, record).edges)) == ()

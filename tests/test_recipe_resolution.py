@@ -39,7 +39,9 @@ def test_cached_exact_tree_needs_no_network(
         assert graph.records == tuple(sorted(tree, key=lambda record: record.ref))
         assert graph.get((root.ref, left.ref)) == (root, left)
         local = LocalRecord(Ref("soc.consumer/1.0"))
-        assert Graph(catalog, local, dependencies=(root.ref,)).requirements == (root.ref,)
+        assert tuple(
+            record.ref for record in Graph(catalog, local, dependencies=(root.ref,)).dependencies()
+        ) == (root.ref,)
 
 
 @pytest.mark.parametrize("published", [False, True])
@@ -79,7 +81,7 @@ def test_unpinned_graph_resolves_before_metadata_reads(
         assert commands.call_count == 1
         assert commands.call_args.args[:2] == ("graph", "info")
         assert "--update" in commands.call_args.args
-    assert graph.requirements == (tree[-1].ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (tree[-1].ref,)
     lock = graph.create_lockfile(tmp_path / "project.lock")
     with patch.object(reader._client, "run", wraps=reader._client.run) as commands:
         assert Graph(reader, local, dependencies=(ref,), lockfile=lock).records == graph.records
@@ -134,11 +136,13 @@ def test_pinned_external_recipe_refreshes_floating_dependencies(
     lock = Graph(reader, ref).create_lockfile(tmp_path / "external.lock")
     second = catalog.publish(LocalRecord(logical, {"generation": 2}))
     with patch.object(reader._client, "run", wraps=reader._client.run) as commands:
-        assert Graph(reader, ref).requirements == (second.ref,)
+        assert tuple(record.ref for record in Graph(reader, ref).dependencies()) == (second.ref,)
         calls = [call.args for call in commands.call_args_list]
         assert len(calls) == 2
         assert all(args[:2] == ("graph", "info") for args in calls)
         assert "--update" not in calls[0] and "--update" in calls[1]
-    assert Graph(reader, ref, lockfile=lock).requirements == (first.ref,)
+    assert tuple(record.ref for record in Graph(reader, ref, lockfile=lock).dependencies()) == (
+        first.ref,
+    )
     local = LocalRecord(Ref("soc.consumer/1.0"))
     assert second in Graph(reader, local, dependencies=(ref,)).records

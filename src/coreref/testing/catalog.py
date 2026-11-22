@@ -22,3 +22,8 @@ class _RecordingCatalog(Catalog):
         installed = super().publish(record, dependencies=dependencies, lockfile=lockfile)
         self._published.append(installed.ref)
         return installed
+
+    def _publish_graph(self, graph: Graph, record: LocalRecord) -> InstalledRecord:
+        installed = super()._publish_graph(graph, record)
+        self._published.append(installed.ref)
+        return installed

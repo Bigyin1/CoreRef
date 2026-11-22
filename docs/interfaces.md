@@ -67,11 +67,8 @@ classDiagram
 | Класс | Основные операции |
 |---|---|
 | `Catalog(home=None, *, remote=None, timeout=60)` | Настройки клиента; обычно достаточно `Catalog()` |
-| `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
 | `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
 | `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
-| `catalog.pack(record, *, dependencies=(), lockfile=None)` | Упаковать локально и получить `InstalledRecord` с точной ревизией |
-| `catalog.upload(ref)` | Загрузить в реестр уже упакованную точную ревизию из локального кэша |
 | `Ref.from_fields(namespace, component, version, *, revision=None)` | Создание из отдельных координат |
 | `catalog.info(ref)` | Метаданные `Record` |
 | `catalog.get(ref)` / `catalog.get_with_sources(ref)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
@@ -82,7 +79,7 @@ classDiagram
 `matches_ref` и `matches` проверяют уже полученные ссылки и записи.
 Фильтры зависимостей задаются в Graph.
 
-`query` обязателен; поиск без ограничений — `catalog.search(SearchQuery())`.
+`query` обязателен; поиск без ограничений — `catalog.search_refs(SearchQuery())`.
 
 ## Диапазоны версий
 
@@ -97,7 +94,7 @@ classDiagram
 даже если CPU проверяли с 1.2. Выбор для конкретного запуска хранится в lockfile
 соответствующего проекта. SoC разрешает граф по рецептам пакетов и своему lockfile.
 
-`graph.requirements` содержит уже выбранные прямые `Ref`. Потребитель LIB/LEF
+`graph.dependencies()` возвращает метаданные с уже выбранными прямыми `Ref`. Потребитель LIB/LEF
 получает файлы из выбранной ревизии зависимости.
 
 ## Ревизии
@@ -159,11 +156,10 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 
 | API Graph | Результат |
 |---|---|
-| `record`, `records`, `requirements` | Корень, все метаданные и прямые Ref корня |
+| `record`, `records` | Корень и все метаданные снимка |
 | `info(ref)` | Метаданные выбранного узла без I/O |
 | `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
-| `ordered_refs(root)`, `ordered_records(root)` | Узлы подграфа в топологическом порядке Conan, включая корень |
-| `get(refs=None, *, filters=None)`, `get_with_sources(refs=None, *, filters=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
+| `get(refs=None, *, with_sources=False, filters=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
 | `get_sources(refs)` | Получение SCM для выбранных ссылок без загрузки бинарных пакетов. Возвращает `dict[Ref, Path]` с точными `Ref`. Для пакетов без SCM записи пропускаются. |
 | `create_lockfile(path=None)`, `lockfile` | Сохранение выбора Conan и путь проектного lockfile |
 | `edges` | Неизменяемые пары Ref от потребителя к зависимости |
@@ -177,7 +173,7 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 
 Graph фиксирует зависимости и выбранные revisions, а локальный корень остаётся рабочим
 LocalRecord: `graph.record is record`, переданный в конструктор. Через `record`, `records`,
-`info` и `ordered_records` доступен тот же объект. Payload, source и files можно дополнить
+и `info` доступен тот же объект. Payload, source и files можно дополнить
 после запуска инструмента и затем вызвать `catalog.publish(graph)` без повторного разрешения.
 Payload сериализуется при публикации, а не при разрешении графа.
 Координаты корня и состав зависимостей меняют через новый Graph; старый результат
@@ -192,21 +188,6 @@ Conan, не разбирая JSON. Если переданного пути ещ
 без повторного разрешения зависимостей. Получение файлов использует уже разрешённый выбор.
 `catalog.publish(graph)` упаковывает последние данные локальной записи с выбором
 версий из этого Graph. В рецепт попадают исходные объявления прямых зависимостей.
-Если flow нашёл дополнительные пакеты, их можно добавить к объявлениям из манифеста.
-
-```python
-requirements = (*manifest.dependencies, found_be.ref)
-final_graph = Graph(catalog, manifest.record, dependencies=requirements)
-# При необходимости явно обновить проектный lockfile расширенным набором.
-final_graph.create_lockfile(project_lockfile)
-catalog.publish(final_graph)
-```
-
-Так исходные диапазоны сохранятся, а найденный BE-пакет будет закреплён на точную
-revision. Если нужно закрепить и все ранее выбранные прямые входы, передайте
-`(*graph.requirements, found_be.ref)`. Для публикации без отдельного Graph также
-доступен `catalog.publish(record, dependencies=requirements)`.
-
 `Workspace(catalog, path="conanws.yml")` — небольшая обёртка над Conan init/add/remove.
 Conan создаёт conanws.yml/conanws.py и управляет составом workspace. SDK не ведёт свой
 реестр. Из текущей директории проекта Conan автоматически выбирает рабочие пакеты:
@@ -242,13 +223,12 @@ workspace.add("../cpu", record=cpu_record, dependencies=cpu_dependencies)
 # cpu_record и cpu_dependencies сформированы парсером конкретного flow.
 # workspace.open(rtl_ref)       # либо Git-копия опубликованной зависимости
 graph = Graph(catalog, rtl_ref)  # Conan уже видит зарегистрированную директорию
-ready = graph.get_with_sources()
+ready = graph.get((graph.record.ref,), with_sources=True)
 local = [record for record in ready if record.is_editable]
 ```
 
 Изменение состава workspace требует нового Graph. Его метаданные — снимок,
-но файлы рабочей копии остаются изменяемыми. `Catalog.cache_directory` возвращает
-реальное хранилище пакетов, включая настройку core.cache:storage_path.
+но файлы рабочей копии остаются изменяемыми.
 Ошибки: `CatalogError` — общий сбой, `NotFound` — отсутствие пакета,
 `Conflict` — конфликт зависимостей, `InvalidPackage` — неверное описание/содержимое.
 Ошибки Conan переводятся в сообщения SDK; исходное исключение доступно через `__cause__`.
@@ -321,15 +301,23 @@ Conan-рецептов по `PackageInput` с опциями и проектно
 `build_prerequisites` добавляет точные Ref предпосылок, которые Conan
 может собрать во время той же установки.
 
-## Файлы артефактов и общий кэш стадий
+## Локальные стадии
 
-`coreref.tools.artifacts` хранит каждый файл в отдельном Conan-пакете с SHA-256
-в версии. `ArtifactStore.pack_index(key, files)` возвращает `OutputIndex` с
-точными Ref, размерами и хешами. Flow может сохранить `index.document()` в
-`payload["output_index"]` своего пакета. Потребитель читает оглавление через
-`OutputIndex.from_record(record)` и получает нужный файл через
-`ArtifactStore.get(index.outputs[name])`. Хранилище проверяет размер и SHA-256
-после установки.
+`coreref.tools.pipeline.BuildStage` задаёт имя, действие, входные и выходные
+файлы и конфигурацию стадии. `Pipeline(directory, stages).run(target)`
+запускает целевую стадию и её предпосылки. Связи выводятся из входов и выходов
+файлов. Состояние сохраняется в директории сборки. Flow задаёт сами команды EDA
+и способ их запуска.
+
+## Именованные выходы и общий кэш стадий
+
+`coreref.tools.outputs.Outputs` позволяет упаковать выходы локально (`pack`),
+опубликовать их для разрешённого проекта (`publish`) и получить нужные файлы
+закреплённой ревизии по именам (`get`). Публикация загружает файлы перед
+оглавлением и добавляет новые выходы к предыдущим выходам того же среза.
+`build_missing=True` разрешает сборку отсутствующего результата, если
+опубликована его производящая стадия. Flow указывает, какие группы
+выходов принадлежат его стадиям.
 
 Conan lockfile фиксирует RREV выбранного пакета оглавления. Ссылки на файлы
 содержатся внутри этой ревизии оглавления. Обычное разрешение графа охватывает
@@ -441,4 +429,4 @@ SDK не удаляет рабочие директории при сбое: н�
 Неверные поля `SearchQuery` отклоняются при создании с `InvalidPackage`.
 Корректный запрос без совпадений возвращает пустой результат. Неизвестные Ref,
 несовпадающие revisions в методах Graph также дают
-`InvalidPackage`, включая `ordered_refs()` и `ordered_records()`.
+`InvalidPackage`.

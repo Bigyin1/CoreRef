@@ -71,7 +71,7 @@ def test_published_record_is_not_a_local_publication_input(catalog: Catalog) -> 
     record = Record(Ref.from_fields("soc", "cpu", "1.0"))
     with pytest.raises(InvalidPackage, match="LocalRecord"):
         catalog.publish(record)  # type: ignore[arg-type]  # Deliberate contract misuse.
-    assert catalog.search(SearchQuery()) == ()
+    assert catalog.search_refs(SearchQuery()) == ()
 
 
 def test_local_metadata_uses_names_and_record_decodes_package_paths(tmp_path: Path) -> None:

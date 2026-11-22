@@ -49,10 +49,9 @@ def test_unknown_refs_use_one_error_contract_without_conan_io(catalog: Catalog) 
     operations = (
         lambda: graph.info(missing),
         lambda: graph.dependencies(missing),
-        lambda: graph.ordered_refs(missing),
-        lambda: graph.ordered_records(missing),
+        lambda: graph.dependencies(missing, transitive=True),
         lambda: graph.get((missing,)),
-        lambda: graph.get_with_sources((missing,)),
+        lambda: graph.get((missing,), with_sources=True),
     )
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected I/O")):
         for operation in operations:

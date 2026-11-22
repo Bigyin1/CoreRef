@@ -106,7 +106,7 @@ def test_dirty_source_fails_before_publication(checkout: Path, *, catalog: Catal
         )
     assert error.value.__cause__ is not None
     assert "dirty" in str(error.value.__cause__)
-    assert not catalog.search(SearchQuery())
+    assert not catalog.search_refs(SearchQuery())
 
 
 @pytest.mark.parametrize("name", ["../escape", "/absolute"])
@@ -120,7 +120,7 @@ def test_copy_cannot_escape_package_directory(packages: Catalog, tmp_path: Path,
                 files={name: artifact},
             )
         )
-    assert not packages.search(SearchQuery())
+    assert not packages.search_refs(SearchQuery())
 
 
 @pytest.mark.parametrize("problem", ["missing", "directory", "overlap"])
@@ -139,7 +139,7 @@ def test_invalid_artifact_inputs_do_not_publish(
         files["a/b"] = artifact
     with pytest.raises(InvalidPackage):
         record = packages.publish(local_record(record, files=files))
-    assert not packages.search(SearchQuery())
+    assert not packages.search_refs(SearchQuery())
 
 
 @pytest.mark.parametrize("problem", ["missing", "file"])
@@ -152,7 +152,7 @@ def test_invalid_source_inputs_do_not_publish(
         source_path.write_text("not a checkout")
     with pytest.raises(InvalidPackage):
         record = packages.publish(local_record(record, source=source_path))
-    assert not packages.search(SearchQuery())
+    assert not packages.search_refs(SearchQuery())
 
 
 def test_missing_content_and_record(packages: Catalog) -> None:

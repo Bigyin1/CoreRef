@@ -96,7 +96,7 @@ def test_file_then_source_upgrade_survives_new_revision_and_lost_publisher(
         shutil.rmtree(history.local.source)
         shutil.rmtree(history.publisher._client.home)
         lock.write_text("The project lockfile is no longer usable")
-        ready = snapshot.get_with_sources((history.first.ref.without_revision(),))[0]
+        ready = snapshot.get((history.first.ref.without_revision(),), with_sources=True)[0]
         assert ready.ref == history.first.ref and ready.payload == {"generation": 1}
         assert ready.source is not None
         assert "updated" not in (ready.source / "cpu.sv").read_text()
@@ -123,16 +123,18 @@ def test_failed_git_upgrade_preserves_files_and_retries_after_origin_returns(
         files = snapshot.get((history.first.ref,))[0]
         history.origin.rename(tmp_path / "offline.git")
         with pytest.raises(CatalogError):
-            snapshot.get_with_sources((history.first.ref,))
+            snapshot.get((history.first.ref,), with_sources=True)
         assert snapshot.get((history.first.ref,))[0] is files
         assert files.source is None and files.files["report"].read_text() == "first"
         assert sum(call.args[0] == "install" for call in run.call_args_list) == 2
         (tmp_path / "offline.git").rename(history.origin)
-        ready = snapshot.get_with_sources((history.first.ref, history.first.ref.without_revision()))
+        ready = snapshot.get(
+            (history.first.ref, history.first.ref.without_revision()), with_sources=True
+        )
         assert len(ready) == 1 and ready[0].source is not None
         assert (ready[0].source / "cpu.sv").is_file()
         assert ready[0].files == files.files
-        assert snapshot.get_with_sources((history.first.ref,))[0] is ready[0]
+        assert snapshot.get((history.first.ref,), with_sources=True)[0] is ready[0]
         assert sum(call.args[0] == "install" for call in run.call_args_list) == 3
 
 
@@ -150,11 +152,13 @@ def test_mixed_valid_and_invalid_batch_does_no_io_and_does_not_poison_retry(
         snapshot.catalog._client, "run", side_effect=AssertionError("Unexpected I/O")
     ):
         with pytest.raises(InvalidPackage):
-            snapshot.get_with_sources(
-                (history.first.ref, bad, history.first.ref.without_revision())
+            snapshot.get(
+                (history.first.ref, bad, history.first.ref.without_revision()), with_sources=True
             )
         assert snapshot.get(()) == ()
-    fetched = snapshot.get_with_sources((history.first.ref, history.first.ref.without_revision()))
+    fetched = snapshot.get(
+        (history.first.ref, history.first.ref.without_revision()), with_sources=True
+    )
     assert len(fetched) == 1 and fetched[0].ref == history.first.ref
     assert fetched[0].source is not None
 
@@ -172,16 +176,20 @@ def test_retry_publication_after_upload_failure_keeps_the_original_lock_choice(
         history.publisher.publish(
             local, dependencies=(history.first.ref.without_revision(),), lockfile=lock
         )
-    assert history.publisher.search(SearchQuery(component="result")) == ()
+    assert history.publisher.search_refs(SearchQuery(component="result")) == ()
     second = history.advance()
     published = history.publisher.publish(
         local, dependencies=(history.first.ref.without_revision(),), lockfile=lock
     )
     locked = Graph(history.publisher, local, dependencies=(history.local.ref,), lockfile=lock)
-    assert locked.requirements == (history.first.ref,)
-    assert Graph(history.publisher, published.ref).requirements == (second.ref,)
-    assert len(history.publisher.search(SearchQuery(component="result"), all_revisions=True)) == 1
-    assert graph.get_with_sources((history.first.ref,))[0].payload == {"generation": 1}
+    assert tuple(record.ref for record in locked.dependencies()) == (history.first.ref,)
+    assert tuple(
+        record.ref for record in Graph(history.publisher, published.ref).dependencies()
+    ) == (second.ref,)
+    assert (
+        len(history.publisher.search_refs(SearchQuery(component="result"), all_revisions=True)) == 1
+    )
+    assert graph.get((history.first.ref,), with_sources=True)[0].payload == {"generation": 1}
 
 
 @pytest.mark.parametrize("reverse", [False, True])
@@ -207,4 +215,4 @@ def test_conflicting_diamond_revisions_do_not_damage_independent_snapshots(
         )
     assert history.first.ref in {record.ref for record in existing.records}
     assert second.ref in {record.ref for record in Graph(history.publisher, right.ref).records}
-    assert existing.get_with_sources((history.first.ref,))[0].source is not None
+    assert existing.get((history.first.ref,), with_sources=True)[0].source is not None

@@ -39,6 +39,3 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
         with pytest.raises(InvalidPackage):
             SearchQuery(component="cpu*")
         commands.assert_not_called()
-    assert reader.search_refs(SearchQuery()) == tuple(
-        record.ref for record in reader.search(SearchQuery())
-    )

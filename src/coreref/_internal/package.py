@@ -253,7 +253,7 @@ class PackageGraph:
         record = self._fetched.get(ref)
         if record is None:
             return True
-        return with_sources and not record.sources_ready
+        return with_sources and not record._sources_ready
 
     def _install(
         self, recipes: tuple[StoredRecipe, ...], *, with_sources: bool
@@ -341,8 +341,10 @@ class LocalPackage:
     def resolved(self) -> PackageGraph:
         return PackageGraph(self._catalog, self.record, self.graph, packages={})
 
-    def pack(self, *, resolved: ResolvedConanGraph | None = None) -> InstalledRecord:
-        record = self._publication_record()
+    def pack(
+        self, *, resolved: ResolvedConanGraph | None = None, record: LocalRecord | None = None
+    ) -> InstalledRecord:
+        record = self._publication_record(self.record if record is None else record)
         if resolved is None and self.dependencies:
             resolved = self.resolved.graph
         recipe = LocalRecipe(record, tuple(str(dep) for dep in self.dependencies))
@@ -378,21 +380,21 @@ class LocalPackage:
             raise InvalidPackage("A package cannot depend on itself")
         return tuple(dependencies)
 
-    def _publication_record(self) -> LocalRecord:
+    def _publication_record(self, record: LocalRecord) -> LocalRecord:
         files: dict[str, Path] = {}
-        for name, path in self.record.files.items():
+        for name, path in record.files.items():
             local = self._local_path(path)
             if not local.is_file():
                 raise InvalidPackage(f"Artifact is not a regular file: {path}")
             if any(name.startswith(other + "/") or other.startswith(name + "/") for other in files):
                 raise InvalidPackage("Artifact paths cannot overlap")
             files[name] = local
-        source = self.record.source
+        source = record.source
         if source is not None:
             source = self._local_path(source)
             if not source.is_dir():
                 raise InvalidPackage("Git source path must be a repository directory")
-        return replace(self.record, source=source, files=files)
+        return replace(record, source=source, files=files)
 
     def _export(self, directory: Path, *, lockfile: Path | None) -> InstalledRecord:
         native = self._client.export_package(directory, lockfile=lockfile)

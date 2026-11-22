@@ -22,14 +22,11 @@ def test_ordering_includes_shared_dependencies_once(*, catalog: Catalog) -> None
         catalog.get(record.ref) for record in (common, cpu, gpio, private)
     )
     snapshot = Graph(catalog, local_record(top), dependencies=(cpu.ref, gpio.ref))
-    order = snapshot.ordered_refs(top.ref)
-    assert set(order) == {common.ref, private.ref, cpu.ref, gpio.ref, top.ref}
-    assert len(order) == 5 and order[-1] == top.ref
+    order = tuple(record.ref for record in snapshot.dependencies(transitive=True))
+    assert set(order) == {common.ref, private.ref, cpu.ref, gpio.ref}
     assert order.index(common.ref) < order.index(cpu.ref)
     assert order.index(common.ref) < order.index(gpio.ref)
     assert order.index(private.ref) < order.index(cpu.ref)
-    assert snapshot.ordered_refs(top.ref) is order
-    assert tuple(record.ref for record in snapshot.ordered_records(top.ref)) == order
 
 
 def test_ordering_rejects_unknown_roots(*, catalog: Catalog) -> None:
@@ -39,4 +36,4 @@ def test_ordering_rejects_unknown_roots(*, catalog: Catalog) -> None:
     snapshot = Graph(catalog, local_record(root), dependencies=(middle.ref,))
     absent = release("absent").ref
     with pytest.raises(InvalidPackage, match="Unknown"):
-        snapshot.ordered_refs(absent)
+        snapshot.dependencies(absent, transitive=True)

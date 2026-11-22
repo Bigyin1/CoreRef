@@ -23,20 +23,20 @@ def test_pack_is_local_and_upload_requires_exact_cached_ref(
     path.write_text("hello")
     record = LocalRecord(Ref("demo.package/1.0"), files={"data": path})
 
-    installed = publisher.pack(record)
+    installed = publisher._pack(record)
     assert installed.ref.revision is not None
     assert consumer.search_refs(SearchQuery(namespace="demo")) == ()
     assert publisher.get(installed.ref).files["data"].read_text() == "hello"
     with pytest.raises(InvalidPackage, match="exact"):
-        publisher.upload(record.ref)
+        publisher._upload(record.ref)
     with pytest.raises(NotFound):
-        consumer.upload(installed.ref)
+        consumer._upload(installed.ref)
 
-    publisher.upload(installed.ref)
+    publisher._upload(installed.ref)
     assert consumer.get(installed.ref).files["data"].read_text() == "hello"
 
     offline = Catalog(configured_home(tmp_path / "offline"))
-    assert offline.pack(record).ref == installed.ref
+    assert offline._pack(record).ref == installed.ref
     assert offline.get(installed.ref).files["data"].read_text() == "hello"
 
 

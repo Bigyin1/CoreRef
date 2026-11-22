@@ -20,7 +20,7 @@ def test_packages_roundtrip_between_independent_clients(
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path / "sandbox")
     publisher, reader = sandbox.catalog, sandbox.new_catalog()
-    assert publisher.cache_directory != reader.cache_directory
+    assert publisher._client.cache_directory != reader._client.cache_directory
     util = publisher.publish(sandbox.package(Ref("test.util/1.0")))
     local = sandbox.package(
         Ref("test.cpu/1.0"),
@@ -30,7 +30,7 @@ def test_packages_roundtrip_between_independent_clients(
     local.payload = {"custom": "flow data"}
     published = publisher.publish(local, dependencies=(util.ref,))
     graph = Graph(reader, published.ref)
-    installed = graph.get_with_sources()
+    installed = graph.get(with_sources=True)
     cpu = next(record for record in installed if record.ref == published.ref)
     assert cpu.source is not None
     assert (cpu.source / "rtl/cpu.sv").read_text() == "module cpu; endmodule\n"
@@ -50,7 +50,7 @@ def test_native_workspace_uses_fixture_sources(
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, LocalRecord(Ref("test.top/1.0")), dependencies=(cpu.ref,))
-    editable = graph.get_with_sources()[0]
+    editable = graph.get(with_sources=True)[0]
     assert editable.is_editable and editable.source == cpu.source
     assert (editable.source / "cpu.sv").read_text() == "local RTL"
     workspace.remove(cpu.source)
@@ -108,7 +108,7 @@ def test_package_hierarchy_downloads_from_bare_upstreams(
     assert {(a.component, b.component) for a, b in graph.edges} == {
         (name, dependency) for name, dependencies in links.items() for dependency in dependencies
     }
-    installed = graph.get_with_sources()
+    installed = graph.get(with_sources=True)
     assert len(installed) == len(records)
     for record in installed:
         assert record.source is not None
@@ -132,7 +132,7 @@ def test_editable_hierarchy_can_mix_local_and_published_packages(
     workspace.add(top.source, record=top, dependencies=(cpu.ref, util.ref))
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, top.ref)
-    installed = {record.ref.component: record for record in graph.get_with_sources()}
+    installed = {record.ref.component: record for record in graph.get(with_sources=True)}
     assert installed["cpu"].source == cpu.source and installed["cpu"].is_editable
     assert installed["top"].source == top.source and installed["top"].is_editable
     assert not installed["util"].is_editable
@@ -195,6 +195,6 @@ def test_environment_owns_server_clients_and_git_origins(tmp_path: Path) -> None
         }
         published = sandbox.publish_set(records, dependencies={"top": ("cpu",)})
         graph = Graph(sandbox.new_catalog(), published["top"].ref)
-        assert len(graph.get_with_sources()) == 2
+        assert len(graph.get(with_sources=True)) == 2
         assert sandbox.server.url.startswith("http://127.0.0.1:")
     assert (tmp_path / "server/server.log").is_file()

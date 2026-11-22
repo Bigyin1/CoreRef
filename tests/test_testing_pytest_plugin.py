@@ -19,11 +19,11 @@ def test_flow(coreref_environment, coreref_catalog, coreref_project, coreref_ser
     published = env.publish(cpu)
     coreref_project.add(published.ref.without_revision())
     coreref_project.save()
-    assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].source is not None
+    assert coreref_project.resolve(coreref_catalog).get(with_sources=True)[0].source is not None
     workspace = env.workspace(directory=coreref_project.path.parent)
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(coreref_project.path.parent)
-    assert coreref_project.resolve(coreref_catalog).get_with_sources()[0].is_editable
+    assert coreref_project.resolve(coreref_catalog).get(with_sources=True)[0].is_editable
     assert len(list(env.root.glob("client-*"))) == 1
 """)
     result = pytester.runpytest_inprocess("-q", "--strict-markers")

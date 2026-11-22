@@ -36,7 +36,7 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
             graph = manifest.resolve(catalog)
         assert graph.record is manifest.record
         assert graph.info(manifest.record.ref) is manifest.record
-        assert graph.ordered_records(manifest.record.ref)[-1] is manifest.record
+        assert graph.info(manifest.record.ref) is manifest.record
         report = tmp_path / "report.txt"
         report.write_text("tool output")
         manifest.record.files["report.txt"] = report
@@ -70,7 +70,7 @@ def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choic
     before = manifest.lockfile.read_bytes()
     catalog.publish(LocalRecord(rtl.ref.without_revision(), {"generation": 2}))
     manifest.record.payload = {"selected_macro": str(macro.ref)}
-    requirements = (*graph.requirements, macro.ref)
+    requirements = (*tuple(record.ref for record in graph.dependencies()), macro.ref)
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
         if prepared:
             augmented = Graph(catalog, manifest.record, dependencies=requirements)
@@ -80,9 +80,12 @@ def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choic
             published = catalog.publish(manifest.record, dependencies=requirements)
         assert sum(call.args[:2] == ("graph", "info") for call in commands.call_args_list) == 1
         assert sum(call.args[0] == "export-pkg" for call in commands.call_args_list) == 1
-    assert graph.requirements == (rtl.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (rtl.ref,)
     assert manifest.dependencies == (rtl.ref.without_revision(),)
-    assert set(Graph(catalog, published.ref).requirements) == {rtl.ref, macro.ref}
+    assert {record.ref for record in Graph(catalog, published.ref).dependencies()} == {
+        rtl.ref,
+        macro.ref,
+    }
     assert (manifest.lockfile.read_bytes() != before) == prepared
     assert ManifestFile(manifest.path).record.payload is None
 
@@ -103,7 +106,11 @@ def test_conflicting_extra_dependency_does_not_replace_the_existing_graph(
         patch.object(catalog._client, "export_package", side_effect=AssertionError("Export")),
         pytest.raises(Conflict),
     ):
-        catalog.publish(root, dependencies=(*graph.requirements, macro.ref))
-    assert graph.record is root and graph.requirements == (rtl.ref,)
+        catalog.publish(
+            root, dependencies=(*tuple(record.ref for record in graph.dependencies()), macro.ref)
+        )
+    assert graph.record is root and tuple(record.ref for record in graph.dependencies()) == (
+        rtl.ref,
+    )
     assert graph.info(rtl.ref).ref == rtl.ref
     assert lock.read_bytes() == original

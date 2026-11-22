@@ -49,16 +49,20 @@ def test_project_lock_pins_resolution_and_export_preserves_the_declared_range(
     assert project.dependencies == (requirement,)
     lock = project.create_lockfile(env.catalog)
     newer = env.publish(LocalRecord(Ref("shared.stdlib/2.0")))
-    assert project.resolve(env.catalog, update=True).requirements == (newer.ref,)
+    assert tuple(
+        record.ref for record in project.resolve(env.catalog, update=True).dependencies()
+    ) == (newer.ref,)
     locked = project.resolve(env.catalog)
-    assert locked.lockfile == lock and locked.requirements == (first.ref,)
+    assert locked.lockfile == lock and tuple(record.ref for record in locked.dependencies()) == (
+        first.ref,
+    )
     assert locked.get()[0].files["rtl.sv"].read_text() == "first"
     project.record.source = None
     project.record.files["manifest.yml"] = project.path
     published = env.publish(project.record, dependencies=project.dependencies, lockfile=lock)
     consumer = env.new_catalog()
     graph = Graph(consumer, published.ref)
-    assert graph.requirements == (newer.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (newer.ref,)
     assert (
         graph.get((published.ref,))[0].files["manifest.yml"].read_bytes()
         == project.path.read_bytes()
@@ -72,7 +76,7 @@ def _publish_locked_block(env: Sandbox, component: str, version: str) -> Ref:
     block.record.source = None
     block.create_lockfile(env.catalog)
     graph = block.resolve(env.catalog)
-    assert graph.requirements == (library.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (library.ref,)
     return env.publish(graph).ref
 
 
@@ -108,7 +112,9 @@ def test_published_explicit_pin_keeps_its_revision(
     library.payload = {"changed": True}
     second = env.publish(library)
     assert first.ref != second.ref
-    assert Graph(env.new_catalog(), macro.ref).requirements == (first.ref,)
+    assert tuple(record.ref for record in Graph(env.new_catalog(), macro.ref).dependencies()) == (
+        first.ref,
+    )
 
 
 def test_dependency_cli_roundtrips_a_range_without_conan(tmp_path: Path) -> None:

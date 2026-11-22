@@ -21,15 +21,6 @@ class Catalog:
     ) -> None:
         self._client = ConanClient(Path(home) if home is not None else None, remote, timeout)
 
-    @property
-    def cache_directory(self) -> Path:
-        """The package storage directory selected by the configured client."""
-        return self._client.cache_directory
-
-    def search(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Record, ...]:
-        """Find latest matching revisions, or history when all_revisions is requested."""
-        return tuple(self.info(ref) for ref in self.search_refs(query, all_revisions=all_revisions))
-
     def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
         """Find exact coordinates without downloading recipes or reading payloads."""
         pattern = query._conan_pattern(all_revisions=all_revisions)
@@ -66,11 +57,11 @@ class Catalog:
     ) -> InstalledRecord:
         """Publish a local description or reuse a previously resolved local graph."""
         self._client.require_remote()
-        installed = self.pack(record, dependencies=dependencies, lockfile=lockfile)
+        installed = self._pack(record, dependencies=dependencies, lockfile=lockfile)
         self._client.upload(str(installed.ref))
         return installed
 
-    def pack(
+    def _pack(
         self,
         record: LocalRecord | Graph,
         *,
@@ -88,13 +79,21 @@ class Catalog:
             return record._pack()
         return self._local_package(record, dependencies, lockfile).pack()
 
-    def upload(self, ref: Ref) -> None:
+    def _upload(self, ref: Ref) -> None:
         """Upload an exact recipe and its locally packed binaries."""
         self._client.require_remote()
         if ref.revision is None:
             raise InvalidPackage("Upload requires an exact recipe revision")
         self._client.cache_path(str(ref))
         self._client.upload(str(ref))
+
+    def _publish_graph(self, graph: Graph, record: LocalRecord) -> InstalledRecord:
+        self._client.require_remote()
+        if graph.catalog is not self:
+            raise InvalidPackage("Publish the graph through its own catalog")
+        installed = graph._pack(record)
+        self._client.upload(str(installed.ref))
+        return installed
 
     def _package(self, ref: Ref) -> StoredPackage:
         return StoredPackage(self, ref)

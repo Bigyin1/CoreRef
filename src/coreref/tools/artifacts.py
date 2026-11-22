@@ -152,7 +152,7 @@ class ArtifactStore:
         if cached is not None:
             return cached
         record = LocalRecord(Ref(f"coreref-artifact.file/{sha256}"), files={"data": path})
-        installed = self.catalog.pack(record)
+        installed = self.catalog._pack(record)
         artifact = Artifact(ref=str(installed.ref), sha256=sha256, size=path.stat().st_size)
         artifact.verify(installed.files["data"])
         self._packed[sha256] = artifact
@@ -175,4 +175,4 @@ class ArtifactStore:
 
     def upload(self, outputs: Mapping[str, Artifact]) -> None:
         for ref in sorted({Ref(item.ref) for item in outputs.values()}):
-            self.catalog.upload(ref)
+            self.catalog._upload(ref)

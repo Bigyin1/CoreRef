@@ -43,7 +43,7 @@ def test_graphs_with_separate_inputs_and_locks_share_a_workspace(
     assert {record.ref for record in right.records} == {right.record.ref, second.ref}
     right.create_lockfile()
     assert left_path.read_bytes() == left_lock
-    assert catalog.search(SearchQuery()) == (first, second)
+    assert catalog.search_refs(SearchQuery()) == (first.ref, second.ref)
 
 
 def test_graph_lockfile_requires_a_path(catalog: Catalog) -> None:
@@ -102,7 +102,6 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
         "catalog",
         "record",
         "records",
-        "requirements",
         "edges",
         "lockfile",
     ],
@@ -110,10 +109,10 @@ def test_lockfile_uses_the_resolved_snapshot_without_more_conan_commands(
 def test_resolved_structure_cannot_be_reassigned(catalog: Catalog, attribute: str) -> None:
     local = LocalRecord(Ref.from_fields("soc", "top", "1.0"))
     graph = Graph(catalog, local)
-    expected = graph.ordered_refs(local.ref)
+    expected = graph._ordered_refs(local.ref)
     with pytest.raises(AttributeError):
         setattr(graph, attribute, None)
-    assert graph.ordered_refs(local.ref) is expected
+    assert graph._ordered_refs(local.ref) is expected
     assert graph.record == local
 
 
@@ -122,17 +121,16 @@ def test_local_views_share_one_working_record_and_preserve_resolved_coordinates(
 ) -> None:
     local = LocalRecord(Ref("soc.top/1.0"))
     graph = Graph(catalog, local)
-    expected = graph.ordered_refs(local.ref)
+    expected = graph._ordered_refs(local.ref)
     views = (
         graph.record,
         graph.records[0],
-        graph.ordered_records(local.ref)[0],
         graph.info(local.ref),
     )
     assert all(record is local for record in views)
     local.payload = {"changed": True}
     assert graph.record.payload == {"changed": True}
-    assert graph.ordered_refs(local.ref) is expected
+    assert graph._ordered_refs(local.ref) is expected
     assert graph.edges is graph.edges
     local.ref = Ref("soc.other/1.0")
     with pytest.raises(InvalidPackage, match="coordinates changed"):

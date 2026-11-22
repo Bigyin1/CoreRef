@@ -42,9 +42,7 @@ def test_metadata_operations_leave_artifacts_on_the_server(
         metadata = reader.info(ref)
         assert type(metadata) is Record and metadata.file_names == ("cpu.lib",)
         assert not hasattr(metadata, "files") and not hasattr(metadata, "source")
-        assert reader.search(SearchQuery()) == tuple(
-            sorted((leaf, parent), key=lambda item: item.ref)
-        )
+        assert reader.search_refs(SearchQuery()) == tuple(sorted((leaf.ref, parent.ref)))
         assert Graph(reader, Ref.from_fields(**parent.ref.to_dict())).dependencies() == (metadata,)
         graph = Graph(
             reader,
@@ -101,12 +99,12 @@ def test_source_presence_and_source_readiness_are_distinct(
     )
     metadata = catalog.info(record.ref)
     assert type(metadata) is Record and metadata.has_source
-    assert record.has_source and record.source is None and not record.sources_ready
+    assert record.has_source and record.source is None and not record._sources_ready
     fetched = catalog.get_with_sources(record.ref)
-    assert fetched.has_source and fetched.source is not None and fetched.sources_ready
+    assert fetched.has_source and fetched.source is not None and fetched._sources_ready
     assert (fetched.source / "cpu.sv").is_file()
     empty = catalog.publish(LocalRecord(Ref.from_fields("soc", "empty--be--lib-lef", "1.0")))
-    assert not empty.has_source and empty.source is None and empty.sources_ready
+    assert not empty.has_source and empty.source is None and empty._sources_ready
     output = json.loads(json.dumps(fetched.to_dict()))
     assert output["source"] == str(fetched.source)
 
@@ -182,4 +180,4 @@ def test_incomplete_package_is_rejected_before_upload(
                 )
             )
         upload.assert_not_called()
-    assert catalog.search(SearchQuery()) == ()
+    assert catalog.search_refs(SearchQuery()) == ()

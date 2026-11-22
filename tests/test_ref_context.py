@@ -30,7 +30,7 @@ def test_one_reference_can_be_used_with_distinct_catalogs(
     assert other_catalog.get(ref).payload == {"origin": "second"}
     assert Graph(catalog, ref).record.ref == first.ref
     assert Graph(other_catalog, ref).record.ref == second.ref
-    assert catalog.search(SearchQuery())[0].ref == first.ref
+    assert catalog.search_refs(SearchQuery())[0] == first.ref
     assert other_catalog.search_refs(SearchQuery()) == (second.ref,)
     assert ref == Ref(str(ref)) and hash(ref) == hash(Ref(str(ref)))
 
@@ -42,7 +42,7 @@ def test_graph_uses_the_explicit_catalog_for_all_nodes(catalog: Catalog) -> None
     assert graph.catalog is catalog
     assert graph.get()[0].ref == leaf.ref
     assert all(not hasattr(record.ref, "_catalog") for record in graph.records)
-    assert graph.requirements == (leaf.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (leaf.ref,)
 
 
 def test_reference_has_no_client_context_and_read_only_coordinates() -> None:

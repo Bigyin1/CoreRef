@@ -286,7 +286,7 @@ class InstalledRecord(Record):
         return self._is_editable
 
     @property
-    def sources_ready(self) -> bool:
+    def _sources_ready(self) -> bool:
         """Whether sources are available or the package declares none."""
         return not self.has_source or self.source is not None
 

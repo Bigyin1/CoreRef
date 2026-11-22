@@ -151,7 +151,8 @@ class _DepsCommands:
         """Fetch the full dependency tree in one batch, keeping the existing lockfile."""
         with _command_errors():
             graph = ManifestFile(file).resolve(self._catalog_factory())
-            records = graph.get_with_sources() if sources else graph.get()
+            refs = tuple(record.ref for record in graph.dependencies(transitive=True))
+            records = graph.get(refs, with_sources=sources)
             typer.echo(json.dumps([record.to_dict() for record in records], indent=2))
 
 

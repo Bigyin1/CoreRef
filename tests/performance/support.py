@@ -130,7 +130,7 @@ def graph_setup(
 
 
 def fetch(graph: Graph, sources: bool) -> tuple[InstalledRecord, ...]:
-    return graph.get_with_sources() if sources else graph.get()
+    return graph.get(with_sources=True) if sources else graph.get()
 
 
 def check_files(records: tuple[InstalledRecord, ...], *, sources: bool) -> None:

@@ -48,7 +48,7 @@ def test_publish_graph_uses_updated_metadata_and_files_with_its_fixed_revision_c
     assert published.payload == {"value": "edited"} and payload.calls == 1
     assert published.files["lib"].read_text() == "updated file"
     assert published.files["new"].read_text() == "new result"
-    assert graph.requirements == (first.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (first.ref,)
     assert Graph(catalog, published.ref).dependencies() == (second,)
     assert not any(call.args[:2] == ("graph", "info") for call in commands.call_args_list)
     assert sum(call.args[0] == "export-pkg" for call in commands.call_args_list) == 1

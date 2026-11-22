@@ -25,7 +25,7 @@ def test_default_catalog_is_lazy_and_belongs_to_one_environment(
         assert first.catalog is catalog
         assert configure.call_count == 1
         assert second.catalog is not catalog
-        assert second.catalog.cache_directory != catalog.cache_directory
+        assert second.catalog._client.cache_directory != catalog._client.cache_directory
         assert first.catalog is catalog
         assert configure.call_count == 2
 
@@ -49,7 +49,7 @@ def test_publish_and_workspace_helpers_share_catalog_and_allow_a_cold_reader(
         assert configure.call_count == 1
         reader = env.new_catalog()
         assert reader is not env.catalog
-        assert reader.cache_directory != env.catalog.cache_directory
+        assert reader._client.cache_directory != env.catalog._client.cache_directory
         assert reader.get(util.ref).files["report"].read_text() == "result"
         assert env.new_catalog() is not reader
         assert configure.call_count == 3

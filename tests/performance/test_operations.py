@@ -66,9 +66,10 @@ def test_lock_keeps_revision_without_preselection(registry: Registry, tmp_path: 
 
 def test_incremental_install_budget(registry: Registry) -> None:
     graph = registry.dataset("shared", 8, "mixed").resolve(registry.reader())
-    selected = graph.ordered_refs(graph.requirements[-1])
+    root = graph.dependencies()[-1].ref
+    selected = (*[record.ref for record in graph.dependencies(root, transitive=True)], root)
     remaining = tuple(
-        ref for ref in graph.ordered_refs(graph.record.ref)[:-1] if ref not in selected
+        record.ref for record in graph.dependencies(transitive=True) if record.ref not in selected
     )
     with (
         patch.object(graph.catalog._client, "run", wraps=graph.catalog._client.run) as commands,
@@ -76,9 +77,9 @@ def test_incremental_install_budget(registry: Registry) -> None:
         patch.object(Git, "clone", autospec=True, side_effect=Git.clone) as clones,
         recipe_reads() as reads,
     ):
-        first = graph.get_with_sources(selected)
+        first = graph.get(selected, with_sources=True)
         assert clones.call_count == sum(record.has_source for record in first)
-        rest = graph.get_with_sources(remaining)
+        rest = graph.get(remaining, with_sources=True)
         assert clones.call_count == sum(record.has_source for record in first + rest)
         assert [call.args[0] for call in commands.call_args_list] == ["install", "install"]
         archives = [
@@ -90,8 +91,8 @@ def test_incremental_install_budget(registry: Registry) -> None:
         commands.reset_mock()
         requests.reset_mock()
         by_ref = {record.ref: record for record in first + rest}
-        assert graph.get_with_sources() == tuple(
-            by_ref[ref] for ref in graph.ordered_refs(graph.record.ref)[:-1]
+        assert graph.get(with_sources=True) == tuple(
+            by_ref[record.ref] for record in graph.dependencies(transitive=True)
         )
         assert not commands.called and not requests.called
         assert reads.call_count == 0
@@ -106,7 +107,7 @@ def test_full_install_budget(registry: Registry, *, sources: bool) -> None:
         patch.object(Session, "send", autospec=True, side_effect=Session.send) as requests,
         recipe_reads() as reads,
     ):
-        records = graph.get_with_sources() if sources else graph.get()
+        records = graph.get(with_sources=True) if sources else graph.get()
     assert [call.args[0] for call in commands.call_args_list] == ["install"]
     assert reads.call_count == 0
     archives = Counter(
@@ -130,7 +131,9 @@ def test_search_refs_reads_no_recipes(registry: Registry) -> None:
     assert reads.call_count == 0
     assert [call.args[0] for call in commands.call_args_list] == ["list"]
     with recipe_reads() as reads:
-        assert {r.ref for r in reader.search(query)} == {r.ref for r in dataset.records}
+        assert {reader.info(ref).ref for ref in reader.search_refs(query)} == {
+            r.ref for r in dataset.records
+        }
     assert reads.call_count == len(dataset.records)
 
 
@@ -142,7 +145,7 @@ def test_snapshot_queries_do_not_perform_io(registry: Registry) -> None:
         patch.object(StoredRecipe, "__init__", side_effect=AssertionError("Recipe I/O")),
     ):
         assert graph.edges is graph.edges
-        order = graph.ordered_refs(graph.record.ref)
-        assert graph.ordered_refs(graph.record.ref) is order
-        assert len(graph.dependencies(transitive=True)) == 32
-        assert all(graph.info(ref).ref == ref for ref in order)
+        ordered = graph.dependencies(transitive=True)
+        assert graph.dependencies(transitive=True) == ordered
+        assert len(ordered) == 32
+        assert all(graph.info(record.ref) is record for record in ordered)

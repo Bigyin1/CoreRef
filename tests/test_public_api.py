@@ -51,7 +51,7 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         stored = instance.get(record.ref)
         assert stored.ref == record.ref
         assert stored.payload["views"] == ("rtl", "timing")
-        assert instance.search(query.SearchQuery()) == (stored,)
+        assert instance.search_refs(query.SearchQuery()) == (stored.ref,)
         assert Graph(instance, record.ref).dependencies() == ()
         resolved = Graph(instance, local)
         assert isinstance(resolved.records[0], records.LocalRecord)

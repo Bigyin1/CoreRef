@@ -28,6 +28,7 @@ CI проверяет обе группы тестов с общим порог�
 |---|---|
 | `tools/cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
 | `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
+| `tools/pipeline.py`, `outputs.py` | Локальное исполнение стадий и именованные результаты |
 | `tools/manifest.py` | Необязательный стандарт YAML, пути и прямые объявления зависимостей |
 | `api/graph.py`, `workspace.py` | Разрешённые зависимости, рабочий LocalRecord и Git-копии |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
@@ -164,7 +165,7 @@ def test_flow(tmp_path, monkeypatch):
         workspace.add(cpu.source, record=cpu)
         monkeypatch.chdir(workspace.path.parent)
         graph = Graph(sandbox.catalog, LocalRecord(Ref("soc.top/1.0")), dependencies=(cpu.ref,))
-        assert graph.get_with_sources()[0].is_editable
+        assert graph.get(with_sources=True)[0].is_editable
 ```
 
 `Sandbox.package()` создаёт новый набор входов при каждом вызове: `sources` —
@@ -208,7 +209,7 @@ def test_package_graph(tmp_path):
 
         # Чистый клиент скачивает рецепты с Conan server, исходники — из Git origins.
         graph = Graph(sandbox.new_catalog(), published["top"].ref)
-        assert len(graph.get_with_sources()) == 4
+        assert len(graph.get(with_sources=True)) == 4
 ```
 
 Ключи `records` — произвольные короткие имена, не Conan Ref. Через них `dependencies`
@@ -318,7 +319,7 @@ def test_soc(tmp_path):
             record = project.record
             catalog.publish(record, dependencies=project.dependencies)
         soc = ManifestFile(env.projects / "soc/manifest.yml")
-        assert len(soc.resolve(env.catalog).get_with_sources()) == 2
+        assert len(soc.resolve(env.catalog).get(with_sources=True)) == 2
 ```
 
 `projects` указывает на исходное дерево; `env.projects` — отдельная рабочая копия
@@ -415,11 +416,11 @@ repositories — пустой tuple. `EnvironmentOptions` описывает т�
 from coreref.testing import trace_operations
 
 with trace_operations() as trace:
-    graph.get_with_sources()
+    graph.get(with_sources=True)
 assert trace.installs == 1
 
 with trace_operations() as cached:
-    graph.get_with_sources()
+    graph.get(with_sources=True)
 assert cached.commands == ()
 ```
 

@@ -24,14 +24,13 @@ def test_published_graph_has_an_exact_root_without_a_consumer_node(catalog: Cata
     graph = Graph(catalog, root.ref.without_revision())
     assert graph.record == root
     assert type(graph.record) is Record
-    assert graph.requirements == (leaf.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (leaf.ref,)
     assert tuple(sorted(graph.edges)) == ((root.ref, leaf.ref),)
-    assert graph.ordered_refs(root.ref.without_revision()) == (leaf.ref, root.ref)
-    assert graph.ordered_records(root.ref) == (leaf, root)
+    assert graph.dependencies(root.ref.without_revision(), transitive=True) == (leaf,)
     assert graph.edges is graph.edges
     with patch.object(catalog._client, "run", side_effect=AssertionError("Unexpected Conan I/O")):
         assert graph.get((root.ref.without_revision(), leaf.ref)) == (root, leaf)
-        assert graph.get_with_sources((root.ref,))[0] is graph.get((root.ref,))[0]
+        assert graph.get((root.ref,), with_sources=True)[0] is graph.get((root.ref,))[0]
     with pytest.raises(InvalidPackage, match="requirements come from"):
         Graph(catalog, root.ref, dependencies=(leaf.ref,))
     with pytest.raises(NotFound):
@@ -68,7 +67,7 @@ def test_published_tree_installs_root_and_dependencies_in_one_batch(
         assert dl.call_count == 0
         assert sum(call.args[:2] == ("graph", "info") for call in run.call_args_list) == 1
         assert not any(call.args[0] == "install" for call in run.call_args_list)
-        records = graph.get_with_sources(graph.ordered_refs(requested))
+        records = graph.get((leaf.ref, requested), with_sources=True)
         assert tuple(record.ref for record in records) == (leaf.ref, root.ref)
         assert all(record.files["report"].read_text() == "data" for record in records)
         assert all(record.source and (record.source / "cpu.sv").is_file() for record in records)
@@ -97,7 +96,7 @@ def test_published_graph_and_lock_keep_the_root_revision(catalog: Catalog, tmp_p
     with pytest.raises(InvalidPackage, match="Revision is not part"):
         graph.get((second.ref,))
     with pytest.raises(InvalidPackage, match="Revision is not part"):
-        graph.ordered_refs(second.ref)
+        graph.dependencies(second.ref, transitive=True)
     with pytest.raises(InvalidPackage):
         Graph(catalog, second.ref, lockfile=lock)
 

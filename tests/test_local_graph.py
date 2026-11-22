@@ -43,7 +43,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     assert stored_root.payload == {"local": ("working-tree",)}
     with pytest.raises(NotFound):
         catalog.get(Ref.from_fields(**root.ref.to_dict()))
-    assert len(catalog.search(SearchQuery())) == 3
+    assert len(catalog.search_refs(SearchQuery())) == 3
 
 
 def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
@@ -51,7 +51,7 @@ def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     graph = Graph(local_catalog, local_record(root))
     assert graph.records == (local_record(root),)
     assert tuple(sorted(graph.edges)) == ()
-    assert local_catalog.search(SearchQuery()) == ()
+    assert local_catalog.search_refs(SearchQuery()) == ()
 
 
 def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:

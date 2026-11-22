@@ -80,6 +80,6 @@ def test_construction_resolves_once_and_keeps_the_working_record(
     assert calls == 1
     assert len(project.edges) == 1
     assert project.info(local.ref) is local and project.record.payload == {"edited": True}
-    assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
-    assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
+    assert project._ordered_refs(local.ref) == (dependency.ref, local.ref)
+    assert project._ordered_refs(local.ref) == (dependency.ref, local.ref)
     assert calls == 1

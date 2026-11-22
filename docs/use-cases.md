@@ -57,7 +57,8 @@ from pathlib import Path
 from coreref.api.catalog import Catalog
 from coreref.tools.manifest import ManifestFile
 from coreref.api.graph import Graph
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
+from coreref.tools.outputs import Outputs
 
 
 def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
@@ -69,14 +70,18 @@ def resolve_rtl_project(catalog: Catalog, root: Path) -> Graph:
 
 def collect_rtl_sources(graph: Graph) -> list[Path]:
     """Получить зависимости одной группой и добавить исходники локального корня."""
-    records: tuple[LocalRecord | InstalledRecord, ...] = graph.get_with_sources()
-    if isinstance(graph.record, LocalRecord):
-        records = (*records, graph.record)
+    records = (*graph.dependencies(transitive=True), graph.record)
+    directories = graph.get_sources(
+        tuple(record.ref for record in records if isinstance(record, Record))
+    )
     sources = []
     for record in records:
-        if record.source is not None:
+        directory = (
+            record.source if isinstance(record, LocalRecord) else directories.get(record.ref)
+        )
+        if directory is not None:
             # sources в payload — относительные пути по соглашению приложения.
-            sources.extend(record.source / name for name in record.payload["sources"])
+            sources.extend(directory / name for name in record.payload["sources"])
     return sources
 
 
@@ -109,12 +114,15 @@ flowchart TD
 ```
 
 ```python
-def macro_files(graph: Graph, ref: Ref) -> tuple[Path, Path]:
-    (macro,) = graph.get((ref,))
-    return macro.files["cpu.lib"], macro.files["cpu.lef"]
+def macro_files(catalog: Catalog, graph: Graph, ref: Ref) -> tuple[Path, Path]:
+    macro = graph.info(ref)
+    if not isinstance(macro, Record):
+        raise ValueError("Expected a published macro")
+    files = Outputs(catalog).get(macro, ("cpu.lib", "cpu.lef"))
+    return files["cpu.lib"], files["cpu.lef"]
 
 
-lib, lef = macro_files(graph, Ref("soc.cpu/1.0"))
+lib, lef = macro_files(catalog, graph, Ref("soc.cpu/1.0"))
 ```
 
 Точный выбор берётся из графа проекта. Если его ревизия CPU содержит только RTL,
@@ -130,13 +138,15 @@ Flow запускает нужные стадии и передаёт CoreRef г
 ```python
 from collections.abc import Mapping
 
+from coreref.tools.artifacts import SliceInputs
+
 
 def publish_cpu(
-    catalog: Catalog, manifest: ManifestFile, outputs: Mapping[str, Path]
+    catalog: Catalog, graph: Graph, inputs: SliceInputs, files: Mapping[str, Path]
 ) -> InstalledRecord:
-    manifest.record.files.update(outputs)
-    return catalog.publish(manifest.resolve(catalog))
+    return Outputs(catalog).publish(graph, inputs, files, {"type": "macro"})
 ```
 
-Зависимости выпуска фиксирует lockfile проекта. `Ref` с revision позволяет
-получить конкретный выпуск после следующих публикаций.
+Flow формирует `SliceInputs` из Git-коммита, lockfile, зависимостей и
+конфигурации сборки. Файлы публикуются по отдельности. Оглавление связывает
+их с ревизией проекта, поэтому потребитель может запросить только нужные выходы.

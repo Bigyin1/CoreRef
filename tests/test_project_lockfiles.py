@@ -32,7 +32,7 @@ def test_project_lock_pins_publication_and_installation(
     assert isinstance(local, LocalRecord)
     record = catalog.publish(
         replace(local, files={"cpu.lib": artifact}),
-        dependencies=project.requirements,
+        dependencies=tuple(record.ref for record in project.dependencies()),
         lockfile=lockfile,
     )
     assert tuple(record.files) == ("cpu.lib",)
@@ -78,7 +78,12 @@ def test_conan_validates_the_supplied_project_lockfile(
     local = project.record
     assert isinstance(local, LocalRecord)
     with pytest.raises(exception):
-        Graph(catalog, local, dependencies=project.requirements, lockfile=lockfile)
+        Graph(
+            catalog,
+            local,
+            dependencies=tuple(record.ref for record in project.dependencies()),
+            lockfile=lockfile,
+        )
     assert catalog.get(macro.ref) == macro
 
 

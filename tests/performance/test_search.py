@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from functools import partial
 from operator import methodcaller
 
 import pytest
@@ -37,8 +36,12 @@ def search_setup(
 ) -> Callable[[], tuple[tuple[Callable[[], object]], dict[str, object]]]:
     def setup() -> tuple[tuple[Callable[[], object]], dict[str, object]]:
         reader = registry.reader()
-        operation = reader.search if metadata else reader.search_refs
-        return (partial(operation, query),), {}
+
+        def list_packages() -> object:
+            refs = reader.search_refs(query)
+            return tuple(reader.info(ref) for ref in refs) if metadata else refs
+
+        return (list_packages,), {}
 
     return setup
 

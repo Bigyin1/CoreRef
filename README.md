@@ -18,7 +18,8 @@ from coreref.api.records import Ref
 
 catalog = Catalog()
 cpu = Ref("soc.cpu/1.0")
-packages = Graph(catalog, cpu).get_with_sources()
+graph = Graph(catalog, cpu)
+sources = graph.get_sources((graph.record.ref,))
 ```
 
 Готовый формат проекта — необязательный `manifest.yml`. С дополнением `coreref[cli]`

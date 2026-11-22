@@ -73,7 +73,7 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     assert resolve_published(reader, be.ref) == original_graph
     remote_catalog._client.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
     with pytest.raises(CatalogError):
-        remote_catalog.search(SearchQuery(namespace="soc", component="cpu--be--lib-lef"))
+        remote_catalog.search_refs(SearchQuery(namespace="soc", component="cpu--be--lib-lef"))
 
 
 def test_cached_package_is_not_published_until_remote_upload_succeeds(
@@ -94,7 +94,7 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
             record = catalog.publish(local_record(record))
     directory = remote_catalog._client.cache_path(str(record.ref))
     assert StoredRecipe(directory, reference=str(record.ref)).record == record
-    assert catalog.search(SearchQuery()) == ()
+    assert catalog.search_refs(SearchQuery()) == ()
 
     # A prepared local package must not block another attempt to publish to the server.
     record = catalog.publish(local_record(record))
@@ -205,7 +205,7 @@ def test_warm_operations_do_not_redownload_recipes(
     actions: dict[str, Callable[[], object]] = {
         "get": lambda: remote_catalog.get(root.ref),
         "resolve": lambda: Graph(remote_catalog, local_record(root), dependencies=(leaf.ref,)),
-        "search": lambda: remote_catalog.search(SearchQuery()),
+        "search": lambda: remote_catalog.search_refs(SearchQuery()),
         "publish": lambda: remote_catalog.publish(local_record(root), dependencies=(leaf.ref,)),
     }
     actions[operation]()
@@ -250,14 +250,14 @@ def test_graph_batch_downloads_sources_and_artifacts_into_a_fresh_reader(
         dependencies=(parent.ref,),
     )
     with patch.object(reader._client, "run", wraps=reader._client.run) as command:
-        fetched = graph.get_with_sources((leaf.ref, parent.ref))
+        fetched = graph.get((leaf.ref, parent.ref), with_sources=True)
         assert all(
             record.source is not None and (record.source / "cpu.sv").is_file() for record in fetched
         )
         assert fetched[1].files["report"].read_text() == "server artifact"
         assert graph.catalog is reader
         shutil.rmtree(git_origin)
-        assert graph.get_with_sources((parent.ref,))[0] is fetched[1]
+        assert graph.get((parent.ref,), with_sources=True)[0] is fetched[1]
         assert command.call_count == 1 and command.call_args.args[0] == "install"
 
 
@@ -275,13 +275,16 @@ def test_remote_latest_and_locked_graphs_survive_new_revisions(
     lock = graph.create_lockfile(tmp_path / "old.lock")
     second = remote_catalog.publish(LocalRecord(logical, {"generation": 2}))
     assert reader.get(dependency).ref == second.ref
-    assert Graph(reader, root, dependencies=(dependency,)).requirements == (second.ref,)
-    assert Graph(reader, root, dependencies=(dependency,), lockfile=lock).requirements == (
-        first.ref,
-    )
+    assert tuple(
+        record.ref for record in Graph(reader, root, dependencies=(dependency,)).dependencies()
+    ) == (second.ref,)
+    assert tuple(
+        record.ref
+        for record in Graph(reader, root, dependencies=(dependency,), lockfile=lock).dependencies()
+    ) == (first.ref,)
     assert graph.get((dependency,))[0].ref == first.ref
-    assert reader.search(SearchQuery()) == (second,)
-    assert set(reader.search(SearchQuery(), all_revisions=True)) == {first, second}
+    assert reader.search_refs(SearchQuery()) == (second.ref,)
+    assert set(reader.search_refs(SearchQuery(), all_revisions=True)) == {first.ref, second.ref}
     missing = Ref.from_fields(**logical.to_dict(), revision="a" * 32)
     with pytest.raises(CatalogError):
         reader.get(missing)
@@ -331,6 +334,6 @@ def test_deleted_remote_revision_remains_available_by_exact_cached_ref(
     remote_catalog._client.run("remove", str(record.ref), "--remote", "catalog", "--confirm")
     assert remote_catalog.get(record.ref) == record
     assert Graph(remote_catalog, record.ref).record == record
-    assert remote_catalog.search(SearchQuery()) == ()
+    assert remote_catalog.search_refs(SearchQuery()) == ()
     with pytest.raises(NotFound):
         remote_catalog.get(record.ref.without_revision())

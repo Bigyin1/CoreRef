@@ -47,9 +47,6 @@ class Graph:
         self._root_ref = self._package.record.ref
         self._index = {record.ref: record for record in self._records}
         self._package.resolve_ref(self._root_ref)
-        self._requirements = tuple(
-            target for source, target in self._dependencies if source == self._package.record.ref
-        )
         self._orders: dict[Ref, tuple[Ref, ...]] = {}
 
     @property
@@ -86,7 +83,7 @@ class Graph:
         """Read dependencies without I/O; transitive results exclude the root, leaves first."""
         selected = self.record.ref if ref is None else self._package.resolve_ref(ref)
         records = []
-        targets = self.ordered_refs(selected)[:-1] if transitive else self._neighbors[selected]
+        targets = self._ordered_refs(selected)[:-1] if transitive else self._neighbors[selected]
         for target in targets:
             record = self._index[target]
             if isinstance(record, Record) and (filters is None or filters.matches(record)):
@@ -100,17 +97,15 @@ class Graph:
             neighbors[source].append(target)
         return {ref: tuple(targets) for ref, targets in neighbors.items()}
 
-    def _pack(self) -> InstalledRecord:
+    def _pack(self, record: LocalRecord | None = None) -> InstalledRecord:
         if self._local is None:
             raise InvalidPackage(
                 "Only a local graph can be packed; use a LocalRecord for a new package"
             )
-        _ = self.record
-        return self._local.pack(resolved=self._package.graph)
-
-    @property
-    def requirements(self) -> tuple[Ref, ...]:
-        return self._requirements
+        root = self.record
+        if record is not None and record.ref != root.ref:
+            raise InvalidPackage("Publication coordinates differ from the resolved root")
+        return self._local.pack(resolved=self._package.graph, record=record)
 
     @property
     def lockfile(self) -> Path | None:
@@ -129,36 +124,21 @@ class Graph:
         self,
         refs: tuple[Ref, ...] | None = None,
         *,
+        with_sources: bool = False,
         filters: SearchQuery | None = None,
     ) -> tuple[InstalledRecord, ...]:
-        """Fetch selected files, or all registry/editable nodes in dependency-first order."""
-        return self._get(refs, filters, with_sources=False)
-
-    def get_with_sources(
-        self,
-        refs: tuple[Ref, ...] | None = None,
-        *,
-        filters: SearchQuery | None = None,
-    ) -> tuple[InstalledRecord, ...]:
-        """Fetch files and sources; omitted refs select registry/editable nodes, leaves first."""
-        return self._get(refs, filters, with_sources=True)
+        """Fetch files for selected nodes, optionally including their Git sources."""
+        if refs is None:
+            refs = self._ordered_refs(self._root_ref)
+            if self._local is not None:
+                refs = refs[:-1]
+        if filters is not None:
+            refs = tuple(ref for ref in refs if filters.matches(self.info(ref)))
+        return self._package.get_with_sources(refs) if with_sources else self._package.get(refs)
 
     def get_sources(self, refs: tuple[Ref, ...]) -> dict[Ref, Path]:
         """Fetch Git sources only, keyed by exact refs. Omit packages without sources."""
         return self._package.get_sources(refs)
-
-    def _get(
-        self, refs: tuple[Ref, ...] | None, filters: SearchQuery | None, *, with_sources: bool
-    ) -> tuple[InstalledRecord, ...]:
-        if refs is None:
-            refs = tuple(
-                record.ref
-                for record in self.ordered_records(self._root_ref)
-                if isinstance(record, Record)
-            )
-        if filters is not None:
-            refs = tuple(ref for ref in refs if filters.matches(self.info(ref)))
-        return self._package.get_with_sources(refs) if with_sources else self._package.get(refs)
 
     @property
     def edges(self) -> tuple[tuple[Ref, Ref], ...]:
@@ -166,7 +146,7 @@ class Graph:
         _ = self.record
         return self._dependencies
 
-    def ordered_refs(self, root: Ref) -> tuple[Ref, ...]:
+    def _ordered_refs(self, root: Ref) -> tuple[Ref, ...]:
         """Return reachable packages in Conan order, including the root."""
         _ = self.record
         root = self._package.resolve_ref(root)
@@ -174,10 +154,6 @@ class Graph:
             references = self._package.graph.ordered_dependencies(root)
             self._orders[root] = (*map(Ref, references), root)
         return self._orders[root]
-
-    def ordered_records(self, root: Ref) -> tuple[LocalRecord | Record, ...]:
-        """Return records in the same dependency-first order as ordered_refs."""
-        return tuple(self.info(ref) for ref in self.ordered_refs(root))
 
 
 __all__ = ["Graph"]

@@ -75,7 +75,7 @@ def test_invalid_custom_payload_does_not_publish_any_records(catalog: Catalog) -
                 )
             )
         )
-    assert not catalog.search(SearchQuery())
+    assert not catalog.search_refs(SearchQuery())
 
 
 def test_namespace_is_part_of_identity(catalog: Catalog) -> None:

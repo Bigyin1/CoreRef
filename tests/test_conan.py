@@ -121,10 +121,10 @@ def test_conan_round_trip_search_and_project_lockfile(
         SearchQuery(version="1.0"),
         SearchQuery(component=rtl.ref.component, namespace="soc"),
     ):
-        assert catalog.search(query) == (stored,)
+        assert catalog.search_refs(query) == (stored.ref,)
     with pytest.raises(InvalidPackage):
         SearchQuery(namespace="with/slash")
-    assert not catalog.search(SearchQuery(component="missing"))
+    assert not catalog.search_refs(SearchQuery(component="missing"))
     with pytest.raises(InvalidPackage):
         SearchQuery(component="")
     expected = resolve_published(catalog, be.ref)
@@ -385,7 +385,7 @@ def test_native_graph_computation_does_not_spawn_a_conan_process(
     root = record()
     root = conan_catalog.publish(local_record(root))
     assert conan_catalog.get(Ref.from_fields(**root.ref.to_dict())).ref == root.ref
-    assert conan_catalog.search(SearchQuery())[0].ref == root.ref
+    assert conan_catalog.search_refs(SearchQuery())[0] == root.ref
     assert len(resolve_published(conan_catalog, root.ref).records) == 1
 
 

@@ -56,14 +56,14 @@ def test_sources_and_files_are_fetched_once_without_project_lockfile(
         return run(*arguments)
 
     monkeypatch.setattr(catalog._client, "run", track)
-    fetched = graph.get_with_sources((parent.ref, leaf.ref, parent.ref))
+    fetched = graph.get((parent.ref, leaf.ref, parent.ref), with_sources=True)
     assert tuple(record.ref for record in fetched) == (parent.ref, leaf.ref)
     assert fetched[0].files["report"].read_text() == "report"
     assert all(
         record.source is not None and (record.source / "cpu.sv").is_file() for record in fetched
     )
-    assert graph.get_with_sources((leaf.ref,))[0] is fetched[1]
-    assert graph.get_with_sources(()) == ()
+    assert graph.get((leaf.ref,), with_sources=True)[0] is fetched[1]
+    assert graph.get((), with_sources=True) == ()
     assert all(
         not hasattr(record, "source") for record in graph.records if isinstance(record, Record)
     )
@@ -88,8 +88,10 @@ def test_only_selected_git_sources_are_fetched_without_package_files(
     sources = graph.get_sources((parent.ref.without_revision(),))
     assert tuple(sources) == (parent.ref,)
     assert (sources[parent.ref] / "cpu.sv").is_file()
-    assert tuple(consumer.cache_directory.rglob("cpu.sv")) == (sources[parent.ref] / "cpu.sv",)
-    assert not tuple(consumer.cache_directory.rglob(artifact.name))
+    assert tuple(consumer._client.cache_directory.rglob("cpu.sv")) == (
+        sources[parent.ref] / "cpu.sv",
+    )
+    assert not tuple(consumer._client.cache_directory.rglob(artifact.name))
     assert graph.get_sources((parent.ref, parent.ref)) == sources
     assert graph.get((parent.ref,))[0].files[artifact.name].read_text() == "netlist"
 
@@ -108,14 +110,14 @@ def test_metadata_only_selection_does_not_run_conan(
         raise AssertionError("Metadata and invalid selections must not invoke Conan")
 
     monkeypatch.setattr(catalog._client, "run", reject)
-    assert graph.get_with_sources((record.ref,)) == (record,)
-    assert graph.get_with_sources(()) == ()
+    assert graph.get((record.ref,), with_sources=True) == (record,)
+    assert graph.get((), with_sources=True) == ()
     for ref in (
         graph.record.ref,
         Ref.from_fields("soc", "absent", "1.0"),
     ):
         with pytest.raises(InvalidPackage, match=r"published dependencies|Unknown reference"):
-            graph.get_with_sources((ref,))
+            graph.get((ref,), with_sources=True)
 
 
 def test_failed_batch_can_be_retried(
@@ -134,8 +136,8 @@ def test_failed_batch_can_be_retried(
     with monkeypatch.context() as patch:
         patch.setattr(catalog._client, "install_project", fail)
         with pytest.raises(CatalogError, match="temporary failure"):
-            graph.get_with_sources((dependency.ref,))
-    assert graph.get_with_sources((dependency.ref,))[0].source is not None
+            graph.get((dependency.ref,), with_sources=True)
+    assert graph.get((dependency.ref,), with_sources=True)[0].source is not None
 
 
 def test_install_must_match_the_resolved_references(
@@ -152,7 +154,7 @@ def test_install_must_match_the_resolved_references(
 
     monkeypatch.setattr(catalog._client, "install_project", changed)
     with pytest.raises(Conflict, match="resolved graph"):
-        graph.get_with_sources((requested.ref,))
+        graph.get((requested.ref,), with_sources=True)
 
 
 def test_unpinned_external_requirement_stays_at_resolved_revision(
@@ -171,7 +173,7 @@ def test_unpinned_external_requirement_stays_at_resolved_revision(
     )
     LocalRecipe(LocalRecord(leaf.ref, {"new": "revision"})).write(tmp_path / "new-leaf")
     catalog._client.upload(catalog._client.export(tmp_path / "new-leaf"))
-    assert graph.get_with_sources((parent,))[0].source is not None
+    assert graph.get((parent,), with_sources=True)[0].source is not None
     assert catalog.get(leaf.ref).ref == leaf.ref
     assert catalog.get(leaf.ref.without_revision()).ref != leaf.ref
 
@@ -202,11 +204,11 @@ def test_required_parent_does_not_fetch_unselected_transitive_source(
     hidden_checkout.rename(tmp_path / "offline-hidden")
     profile = catalog._client.home / "profiles/default"
     profile.write_text(profile.read_text() + "\n[conf]\ntools.build:download_source=True\n")
-    fetched = graph.get_with_sources((parent.ref,))
+    fetched = graph.get((parent.ref,), with_sources=True)
     assert len(fetched) == 1 and fetched[0].source is not None
     assert (fetched[0].source / "cpu.sv").is_file()
     (tmp_path / "offline-hidden").rename(hidden_checkout)
-    additional = graph.get_with_sources((hidden.ref, parent.ref))
+    additional = graph.get((hidden.ref, parent.ref), with_sources=True)
     assert additional[0].source is not None
     assert additional[1] is fetched[0]
 
@@ -223,7 +225,7 @@ def test_metadata_only_record_is_not_installed_with_source_packages(
         LocalRecord(Ref.from_fields("soc", "top", "1.0")),
         dependencies=(metadata, dependency.ref),
     )
-    fetched = graph.get_with_sources((dependency.ref, metadata))
+    fetched = graph.get((dependency.ref, metadata), with_sources=True)
     assert fetched[0].source is not None
     assert fetched[1].payload == {"meta": True}
     assert fetched[1].source is None and fetched[1].files == {}
@@ -265,13 +267,13 @@ def test_batch_files_do_not_require_scm_and_can_be_upgraded_to_sources(
     assert calls == ["install"]
     assert graph.get((records[0].ref,))[0] is fetched[0]
     (tmp_path / "offline-checkout").rename(checkout)
-    sourced = graph.get_with_sources(tuple(record.ref for record in records))
+    sourced = graph.get(tuple(record.ref for record in records), with_sources=True)
     assert all(
         record.source is not None and (record.source / "cpu.sv").is_file() for record in sourced
     )
     assert tuple(record.files for record in sourced) == tuple(record.files for record in fetched)
     assert graph.get((records[0].ref,))[0] is sourced[0]
-    assert graph.get_with_sources((records[1].ref,))[0] is sourced[1]
+    assert graph.get((records[1].ref,), with_sources=True)[0] is sourced[1]
     assert calls == ["install", "install"]
 
 
@@ -315,5 +317,5 @@ def test_published_graph_does_not_fetch_scm_enabled_by_profile(
     profile = catalog._client.home / "profiles/default"
     profile.write_text(profile.read_text() + "\n[conf]\nsoc.*:tools.build:download_source=True\n")
     graph = Graph(catalog, parent.ref)
-    assert graph.requirements == (leaf.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (leaf.ref,)
     assert graph.get((leaf.ref,))[0].source is None

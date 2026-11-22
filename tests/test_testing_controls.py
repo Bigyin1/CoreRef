@@ -54,11 +54,11 @@ def test_operation_trace_counts_real_fetch_then_cached_reuse(
     assert resolution.recipe_reads == 1
     assert resolution.installs == resolution.source_clones == resolution.package_downloads == 0
     with trace_operations() as fetch:
-        assert len(graph.get_with_sources()) == 1
+        assert len(graph.get(with_sources=True)) == 1
     assert fetch.installs == fetch.package_downloads == fetch.source_clones == 1
     assert fetch.recipe_reads == fetch.recipe_downloads == 0
     with trace_operations() as cached:
-        assert len(graph.get_with_sources()) == 1
+        assert len(graph.get(with_sources=True)) == 1
     assert cached.commands == ()
     assert cached.installs == cached.source_clones == cached.package_downloads == 0
 

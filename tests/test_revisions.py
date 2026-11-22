@@ -46,13 +46,13 @@ def test_search_selects_latest_history_and_explicit_revision(catalog: Catalog) -
     assert first.ref != second.ref
     assert catalog.get(first.ref) == first
     assert catalog.get(ref) == second
-    assert catalog.search(SearchQuery()) == (second,)
-    assert set(catalog.search(SearchQuery(), all_revisions=True)) == {first, second}
+    assert catalog.search_refs(SearchQuery()) == (second.ref,)
+    assert set(catalog.search_refs(SearchQuery(), all_revisions=True)) == {first.ref, second.ref}
     query = SearchQuery(revision=first.ref.revision)
-    assert catalog.search(query) == (first,)
-    assert catalog.search(query, all_revisions=True) == (first,)
+    assert catalog.search_refs(query) == (first.ref,)
+    assert catalog.search_refs(query, all_revisions=True) == (first.ref,)
     assert catalog.publish(LocalRecord(ref, {"generation": 2})).ref == second.ref
-    assert len(catalog.search(SearchQuery(), all_revisions=True)) == 2
+    assert len(catalog.search_refs(SearchQuery(), all_revisions=True)) == 2
 
 
 def test_query_builds_revision_patterns_directly() -> None:
@@ -74,7 +74,7 @@ def test_local_roots_cannot_claim_a_revision(catalog: Catalog, operation: str) -
             catalog.publish(local)
         else:
             Graph(catalog, local)
-    assert catalog.search(SearchQuery()) == ()
+    assert catalog.search_refs(SearchQuery()) == ()
 
 
 def test_lockfile_and_graph_keep_old_files_after_new_revision(
@@ -90,11 +90,13 @@ def test_lockfile_and_graph_keep_old_files_after_new_revision(
     contents = lock.read_bytes()
     file.write_text("second")
     second = catalog.publish(LocalRecord(ref, files={"report": file}))
-    assert graph.ordered_refs(root.ref) == (first.ref, root.ref)
+    assert graph.dependencies(root.ref, transitive=True) == (first,)
     assert graph.get((ref,))[0].files["report"].read_text() == "first"
-    assert Graph(catalog, root, dependencies=(ref,)).requirements == (second.ref,)
+    assert tuple(
+        record.ref for record in Graph(catalog, root, dependencies=(ref,)).dependencies()
+    ) == (second.ref,)
     locked = Graph(catalog, root, dependencies=(ref,), lockfile=lock)
-    assert locked.requirements == (first.ref,)
+    assert tuple(record.ref for record in locked.dependencies()) == (first.ref,)
     published = catalog.publish(root, dependencies=(ref,), lockfile=lock)
     assert Graph(catalog, published.ref).dependencies() == (second,)
     assert lock.read_bytes() == contents
@@ -103,7 +105,7 @@ def test_lockfile_and_graph_keep_old_files_after_new_revision(
     with pytest.raises(InvalidPackage, match="Revision"):
         graph.get((second.ref,))
     with pytest.raises(InvalidPackage, match="Revision"):
-        graph.ordered_refs(second.ref)
+        graph.dependencies(second.ref, transitive=True)
 
 
 def test_missing_explicit_revision_does_not_fall_back(catalog: Catalog) -> None:

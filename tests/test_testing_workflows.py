@@ -81,7 +81,7 @@ def test_consumer_deps_edit_lock_and_workspace_next_to_project(
     project = env.project(env.ref("top"), path=tmp_path / "project/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
-    assert project.resolve(catalog).get_with_sources()[0].source != cpu.source
+    assert project.resolve(catalog).get(with_sources=True)[0].source != cpu.source
     project.create_lockfile(catalog)
     assert project.lockfile.is_file()
     project.lockfile.unlink()
@@ -89,7 +89,7 @@ def test_consumer_deps_edit_lock_and_workspace_next_to_project(
     assert cpu.source is not None
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(project.path.parent)
-    editable = project.resolve(catalog).get_with_sources()[0]
+    editable = project.resolve(catalog).get(with_sources=True)[0]
     assert editable.source == cpu.source and editable.is_editable
 
 
@@ -162,8 +162,8 @@ def test_single_publication_keeps_lock_choice_and_records_only_successes(
     assert first.ref != second.ref
     locked = env.publish(consumer.record, dependencies=consumer.dependencies, lockfile=lock)
     reader = env.new_catalog()
-    assert consumer.resolve(reader).requirements == (first.ref,)
-    assert Graph(reader, locked.ref).requirements == (second.ref,)
+    assert tuple(record.ref for record in consumer.resolve(reader).dependencies()) == (first.ref,)
+    assert tuple(record.ref for record in Graph(reader, locked.ref).dependencies()) == (second.ref,)
     assert env.publish(consumer.resolve(catalog)).ref == locked.ref
     with pytest.raises(CatalogError):
         env.publish(env.package(env.ref("broken")), dependencies=(env.ref("absent"),))

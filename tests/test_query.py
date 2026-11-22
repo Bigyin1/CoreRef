@@ -27,7 +27,7 @@ def test_query_matching_and_catalog_search_agree(catalog: Catalog, query: Search
         for ref in ("rtl.core/1.0", "physical.core/1.0", "rtl.core/2.0", "rtl.core-extra/1.0")
     )
     expected = tuple(record for record in records if query.matches(record))
-    assert catalog.search(query) == tuple(sorted(expected, key=lambda record: record.ref))
+    assert catalog.search_refs(query) == tuple(sorted(record.ref for record in expected))
 
 
 @pytest.mark.parametrize(
