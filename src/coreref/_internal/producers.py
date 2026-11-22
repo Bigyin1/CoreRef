@@ -122,7 +122,9 @@ class ProducerRecipes:
                 version=ref.version,
                 dependencies=sorted(dependencies.producers),
                 runtime=runtime.package_name if runtime is not None else None,
-                module=self._runner.module if isinstance(self._runner, ProducerRuntime) else None,
+                runner_args=self._runner._arguments()
+                if isinstance(self._runner, ProducerRuntime)
+                else None,
             )
             (directory / "conanfile.py").write_text(recipe, encoding="utf-8")
             exact = self._variants.publish_recipe(directory)

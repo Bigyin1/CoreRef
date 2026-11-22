@@ -20,6 +20,11 @@ class ProducerRuntime:
     project: Path
     module: str
 
+    def _arguments(self) -> tuple[str, ...]:
+        if ":" in self.module:
+            return ("-m", "coreref.api.build.producer", self.module)
+        return ("-m", self.module)
+
     @property
     def files(self) -> dict[str, Path]:
         return {name: self.project / name for name in _ENVIRONMENT_FILES}

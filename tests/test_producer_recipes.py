@@ -1,15 +1,58 @@
 """Build a generic staged Conan package with the shared recipe generator."""
 
+import json
+import sys
 from pathlib import Path
 
 import pytest
 
 from coreref._internal.producers import ProducerRecipes
+from coreref.api.build import producer
 from coreref.api.build.route import RecipeStage, StageSpec
 from coreref.api.packages.catalog import Catalog
 from coreref.api.packages.records import Ref
 from coreref.api.packages.variants import PackageInput, Variants
 from coreref.testing import Sandbox, environment
+
+
+def test_shared_executor_stages_only_declared_nested_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def emit(stage: producer.ProducerStage) -> None:
+        assert sorted(path.name for path in stage.directory.iterdir()) == ["inputs"]
+        data = (stage.directory / "inputs/source").read_text()
+        target = stage.directory / "outputs/result"
+        target.parent.mkdir()
+        target.write_text(
+            f"{stage.pipeline_configuration['prefix']}:{stage.configuration['tag']}:{data}"
+        )
+
+    source = tmp_path / "inputs/source"
+    source.parent.mkdir()
+    source.write_text("data")
+    (tmp_path / "unlisted").touch()
+    layout = tmp_path / "pipeline.json"
+    layout.write_text(
+        json.dumps(
+            {
+                "configuration": {"prefix": "recipe"},
+                "stages": [
+                    {
+                        "name": "emit",
+                        "inputs": ["inputs/source"],
+                        "outputs": ["outputs/result"],
+                        "configuration": {"tag": "stage"},
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(producer, "_test_handler", emit, raising=False)
+    monkeypatch.setattr(
+        sys, "argv", ["producer", f"{producer.__name__}:_test_handler", str(layout), str(tmp_path)]
+    )
+    producer.main()
+    assert (tmp_path / "outputs/result").read_text() == "recipe:stage:data"
 
 
 def _runner(env: Sandbox) -> ProducerRecipes:

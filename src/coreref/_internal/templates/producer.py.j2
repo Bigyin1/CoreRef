@@ -47,7 +47,7 @@ class StageProducer(ConanFile):
         subprocess.run(
             [
                 "uv", "run", "--locked", "--no-dev", "--managed-python", "--python", python,
-                "python", "-I", "-m", {{ module | tojson }}, str(layout), str(directory),
+                "python", "-I", *{{ runner_args | tojson }}, str(layout), str(directory),
             ],
             cwd=environment,
             env=env,
