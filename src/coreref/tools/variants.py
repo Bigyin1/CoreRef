@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from shutil import copyfile
 from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
+from .._internal.recipe import _RECIPE_ENV
 from .._internal.references import from_conan_reference
 from .._internal.types import NativeGraph
 from ..api.errors import InvalidPackage
@@ -18,12 +20,16 @@ if TYPE_CHECKING:
     from ..api.catalog import Catalog
 
 
+_OptionValue = str | int | bool
+_GENERATED_TEMPLATE = _RECIPE_ENV.get_template("generated.py.j2")
+
+
 @dataclass(frozen=True)
 class PackageInput:
     """A recipe requirement and options for one named input of the flow."""
 
     requirement: Dependency
-    options: Mapping[str, str | int | bool]
+    options: Mapping[str, _OptionValue]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
@@ -65,6 +71,37 @@ class Variants:
         ref = from_conan_reference(self._client.export(directory.absolute()))
         self._client.run("upload", str(ref), "--only-recipe", "--remote", remote, "--confirm")
         return ref
+
+    def publish_generated_recipe(
+        self,
+        ref: Ref,
+        *,
+        options: Mapping[str, tuple[_OptionValue, ...]],
+        inputs: Mapping[str, Path],
+        runner: Path,
+    ) -> Ref:
+        """Publish a recipe that calls generate(options, source, output) from runner.
+
+        The first value in each option domain is its default. The generator receives
+        Conan option strings and paths to its named inputs and the binary directory.
+        """
+        if ref.revision is not None:
+            raise InvalidPackage("A generated recipe requires a reference without revision")
+        domains = {name: list(values) for name, values in sorted(options.items())}
+        if any(not values for values in domains.values()):
+            raise InvalidPackage("Each recipe option needs at least one allowed value")
+        recipe = _GENERATED_TEMPLATE.render(
+            name=ref.package_name,
+            version=ref.version,
+            options=domains,
+            defaults={name: values[0] for name, values in domains.items()},
+        )
+        with TemporaryDirectory(prefix="coreref-generated-") as temporary:
+            directory = Path(temporary)
+            (directory / "conanfile.py").write_text(recipe, encoding="utf-8")
+            copyfile(runner, directory / "generator.py")
+            _stage_recipe_inputs(directory / "inputs", inputs)
+            return self.publish_recipe(directory)
 
     def publish(self, package: ConfiguredPackage) -> None:
         """Upload the exact installed binary revision to the configured registry."""
@@ -134,6 +171,18 @@ class Variants:
             )
         graph = cast(NativeGraph, result["graph"])
         return _selected_package(graph, package.requirement.package_name)
+
+
+def _stage_recipe_inputs(directory: Path, inputs: Mapping[str, Path]) -> None:
+    for name, source in sorted(inputs.items()):
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise InvalidPackage(f"Invalid recipe input path: {name!r}")
+        if relative.as_posix() != name or "\\" in name or ":" in name:
+            raise InvalidPackage(f"Invalid recipe input path: {name!r}")
+        destination = directory / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        copyfile(source, destination)
 
 
 def _build_policy(

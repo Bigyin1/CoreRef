@@ -52,3 +52,70 @@ class Producer(ConanFile):
     )
     assert (installed.directory / "result").read_text() == "output"
     assert reader.get(target, lockfile=None).binary_reference == installed.binary_reference
+
+
+def test_generated_recipe_builds_configurations_from_exported_inputs(
+    conan_server: LocalServer, tmp_path: Path
+) -> None:
+    writer = Variants(Catalog(conan_server.configure(tmp_path / "writer")))
+    reader = Variants(Catalog(conan_server.configure(tmp_path / "reader")))
+    input_file = tmp_path / "input.txt"
+    input_file.write_text("result", encoding="utf-8")
+    runner = tmp_path / "generate.py"
+    runner.write_text(
+        """def generate(options, source, output):
+    value = (source / "config/input.txt").read_text(encoding="utf-8")
+    (output / "result.txt").write_text(
+        f'{value}:{options["size"]}:{options["label"]}:{options["enabled"]}', encoding="utf-8"
+    )
+""",
+        encoding="utf-8",
+    )
+
+    ref = writer.publish_generated_recipe(
+        Ref("tools.generated/1.0"),
+        options={"size": (8, 4), "label": ("fast", "slow"), "enabled": (True, False)},
+        inputs={"config/input.txt": input_file},
+        runner=runner,
+    )
+    runner.unlink()
+    input_file.unlink()
+
+    default = reader.get(PackageInput(ref, {}), lockfile=None, build_missing=True)
+    custom = reader.get(
+        PackageInput(ref, {"size": 4, "label": "slow", "enabled": False}),
+        lockfile=None,
+        build_missing=True,
+    )
+    assert default.ref == custom.ref == ref
+    assert ref.revision is not None
+    assert default.package_id != custom.package_id
+    assert (default.directory / "result.txt").read_text() == "result:8:fast:True"
+    assert (custom.directory / "result.txt").read_text() == "result:4:slow:False"
+
+
+@pytest.mark.parametrize("name", [".", "/absolute", "../outside", "directory//input"])
+def test_generated_recipe_rejects_unsafe_names(name: str, tmp_path: Path) -> None:
+    variants = Variants(Catalog(tmp_path / "home"))
+    runner = Path(__file__)
+    with pytest.raises(InvalidPackage, match="Invalid recipe input path"):
+        variants.publish_generated_recipe(
+            Ref("tools.generated/1.0"), options={}, inputs={name: runner}, runner=runner
+        )
+
+
+@pytest.mark.parametrize(
+    ("reference", "values", "message"),
+    [
+        ("tools.generated/1.0#old", (4,), "without revision"),
+        ("tools.generated/1.0", (), "at least one allowed value"),
+    ],
+)
+def test_generated_recipe_rejects_invalid_configuration(
+    reference: str, values: tuple[int, ...], message: str, tmp_path: Path
+) -> None:
+    variants = Variants(Catalog(tmp_path / "home"))
+    with pytest.raises(InvalidPackage, match=message):
+        variants.publish_generated_recipe(
+            Ref(reference), options={"size": values}, inputs={}, runner=Path(__file__)
+        )
