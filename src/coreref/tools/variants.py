@@ -14,7 +14,8 @@ from .._internal.recipe import _RECIPE_ENV
 from .._internal.references import from_conan_reference
 from .._internal.types import NativeGraph
 from ..api.errors import InvalidPackage
-from ..api.records import Dependency, Ref
+from ..api.graph import Graph
+from ..api.records import Dependency, LocalRecord, Ref
 
 if TYPE_CHECKING:
     from ..api.catalog import Catalog
@@ -63,6 +64,7 @@ class Variants:
     """Materialize independently configured inputs with a shared project lockfile."""
 
     def __init__(self, catalog: Catalog) -> None:
+        self._catalog = catalog
         self._client = catalog._client
 
     def publish_recipe(self, directory: Path) -> Ref:
@@ -107,6 +109,23 @@ class Variants:
         """Upload the exact installed binary revision to the configured registry."""
         self._client.upload(package.binary_reference)
 
+    def create_lockfile(
+        self,
+        record: LocalRecord,
+        *,
+        requirements: tuple[Dependency, ...],
+        inputs: Iterable[PackageInput],
+        path: Path,
+    ) -> Path:
+        """Resolve plain and configured requirements afresh, then replace the project lock."""
+        path = path.expanduser().absolute()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        graph = Graph(self._catalog, record, dependencies=requirements)
+        with TemporaryDirectory(prefix=".coreref-lock-", dir=path.parent) as temporary:
+            candidate = graph.create_lockfile(Path(temporary) / "conan.lock")
+            self._lock_inputs(inputs, candidate)
+            return candidate.replace(path)
+
     def extend_lockfile(self, inputs: Iterable[PackageInput], path: Path) -> Path:
         """Add configurable inputs to a project lock using Conan's lock commands."""
         path = path.absolute()
@@ -114,21 +133,41 @@ class Variants:
             candidate = Path(temporary) / "conan.lock"
             if path.is_file():
                 candidate.write_bytes(path.read_bytes())
-            for package in inputs:
-                self._client.run(
-                    "lock",
-                    "create",
-                    *package._arguments(),
-                    "--lockfile",
-                    str(candidate) if candidate.is_file() else "",
-                    "--lockfile-out",
-                    str(candidate),
-                    *self._client.source_args,
-                )
+            self._lock_inputs(inputs, candidate)
             if not candidate.is_file():
                 raise InvalidPackage("A project lockfile requires at least one package input")
             candidate.replace(path)
         return path
+
+    def _lock_inputs(self, inputs: Iterable[PackageInput], path: Path) -> None:
+        for package in inputs:
+            self._client.run(
+                "lock",
+                "create",
+                *package._arguments(),
+                "--lockfile",
+                str(path) if path.is_file() else "",
+                "--lockfile-out",
+                str(path),
+                *self._client.source_args,
+            )
+
+    def get_many(
+        self,
+        inputs: Mapping[str, PackageInput],
+        *,
+        lockfile: Path,
+        build_missing: bool = False,
+    ) -> dict[str, ConfiguredPackage]:
+        """Install each named configuration independently, using the same project lock."""
+        if inputs and not lockfile.is_file():
+            raise FileNotFoundError(
+                f"Create the project lockfile before installing variants: {lockfile}"
+            )
+        return {
+            name: self.get(package, lockfile=lockfile, build_missing=build_missing)
+            for name, package in inputs.items()
+        }
 
     def get(
         self,

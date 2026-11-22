@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+import subprocess
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +24,40 @@ def file_digest(path: Path) -> str:
 def fingerprint(document: JSON) -> str:
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _git(source: Path, *arguments: str) -> str:
+    return subprocess.check_output(  # noqa: S603 - fixed Git commands, paths are passed as arguments.
+        ["git", "-C", str(source), *arguments],  # noqa: S607 - use the project's Git executable.
+        text=True,
+        stderr=subprocess.DEVNULL,
+    ).strip()
+
+
+def clean_commit(source: Path) -> str | None:
+    """Return HEAD for a clean Git worktree rooted at source."""
+    source = source.resolve()
+    try:
+        if Path(_git(source, "rev-parse", "--show-toplevel")).resolve() != source:
+            return None
+        if _git(source, "status", "--porcelain", "--untracked-files=all"):
+            return None
+        return _git(source, "rev-parse", "HEAD")
+    except subprocess.CalledProcessError:
+        return None
+
+
+@contextmanager
+def committed_slice(source: Path, capture: Callable[[str], SliceInputs]) -> Iterator[SliceInputs]:
+    """Check that a build used unchanged inputs from a clean Git checkout."""
+    commit = clean_commit(source)
+    if commit is None:
+        raise ValueError("Publishing a project slice requires a clean Git checkout")
+    inputs = capture(commit)
+    key = inputs.key()
+    yield inputs
+    if clean_commit(source) != commit or capture(commit).key() != key:
+        raise ValueError("Project inputs changed while building the slice")
 
 
 @dataclass(frozen=True)

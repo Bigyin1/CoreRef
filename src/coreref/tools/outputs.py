@@ -152,6 +152,23 @@ class Outputs:
             return None
         return {name: Ref(artifact.ref) for name, artifact in index.outputs.items()}
 
+    def available(self, record: Record, *, producer_only: bool = False) -> set[str]:
+        """Read output names without installing them, honoring the build-missing policy.
+
+        With producer_only, list outputs promised by recipes for use as build inputs.
+        """
+        available: set[str] = set()
+        if not producer_only:
+            links = self.links(record)
+            if links is None:
+                return set(record.file_names)
+            available.update(links)
+            if not self._build_missing:
+                return available
+        for group in read_producers(record):
+            available.update(self._groups.get(group, ()))
+        return available
+
     def get(self, record: Record, names: tuple[str, ...]) -> dict[str, Path]:
         """Retrieve selected files from this revision, optionally using declared producers."""
         if not names:

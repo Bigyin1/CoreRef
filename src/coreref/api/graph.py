@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -79,16 +80,44 @@ class Graph:
         *,
         transitive: bool = False,
         filters: SearchQuery | None = None,
+        stop_at: Collection[Ref] = (),
     ) -> tuple[Record, ...]:
-        """Read dependencies without I/O; transitive results exclude the root, leaves first."""
+        """Read dependencies without I/O, with transitive results in leaves-first order.
+
+        Each stop_at package remains visible. Its dependencies are included when
+        they are also reached through another path from the selected root.
+        """
         selected = self.record.ref if ref is None else self._package.resolve_ref(ref)
-        records = []
+        stops = {self._package.resolve_ref(boundary) for boundary in stop_at}
+        if selected in stops:
+            return ()
         targets = self._ordered_refs(selected)[:-1] if transitive else self._neighbors[selected]
+        if transitive and stops:
+            reachable = self._reachable(selected, stops)
+            targets = tuple(target for target in targets if target in reachable)
+        return self._matching_records(targets, filters)
+
+    def _matching_records(
+        self, targets: tuple[Ref, ...], filters: SearchQuery | None
+    ) -> tuple[Record, ...]:
+        records = []
         for target in targets:
             record = self._index[target]
             if isinstance(record, Record) and (filters is None or filters.matches(record)):
                 records.append(record)
         return tuple(records)
+
+    def _reachable(self, root: Ref, stops: set[Ref]) -> set[Ref]:
+        pending = [root]
+        visited: set[Ref] = set()
+        while pending:
+            ref = pending.pop()
+            if ref in visited:
+                continue
+            visited.add(ref)
+            if ref not in stops:
+                pending.extend(self._neighbors[ref])
+        return visited
 
     @cached_property
     def _neighbors(self) -> dict[Ref, tuple[Ref, ...]]:

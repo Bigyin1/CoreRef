@@ -103,6 +103,11 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         with pytest.raises(ValueError, match="missing outputs"):
             Outputs(reader).get(index, ("unknown",))
         outputs = Outputs(reader, groups=groups, build_missing=True)
+        with trace_operations() as trace:
+            assert outputs.available(index, producer_only=True) == set(groups["layout"])
+            assert outputs.available(index) == set(groups["layout"])
+            assert Outputs(reader).available(index) == {"abstract.lef"}
+        assert not trace.commands
         assert outputs.get(index, ("timing.lib",))["timing.lib"].read_text() == "Liberty"
         with pytest.raises(ValueError, match="did not produce"):
             outputs.get(index, ("unproduced",))

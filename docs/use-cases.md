@@ -6,14 +6,14 @@ Ref задаёт координаты компонента или библиот
 `shared.stdlib/2.0`. Опубликованная ревизия объединяет исходники и готовые
 артефакты. Flow использует из неё входы нужной стадии.
 
-В примерах используется необязательный YAML-адаптер `ManifestFile`. Приложение
-может читать собственный формат и создавать `LocalRecord` и зависимости напрямую.
+В примерах `ManifestFile` читает стандартный манифест CoreRef и создаёт рабочий
+`LocalRecord` и список зависимостей.
 
 Graph строится и для неопубликованного локального проекта. Его lockfile сохраняют
 в репозитории или workspace проекта для повторения выбора версий и revisions.
 Для работы над зависимостью используют `workspace.open(ref)` или
-`workspace.add(directory, record=local_record, dependencies=refs)`. Формат проекта читает flow;
-для стандартного YAML есть `ManifestFile.add_to_workspace(workspace)`.
+`workspace.add(directory, record=local_record, dependencies=refs)`. По манифесту
+рабочая копия добавляется через `ManifestFile.add_to_workspace(workspace)`.
 Conan сам выбирает рабочие копии из workspace текущего проекта; Graph не требует
 особых параметров. SDK добавляет в рабочую копию только conanfile.py, если его ещё нет.
 `InstalledRecord.is_editable` отличает такую запись от кэшовой. Локальные files могут

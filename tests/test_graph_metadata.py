@@ -15,9 +15,10 @@ from coreref.api.records import LocalRecord, Ref
 
 def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog) -> None:
     leaf = catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "1.0")))
+    hidden = catalog.publish(LocalRecord(Ref("soc.hidden/1.0")))
     parent = catalog.publish(
         LocalRecord(Ref.from_fields("soc", "parent", "1.0")),
-        dependencies=(leaf.ref,),
+        dependencies=(leaf.ref, hidden.ref),
     )
     local = LocalRecord(Ref.from_fields("soc", "top", "1.0"), {"root": True})
     graph = Graph(catalog, local, dependencies=(parent.ref, leaf.ref))
@@ -27,8 +28,13 @@ def test_metadata_access_reads_the_captured_diamond_without_io(catalog: Catalog)
     ):
         assert graph.info(leaf.ref.without_revision()) is graph.info(leaf.ref)
         assert graph.info(leaf.ref).payload is None
-        assert graph.dependencies(parent.ref.without_revision()) == (leaf,)
+        assert set(graph.dependencies(parent.ref.without_revision())) == {leaf, hidden}
         assert graph.dependencies() == (leaf, parent)
+        assert graph.dependencies(transitive=True, stop_at={parent.ref.without_revision()}) == (
+            leaf,
+            parent,
+        )
+        assert graph.dependencies(parent.ref, transitive=True, stop_at={parent.ref}) == ()
         assert graph.dependencies(local.ref, filters=SearchQuery(component="parent")) == (parent,)
         assert graph.dependencies(leaf.ref) == ()
         assert graph.dependencies(filters=SearchQuery(component="be")) == ()

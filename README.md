@@ -22,7 +22,7 @@ graph = Graph(catalog, cpu)
 sources = graph.get_sources((graph.record.ref,))
 ```
 
-Готовый формат проекта — необязательный `manifest.yml`. С дополнением `coreref[cli]`
+Стандартный формат проекта CoreRef — `manifest.yml`. С дополнением `coreref[cli]`
 доступны группы Typer `deps` и `workspace` для включения в CLI своего flow. Собственные форматы также поддерживаются.
 
 - [Публичный API и связи классов](docs/interfaces.md).
