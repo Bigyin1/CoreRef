@@ -1,4 +1,8 @@
-"""Resolved dependencies, a working local root, ordering and lockfiles."""
+"""Resolve Conan dependencies and keep their selection for later operations.
+
+A ``Graph`` can inspect stored metadata, fetch selected files and sources
+in batches, or write the already-resolved graph to a project lockfile.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +23,14 @@ if TYPE_CHECKING:
 
 @dataclass(init=False)
 class Graph:
-    """Resolve a package; use an existing lockfile and retain a missing path for later saving."""
+    """Keep a dependency resolution for a published package or local root.
+
+    Conan resolves dependencies and reads recipe metadata when the graph
+    is constructed. Inspection methods then use the snapshot in memory.
+    Fetching follows the selected revisions, including for references
+    that omit their revision. The local root stays available as the same
+    mutable ``LocalRecord`` supplied by the caller.
+    """
 
     _records: tuple[LocalRecord | Record, ...]
     _dependencies: tuple[tuple[Ref, Ref], ...]
@@ -32,6 +43,13 @@ class Graph:
         dependencies: tuple[Dependency, ...] = (),
         lockfile: Path | None = None,
     ) -> None:
+        """Resolve a package root using the supplied catalog.
+
+        Pass a published ``Ref`` to read its recipe requirements or a
+        ``LocalRecord`` to supply ``dependencies`` explicitly. An existing
+        ``lockfile`` constrains resolution. A missing path is remembered as
+        the default destination for ``create_lockfile()``.
+        """
         lockfile = lockfile.expanduser().absolute() if lockfile is not None else None
         seed = lockfile if lockfile is not None and lockfile.exists() else None
         self._catalog = catalog
@@ -52,11 +70,15 @@ class Graph:
 
     @property
     def catalog(self) -> Catalog:
+        """Return the catalog used for resolution and subsequent retrieval."""
         return self._catalog
 
     @property
     def record(self) -> LocalRecord | Record:
-        """Return the working local root, or immutable metadata of a published root."""
+        """Return the working local root or the published root's metadata.
+
+        Create a new graph if the coordinates of a local root change.
+        """
         record = self._package.record
         if record.ref != self._root_ref:
             raise InvalidPackage("Local root coordinates changed; create a new Graph")
@@ -64,12 +86,19 @@ class Graph:
 
     @property
     def records(self) -> tuple[LocalRecord | Record, ...]:
-        """Return records with the same working local root as record and info()."""
+        """Return metadata for every resolved node, including the root.
+
+        A local root is the same working record returned by ``record``.
+        """
         _ = self.record
         return self._records
 
     def info(self, ref: Ref) -> LocalRecord | Record:
-        """Read resolved metadata or the working local root, without package I/O."""
+        """Look up a node in the resolved snapshot without package I/O.
+
+        An unpinned reference matches the revision already selected by this
+        graph. A supplied revision must agree with that selection.
+        """
         ref = self._package.resolve_ref(ref)
         _ = self.record
         return self._index[ref]
@@ -82,10 +111,14 @@ class Graph:
         filters: SearchQuery | None = None,
         stop_at: Collection[Ref] = (),
     ) -> tuple[Record, ...]:
-        """Read dependencies without I/O, with transitive results in leaves-first order.
+        """Return dependency metadata without performing package I/O.
 
-        Each stop_at package remains visible. Its dependencies are included when
-        they are also reached through another path from the selected root.
+        Omit ``ref`` to start at the root. The default returns direct
+        dependencies. Set ``transitive=True`` to visit each reachable package
+        once, dependencies before consumers. ``filters`` selects which
+        records to return after traversal. ``stop_at`` keeps boundary packages
+        visible while pruning their descendants along that path. Shared
+        dependencies remain visible when reached by another path.
         """
         selected = self.record.ref if ref is None else self._package.resolve_ref(ref)
         stops = {self._package.resolve_ref(boundary) for boundary in stop_at}
@@ -138,10 +171,16 @@ class Graph:
 
     @property
     def lockfile(self) -> Path | None:
+        """Return the configured or last successfully saved lockfile path."""
         return self._lockfile
 
     def create_lockfile(self, path: str | Path | None = None) -> Path:
-        """Save the resolved graph through Conan; remember the path only after success."""
+        """Write the current resolution to a Conan lockfile.
+
+        Use the supplied path or the graph's remembered path. If neither is
+        available, raise ``CatalogError``. The chosen destination becomes
+        ``lockfile`` after a successful write.
+        """
         output = path if path is not None else self.lockfile
         if output is None:
             raise CatalogError("Provide a lockfile path in Graph or create_lockfile")
@@ -155,7 +194,14 @@ class Graph:
         *,
         with_sources: bool = False,
     ) -> tuple[InstalledRecord, ...]:
-        """Fetch files for selected nodes, optionally including their Git sources."""
+        """Get files for selected nodes, optionally with their Git sources.
+
+        The default fetches every resolved package in dependency order,
+        excluding an unpublished local root. An explicit tuple limits the
+        result to those nodes, in request order with duplicates removed.
+        Pass an empty tuple for no results. Fetching uses this graph's
+        resolution and batches packages that need installation.
+        """
         if refs is None:
             refs = self._ordered_refs(self._root_ref)
             if self._local is not None:
@@ -163,12 +209,17 @@ class Graph:
         return self._package.get(refs, with_sources=with_sources)
 
     def get_sources(self, refs: tuple[Ref, ...]) -> dict[Ref, Path]:
-        """Fetch Git sources only, keyed by exact refs. Omit packages without sources."""
+        """Fetch sources for the selected packages and return paths by resolved Ref.
+
+        Packages without declared Git sources are omitted. Use this operation
+        when you only need sources, such as when generating an RTL file list.
+        Editable paths can point into a working checkout.
+        """
         return self._package.get_sources(refs)
 
     @property
     def edges(self) -> tuple[tuple[Ref, Ref], ...]:
-        """Read direct edges selected by Conan, from consumer to dependency."""
+        """Return direct edges as pairs from consumer to dependency."""
         _ = self.record
         return self._dependencies
 

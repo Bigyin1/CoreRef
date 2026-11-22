@@ -1,4 +1,10 @@
-"""Publish project outputs and retrieve only the named files a consumer needs."""
+"""Resolve named build results from published project revisions.
+
+A published project can point to individual artifacts through an
+output index. Consumers can fetch the required files without installing
+unrelated outputs. The catalog also supports packages with files
+stored directly in their binary.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +47,12 @@ def _metadata(
 
 
 class Outputs:
-    """Store named files under the resolved project and recover missing outputs on demand."""
+    """Find and retrieve artifacts for the revision described by a record.
+
+    Metadata inspection uses the supplied record. Retrieval downloads
+    the selected artifacts and can install or rebuild configured output
+    groups when a published recipe provides them.
+    """
 
     def __init__(
         self,
@@ -50,6 +61,12 @@ class Outputs:
         groups: Mapping[str, tuple[str, ...]] | None = None,
         build_missing: bool = False,
     ) -> None:
+        """Bind artifact operations to a catalog.
+
+        ``groups`` maps recipe group names to the filenames they produce.
+        Set ``build_missing=True`` to let Conan build a missing binary for a
+        requested group.
+        """
         self._catalog = catalog
         self._store = ArtifactStore(catalog)
         self._variants = catalog._variants
@@ -140,16 +157,25 @@ class Outputs:
 
     @staticmethod
     def links(record: Record) -> dict[str, Ref] | None:
-        """Read exact references for ready outputs, or None for ordinary packages."""
+        """Read exact references for the ready outputs without fetching them.
+
+        Return a mapping from output names to artifact references. ``None``
+        indicates that the package has no output index, while an empty mapping
+        represents an index with no ready outputs.
+        """
         index = OutputIndex.from_record(record)
         if index is None:
             return None
         return {name: Ref(artifact.ref) for name, artifact in index.outputs.items()}
 
     def available(self, record: Record, *, producer_only: bool = False) -> set[str]:
-        """Read output names without installing them, honoring the build-missing policy.
+        """List discoverable output names without installing packages.
 
-        With producer_only, list outputs promised by recipes for use as build inputs.
+        The default includes published files, plus declared recipe outputs
+        when ``build_missing`` is enabled. For an ordinary package it uses
+        the file names in the recipe metadata. Set ``producer_only=True``
+        to check only what registered recipes promise, regardless of the
+        build policy.
         """
         available: set[str] = set()
         if not producer_only:
@@ -164,7 +190,13 @@ class Outputs:
         return available
 
     def get(self, record: Record, names: tuple[str, ...]) -> dict[str, Path]:
-        """Retrieve selected files from this revision, optionally using declared producers."""
+        """Return local paths for the requested output names.
+
+        Download only those indexed files that are requested. Missing indexed
+        files can come from a registered recipe group. For an ordinary package,
+        install the package binary and select the requested files from it.
+        An empty request returns an empty mapping.
+        """
         if not names:
             return {}
         index = OutputIndex.from_record(record)

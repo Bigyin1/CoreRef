@@ -1,4 +1,8 @@
-"""Load local YAML routes and select stages without invoking their handlers."""
+"""Declare and validate stage graphs for CoreRef builds.
+
+The route controls stage dependencies and output names. The flow
+provides actions and the files and configuration needed to run them.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +20,11 @@ from ..packages.records import JSON
 
 
 class CacheMode(str, Enum):
-    """Whether to reuse and publish shared stage results."""
+    """Control shared-cache access for stages that opt into it.
+
+    ``OFF`` bypasses the shared cache. ``READ`` can restore a matching
+    result. ``WRITE`` can also publish a successful result on a miss.
+    """
 
     OFF = "off"
     READ = "read"
@@ -24,6 +32,14 @@ class CacheMode(str, Enum):
 
 
 class StageSpec(BaseModel):
+    """Describe a named stage before binding it to a handler.
+
+    ``needs`` names direct predecessor stages. ``outputs`` lists relative
+    paths within the build directory. ``purpose`` determines whether the
+    stage can participate in publication. Release stages can depend on
+    other release stages.
+    """
+
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
     name: str = Field(pattern=r"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$")
@@ -34,7 +50,16 @@ class StageSpec(BaseModel):
 
 @dataclass(frozen=True, kw_only=True)
 class Stage:
-    """Bind a stage to its action, input files and parameters."""
+    """Bind a declared stage to a callable and its tracked inputs.
+
+    ``action`` is called with no arguments. ``inputs`` lists filenames
+    prepared in the build directory. ``files`` identifies source paths for
+    the release snapshot. ``configuration`` contributes to both local
+    execution and release inputs, while ``local_configuration`` applies
+    only to local runs. ``bundled_inputs`` identifies inputs already
+    shipped with the producer's implementation. Set ``always_run`` when
+    the action must execute even if the local executor can reuse its outputs.
+    """
 
     action: Callable[[], object]
     inputs: tuple[str, ...] = ()
@@ -53,9 +78,18 @@ class _Document(BaseModel):
 
 
 class Route:
-    """A validated graph of uniquely named build stages."""
+    """Validate the dependencies and output paths of a set of stages.
+
+    ``order`` lists stage names in topological order with dependencies
+    first. Look up a stage by name with indexing or check its membership
+    before selecting it as a target.
+    """
 
     def __init__(self, stages: list[StageSpec]) -> None:
+        """Validate stage names, output paths and dependency edges.
+
+        Reject duplicate output paths, missing stage references and cycles.
+        """
         self._stages = {stage.name: stage for stage in stages}
         if len(stages) != len(self._stages):
             raise ValueError("Duplicate stage in flow")
@@ -71,7 +105,13 @@ class Route:
 
     @classmethod
     def load(cls, project: Path, path: Path = Path("flow.yml")) -> Route:
-        """Read an entry file and its local imports, relative to the project root."""
+        """Load a route YAML file within the project directory.
+
+        ``path`` defaults to ``flow.yml`` relative to the project. Each
+        import is relative to the YAML file that declares it and must resolve
+        inside the project directory. Loading validates the route without
+        invoking any stage handlers.
+        """
         project = project.resolve()
         return cls(_read_stages(project, project / path))
 
@@ -81,7 +121,12 @@ class Route:
         *,
         inputs: Mapping[str, tuple[str, ...]],
     ) -> None:
-        """Match declarative stages to the files their handlers produce and consume."""
+        """Check declared stages against a flow's known handler outputs and inputs.
+
+        Each stage must have a handler with matching outputs. If a handler
+        consumes a file produced by another handler, declare that producer
+        as a direct dependency in ``needs``.
+        """
         producers = {name: stage for stage, names in outputs.items() for name in names}
         for stage in self._stages.values():
             self._validate_handler(stage, outputs, inputs.get(stage.name, ()), producers)
@@ -114,12 +159,14 @@ class Route:
                 )
 
     def __getitem__(self, name: str) -> StageSpec:
+        """Return the stage specification or raise ``ValueError`` for an unknown name."""
         try:
             return self._stages[name]
         except KeyError as exc:
             raise ValueError(f"Unknown stage {name!r}") from exc
 
     def __contains__(self, name: str) -> bool:
+        """Check whether the route declares the named stage."""
         return name in self._stages
 
     def _closure(self, targets: Iterable[str]) -> tuple[StageSpec, ...]:

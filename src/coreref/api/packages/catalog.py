@@ -1,4 +1,9 @@
-"""Public catalog API over Conan package operations."""
+"""Search, fetch and publish packages through a configured Conan registry.
+
+Start with ``search_refs`` when you only need coordinates. Use ``info``
+for recipe metadata and ``get`` for installed files. To fetch several
+packages with the same resolution, use a project ``Graph``.
+"""
 
 from __future__ import annotations
 
@@ -25,11 +30,23 @@ if TYPE_CHECKING:
 
 
 class Catalog:
-    """Pack, publish, and search packages using an already configured Conan client."""
+    """Connect package operations to a Conan home and registry.
+
+    A catalog can work with the local cache when no remote is configured.
+    Publishing requires a remote. Importing this class leaves Conan unloaded
+    until a catalog is constructed.
+    """
 
     def __init__(
         self, home: str | Path | None = None, *, remote: str | None = None, timeout: float = 60
     ) -> None:
+        """Open an existing Conan configuration.
+
+        ``home`` points to the Conan home. If omitted, use Conan's default.
+        ``remote`` selects a registry by name. When the home lists multiple
+        remotes, provide a name explicitly. ``timeout`` is the command timeout
+        in seconds.
+        """
         from ..._internal.client import ConanClient
         from ..._internal.variants import Variants
 
@@ -37,7 +54,14 @@ class Catalog:
         self._variants = Variants(self)
 
     def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
-        """Find exact coordinates without downloading recipes or reading payloads."""
+        """Return matching recipe references with concrete revisions.
+
+        The default is Conan's latest revision for each matching name and
+        version. Set ``all_revisions=True`` to include history. A revision in
+        the query selects that exact revision in either mode. The returned
+        tuple is sorted by coordinates. Search lists references without
+        downloading recipe metadata or package binaries.
+        """
         pattern = query._conan_pattern(all_revisions=all_revisions)
         refs = []
         for reference, revisions in self._client.index(pattern).items():
@@ -52,17 +76,34 @@ class Catalog:
         return tuple(sorted(refs))
 
     def info(self, ref: Ref) -> Record:
-        """Read recipe metadata without installing package contents."""
+        """Read a package's recipe metadata as a ``Record``.
+
+        Conan may fetch the recipe from the configured remote. File names and
+        source availability come from metadata. To get paths, call ``get``.
+        """
         return self._package(ref).info()
 
     def get(self, ref: Ref, *, with_sources: bool = False) -> InstalledRecord:
-        """Get package files and optionally Git sources, resolving an unpinned revision."""
+        """Install packaged files and return their local paths.
+
+        Conan resolves a reference without a revision. Set
+        ``with_sources=True`` to also obtain Git sources if the recipe declares
+        them. When Conan selects an editable package, returned paths can point
+        into its working checkout.
+        """
         return self._package(ref).get(with_sources=with_sources)
 
     def get_variant(
         self, package: PackageInput, *, lockfile: Path | None = None, build_missing: bool = False
     ) -> ConfiguredPackage:
-        """Install one configured package from the lockfile and optionally build it."""
+        """Install the binary for a requirement and its options.
+
+        Pass a lockfile to use its recipe selection. With ``lockfile=None``,
+        Conan resolves the requirement without that lock. Set
+        ``build_missing=True`` to permit building the requested configuration
+        when its binary is unavailable. The result includes the exact recipe
+        and binary identities and the local installation directory.
+        """
         return self._variants._get(package, lockfile=lockfile, build_missing=build_missing)
 
     def publish_variant_recipe(
@@ -73,13 +114,25 @@ class Catalog:
         inputs: Mapping[str, Path],
         runner: Path,
     ) -> Ref:
-        """Publish a generator-backed recipe with these option domains and named inputs."""
+        """Publish a recipe for an option-dependent binary.
+
+        ``ref`` must omit the recipe revision. The first value of each option
+        domain is its default. ``inputs`` maps names in the recipe's source
+        directory to local files. ``runner`` is a Python file defining
+        ``generate(options, source, output)``. Conan passes selected option
+        values as strings and paths for the inputs and output directory.
+        Return the exact reference of the published recipe.
+        """
         return self._variants.publish_generated_recipe(
             ref, options=options, inputs=inputs, runner=runner
         )
 
     def publish_variant(self, package: ConfiguredPackage) -> None:
-        """Upload the exact installed variant to this catalog."""
+        """Upload the exact installed binary to the configured registry.
+
+        Use the result of ``get_variant`` from a catalog with access to the
+        same Conan cache.
+        """
         self._variants.publish(package)
 
     def publish(
@@ -89,7 +142,14 @@ class Catalog:
         dependencies: tuple[Dependency, ...] = (),
         lockfile: Path | None = None,
     ) -> InstalledRecord:
-        """Publish a local description or reuse a previously resolved local graph."""
+        """Package local inputs and publish them to the configured registry.
+
+        Pass a ``LocalRecord`` with optional ``dependencies`` and ``lockfile``,
+        or pass a local ``Graph`` resolved by this catalog. A graph supplies
+        its own dependency selection, so leave those arguments unset in that
+        case. The returned record identifies the published recipe revision
+        and provides paths to the installed files.
+        """
         self._client.require_remote()
         installed = self._pack(record, dependencies=dependencies, lockfile=lockfile)
         self._client.upload(str(installed.ref))

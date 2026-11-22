@@ -1,4 +1,9 @@
-"""The standard CoreRef manifest."""
+"""Parse the standard manifest for CoreRef projects.
+
+The YAML captures package coordinates, dependencies, options, tool
+pins and package inputs. A flow interprets the project type and defines
+the build route separately.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +31,14 @@ class _ConfiguredDependency(BaseModel):
 
 
 class Manifest(BaseModel):
-    """Build configuration shared by CoreRef projects."""
+    """Validate project declarations shared by CoreRef and a flow.
+
+    Only ``ref`` is required. A dependency can be a reference, a Conan
+    version range, or a named configuration with options. The ``tools``
+    map accepts named image digests and command version pins. ``files``
+    maps logical artifact names to filesystem paths rooted at the project
+    when relative. ``payload`` is optional flow metadata.
+    """
 
     model_config = ConfigDict(extra="forbid", strict=True)
     ref: str
@@ -41,7 +53,12 @@ class Manifest(BaseModel):
 
     @classmethod
     def load(cls, path: Path, *, flow_package: str | None = None) -> Manifest:
-        """Read a manifest from YAML and optionally verify the active flow package."""
+        """Read and validate a YAML manifest at ``path``.
+
+        If ``flow_package`` is supplied, require a ``flow_version`` and
+        check it against the installed Python distribution. Invalid YAML
+        or schema data raises ``InvalidPackage``.
+        """
         try:
             manifest = cls.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
         except (yaml.YAMLError, ValidationError) as error:
@@ -66,16 +83,31 @@ class Manifest(BaseModel):
             )
 
     def image(self, name: str) -> str | None:
-        """Read the pinned image for this tool, if configured to run in a container."""
+        """Return the digest-pinned OCI image for a tool, if configured.
+
+        An absent tool or a local command pin yields ``None``.
+        """
         pin = self.tools.get(name)
         return pin.image if isinstance(pin, ImagePin) else None
 
     def command(self, name: str) -> tuple[str, str]:
-        """Resolve the local tool and return its executable path and verified version."""
+        """Find a pinned local command and verify its reported version.
+
+        Resolve the configured command, or the tool name by default, on
+        ``PATH`` and run it with ``--version``. Return the executable path
+        and the verified version. A missing executable raises
+        ``FileNotFoundError``. A missing pin or mismatched version raises
+        ``ValueError``.
+        """
         return checked_command(self.tools, name)
 
     def local_record(self, source: Path) -> LocalRecord:
-        """Use the project directory as SCM source and as the base for file paths."""
+        """Create a working publication record for the supplied checkout.
+
+        Use ``source`` as the SCM checkout and resolve relative entries in
+        ``files`` against it. The project's root reference must omit a recipe
+        revision. Dependency requirements are available separately.
+        """
         ref = Ref(self.ref)
         if ref.revision is not None:
             raise InvalidPackage("A local package root must not specify a revision")
@@ -91,10 +123,15 @@ class Manifest(BaseModel):
 
     @property
     def requirements(self) -> tuple[Dependency, ...]:
+        """Return the ordinary references and version ranges in manifest order."""
         return tuple(_parse_dependency(item) for item in self.dependencies if isinstance(item, str))
 
     @property
     def configured_dependencies(self) -> dict[str, PackageInput]:
+        """Return option-dependent inputs keyed by their manifest names.
+
+        Different names can select distinct option sets for the same recipe.
+        """
         return {
             item.name: PackageInput(Ref(item.ref), item.options)
             for item in self.dependencies

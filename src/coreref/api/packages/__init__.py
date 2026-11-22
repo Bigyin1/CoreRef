@@ -1,4 +1,10 @@
-"""Search, fetch and publish packages and configured binaries."""
+"""Address, search and publish hardware packages.
+
+Use ``Ref`` for concrete versions and ``Requirement`` for dependency ranges.
+``Catalog`` works with ``Record`` metadata, ``InstalledRecord`` paths and
+``LocalRecord`` publication inputs. ``PackageInput`` and
+``ConfiguredPackage`` describe option-dependent binaries.
+"""
 
 from .catalog import Catalog
 from .query import SearchQuery

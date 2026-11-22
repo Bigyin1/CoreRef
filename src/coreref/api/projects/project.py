@@ -1,4 +1,8 @@
-"""Local project state shared by tool flows using the CoreRef manifest."""
+"""Operate on one checkout, from locking dependencies to releasing results.
+
+A flow implements the route and stage actions. ``Project`` handles
+dependency selection, local scheduling and publication of named outputs.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +29,14 @@ if TYPE_CHECKING:
 
 
 class Project:
-    """Bind a manifest to a checkout, its lockfile and a catalog for one command."""
+    """Bind a manifest, checkout and catalog for a build or CLI command.
+
+    Use ``graph`` to inspect locked dependencies, ``lock()`` to refresh
+    ``manifest.lock``, and ``build()`` or ``publish()`` to run stages.
+    ``record`` describes the package being prepared, ``build_dir`` holds
+    local stage outputs, and ``outputs`` resolves artifacts from published
+    revisions. A flow supplies ``route`` and the ``_stage`` handler.
+    """
 
     _output_groups: Mapping[str, tuple[str, ...]] = {}
 
@@ -40,6 +51,12 @@ class Project:
         build_missing: bool = False,
         cache_mode: CacheMode = CacheMode.OFF,
     ) -> None:
+        """Bind the project directory to the given manifest and catalog.
+
+        ``build_missing`` permits rebuilding missing published output groups.
+        ``cache_mode`` controls shared-cache access for stages that opt in.
+        The first access to ``graph`` resolves the dependencies.
+        """
         self.source = directory.resolve()
         self.manifest = manifest
         self.catalog = catalog
@@ -51,6 +68,7 @@ class Project:
 
     @property
     def cache_mode(self) -> CacheMode:
+        """Return the configured policy for shared stage results."""
         return self._stage_cache.mode
 
     def _require_lockfile(self) -> Path:
@@ -61,6 +79,11 @@ class Project:
 
     @cached_property
     def graph(self) -> Graph:
+        """Resolve and cache the ordinary dependencies using ``manifest.lock``.
+
+        The lockfile must exist. Resolve a new project instance to use a
+        lockfile changed after the graph was first accessed.
+        """
         return Graph(
             self.catalog,
             self.record,
@@ -69,7 +92,12 @@ class Project:
         )
 
     def lock(self, *additional_inputs: PackageInput) -> Path:
-        """Refresh the project lock with all ordinary and configured requirements."""
+        """Resolve declared dependencies afresh and save ``manifest.lock``.
+
+        Include both ordinary dependencies and named configurations from the
+        manifest. Pass ``additional_inputs`` to lock additional configured
+        requirements discovered by the flow. Return the saved lockfile path.
+        """
         configured = (*self.manifest.configured_dependencies.values(), *additional_inputs)
         return self.catalog._variants.create_lockfile(
             self.record,
@@ -79,7 +107,12 @@ class Project:
         )
 
     def install_variants(self, *, build_missing: bool = False) -> dict[str, ConfiguredPackage]:
-        """Fetch the named configurations in the manifest using their locked recipes."""
+        """Install the configurations declared in the manifest.
+
+        Return a mapping keyed by their declared names. Each configuration is
+        resolved independently against the same project lockfile. Set
+        ``build_missing=True`` to allow a missing binary to be built.
+        """
         return self.catalog._variants.get_many(
             self.manifest.configured_dependencies,
             lockfile=self.lockfile,
@@ -91,16 +124,30 @@ class Project:
 
     @property
     def route(self) -> Route:
+        """Return the flow's declarative stage graph.
+
+        Subclasses implement this property to enable build and publication.
+        """
         raise NotImplementedError("This project does not define a build route")
 
     def _stage(self, spec: StageSpec) -> Stage:
+        """Return the runtime action and inputs for a declared stage."""
         raise NotImplementedError(f"No handler for stage {spec.name!r}")
 
     def _prepare(self, stages: tuple[StageSpec, ...]) -> None:
-        """Prepare inputs that can be fetched together for the selected stages."""
+        """Prepare inputs that can be fetched together for selected stages.
+
+        The stage specifications include prerequisites and are ordered
+        dependencies first.
+        """
 
     def build(self, target: str | tuple[str, ...]) -> dict[str, Path]:
-        """Execute the requested targets and their prerequisites."""
+        """Run one or more route targets and their prerequisites.
+
+        The local executor can reuse outputs when their tracked inputs are
+        unchanged. Return the declared outputs in the selected subgraph,
+        including prerequisites, as paths under ``build_dir``.
+        """
         targets = (target,) if isinstance(target, str) else target
         if not targets:
             raise ValueError("Select at least one build stage")
@@ -119,6 +166,13 @@ class Project:
         outputs: tuple[str, ...],
         action: Callable[[], None],
     ) -> str | None:
+        """Run an isolated tool stage with the project's shared-cache policy.
+
+        ``invocation`` supplies the stage name, command, digest-pinned image and
+        platform in that order. Input and output names are relative to the
+        working directory. Return a cache key on a hit, or ``None`` after
+        executing the action.
+        """
         if self.cache_mode is CacheMode.OFF:
             action()
             return None
@@ -139,6 +193,12 @@ class Project:
         )
 
     def _stage_ready(self, spec: StageSpec, *, for_recipe: bool) -> bool:
+        """Decide whether a release stage has the inputs it needs.
+
+        The ``for_recipe`` flag asks whether the stage can be exported for
+        rebuilding in another environment. The base implementation only
+        checks local input files for a regular release.
+        """
         return not for_recipe and all(path.is_file() for path in self._stage(spec).files.values())
 
     def _ready_release(self, *, for_recipe: bool = False) -> tuple[StageSpec, ...]:
@@ -152,6 +212,7 @@ class Project:
         return targets
 
     def _release_requirements(self) -> Mapping[str, tuple[str, ...]]:
+        """Map release stages to additional checks that must run before publication."""
         return {}
 
     def _release_checks(self, targets: tuple[str, ...]) -> tuple[str, ...]:
@@ -177,12 +238,28 @@ class Project:
         return {f"producer/{name}": path for name, path in producer_files(self.source).items()}
 
     def _producer_members(self) -> Mapping[str, tuple[str, ...]]:
+        """Map each rebuildable output group to the stage names it runs.
+
+        Set ``_producer_handler`` to the installed flow's ``module:function``
+        entry point when publishing rebuildable groups.
+        """
         return {}
 
     def _prepare_producers(self, _stages: tuple[StageSpec, ...], /) -> Mapping[str, JSON]:
+        """Prepare files for the selected rebuildable stages before recipe export.
+
+        Return configuration shared by their handlers. CoreRef captures the
+        producer's locked Python environment and exports the prepared recipes.
+        """
         return {}
 
     def _producer_dependencies(self) -> Mapping[str, tuple[Record, str]]:
+        """Bind staged filenames to named outputs from published dependency records.
+
+        The mapping values are pairs containing the dependency record and its
+        output name. CoreRef uses the record's exact selection to bind the
+        corresponding recipe when one is registered.
+        """
         return {}
 
     def _publish_ready_recipes(
@@ -223,6 +300,11 @@ class Project:
         return {**self.record.files, **outputs, "lockfile": self._require_lockfile()}
 
     def _slice_metadata(self, _variants: Mapping[str, str], /) -> Mapping[str, JSON]:
+        """Provide additional flow metadata for the published project revision.
+
+        The argument maps each named configuration to the exact binary
+        reference selected for the slice.
+        """
         return {}
 
     def _snapshot(self) -> Snapshot:
@@ -245,7 +327,16 @@ class Project:
         *,
         with_producers: bool = False,
     ) -> InstalledRecord:
-        """Build and publish release targets, or select the ready ones automatically."""
+        """Build release targets and publish their named outputs.
+
+        Pass a release target or tuple of targets. Omit them to let the flow
+        choose the ready terminal stages, subject to ``release_through``.
+        Publication requires a clean Git checkout and an existing lockfile.
+        CoreRef checks that the snapshot inputs stay unchanged during the
+        build. With ``with_producers=True``, also publish recipe groups ready
+        for rebuilding. The returned record is the published output index
+        for the project revision.
+        """
         if isinstance(target, str):
             target = (target,)
         targets = self._release_checks(target if target is not None else self._release_targets())
