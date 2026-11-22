@@ -7,10 +7,10 @@ import pytest
 from typer.testing import CliRunner
 
 from coreref.api.errors import InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.manifest import ManifestFile
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref, Requirement
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Record, Ref, Requirement
+from coreref.api.projects.graph import Graph
+from coreref.api.projects.manifest import ManifestFile
 from coreref.cli import create_deps_app
 from coreref.testing import LocalServer, Sandbox
 

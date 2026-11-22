@@ -10,10 +10,10 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError
-from coreref.api.records import LocalRecord, Ref
-from coreref.api.workspace import Workspace
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.workspace import Workspace
 from coreref.cli import create_deps_app, create_workspace_app
 
 runner = CliRunner()

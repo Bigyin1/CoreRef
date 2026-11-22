@@ -4,19 +4,57 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 
-from .._internal.artifacts import ArtifactStore, OutputIndex
-from .artifacts import SliceInputs
-from .catalog import Catalog
-from .errors import InvalidPackage, NotFound
-from .graph import Graph
-from .query import SearchQuery
-from .records import JSON, InstalledRecord, LocalRecord, Record, Ref
-from .variants import PackageInput, Variants
+from ..._internal.artifacts import ArtifactStore, OutputIndex
+from ..._internal.hashing import file_digest, fingerprint
+from ..errors import InvalidPackage, NotFound
+from ..packages.catalog import Catalog
+from ..packages.query import SearchQuery
+from ..packages.records import JSON, InstalledRecord, LocalRecord, Record, Ref
+from ..packages.variants import PackageInput, Variants
+from ..projects.graph import Graph
+
+
+@dataclass(frozen=True)
+class SliceInputs:
+    """Inputs that identify a project slice independently of the requested stage."""
+
+    project: Ref
+    commit: str | None
+    lockfile: Path
+    dependencies: tuple[Ref, ...]
+    environment: JSON
+    variants: Mapping[str, str] = field(default_factory=dict)
+    local_outputs: Mapping[str, Path] = field(default_factory=dict)
+    input_files: Mapping[str, Path | None] | None = None
+
+    def key(self) -> str:
+        """Hash the resolved inputs, including output bytes for an unpublished worktree."""
+        local_outputs = self.local_outputs if self.commit is None else {}
+        inputs: dict[str, JSON] = {
+            "project": str(self.project),
+            "local_outputs": {name: file_digest(path) for name, path in local_outputs.items()},
+            "lockfile": file_digest(self.lockfile),
+            "dependencies": tuple(sorted(map(str, self.dependencies))),
+            "variants": self.variants,
+            "environment": self.environment,
+        }
+        if self.input_files is None:
+            return fingerprint({"schema_version": 1, "commit": self.commit, **inputs})
+        files = _input_digests(self.input_files)
+        return fingerprint(
+            {"schema_version": 2, "worktree": self.commit is None, "files": files, **inputs}
+        )
+
+
+def _input_digests(files: Mapping[str, Path | None]) -> dict[str, str | None]:
+    digests = {path: file_digest(path) for path in set(files.values()) if path is not None}
+    return {name: digests[path] if path is not None else None for name, path in files.items()}
+
 
 PRODUCER_NAMESPACE = "coreref-producer"
 
@@ -37,14 +75,6 @@ class Producer(BaseModel):
 
     def _document(self) -> JSON:
         return {"ref": self.ref, "prerequisites": self.prerequisites}
-
-
-def read_producers(record: Record) -> dict[str, Producer]:
-    """Read the registered producers of an exact project revision."""
-    payload = record.payload
-    if not isinstance(payload, Mapping) or "producers" not in payload:
-        return {}
-    return TypeAdapter(dict[str, Producer]).validate_json(json.dumps(payload["producers"]))
 
 
 def _merge_producers(
@@ -128,7 +158,7 @@ class Outputs:
             return None, {}
         index = OutputIndex.from_record(latest)
         if index is not None and index.key == key:
-            return index, read_producers(latest)
+            return index, self.producers(latest)
         query = SearchQuery(
             namespace=root.namespace, component=root.component, version=root.version
         )
@@ -141,8 +171,16 @@ class Outputs:
             previous = OutputIndex.from_record(record)
             if previous is not None and previous.key == key:
                 merged = previous if merged is None else merged.extend(previous)
-                producers = _merge_producers(producers, read_producers(record))
+                producers = _merge_producers(producers, self.producers(record))
         return merged, producers
+
+    @staticmethod
+    def producers(record: Record) -> dict[str, Producer]:
+        """Read the registered producers of an exact project revision."""
+        payload = record.payload
+        if not isinstance(payload, Mapping) or "producers" not in payload:
+            return {}
+        return TypeAdapter(dict[str, Producer]).validate_json(json.dumps(payload["producers"]))
 
     @staticmethod
     def links(record: Record) -> dict[str, Ref] | None:
@@ -165,7 +203,7 @@ class Outputs:
             available.update(links)
             if not self._build_missing:
                 return available
-        for group in read_producers(record):
+        for group in self.producers(record):
             available.update(self._groups.get(group, ()))
         return available
 
@@ -191,7 +229,7 @@ class Outputs:
         index: OutputIndex,
         missing: set[str],
     ) -> dict[str, Path]:
-        declared = read_producers(record)
+        declared = self.producers(record)
         selected = {
             group: missing.intersection(names)
             for group, names in self._groups.items()

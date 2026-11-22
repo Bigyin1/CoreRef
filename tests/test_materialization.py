@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from coreref._internal.recipe import LocalRecipe, StoredRecipe
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Record, Ref
 
 
 def test_files_are_available_on_fetch_and_source_is_optional(

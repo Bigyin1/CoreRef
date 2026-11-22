@@ -15,14 +15,14 @@ from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
 from coreref._internal.recipe import LocalRecipe, StoredRecipe
-from coreref.api.catalog import Catalog
 from coreref.api.errors import (
     CatalogError,
     NotFound,
 )
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import configured_home, local_server
 from tests.helpers import local_record, resolve_published
 

@@ -10,11 +10,11 @@ from unittest.mock import patch
 import pytest
 
 from coreref._internal.types import NativeGraph
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer
 from tests.test_models import UserPayload
 

@@ -8,8 +8,8 @@ from operator import methodcaller
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from coreref.api.query import SearchQuery
-from coreref.api.records import Record, Ref
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import Record, Ref
 from coreref.testing import local_server
 from tests.performance.support import Dataset, Registry
 

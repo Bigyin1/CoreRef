@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage
-from coreref.api.records import JSON, Record
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import JSON, Record
 from tests.helpers import content, local_record, release, run
 
 

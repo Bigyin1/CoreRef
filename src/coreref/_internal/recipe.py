@@ -14,7 +14,7 @@ import yaml  # type: ignore[import-untyped]
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
 from ..api.errors import CatalogError, InvalidPackage
-from ..api.records import InstalledRecord, LocalRecord, Record, Ref
+from ..api.packages.records import InstalledRecord, LocalRecord, Record, Ref
 from .references import from_conan_reference, to_conan_reference
 from .types import NativePackage
 

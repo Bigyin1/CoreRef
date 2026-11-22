@@ -1,35 +1,20 @@
-"""Inputs that identify a project slice and its contents."""
+"""Collect and verify the inputs of a release snapshot."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import subprocess
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .records import JSON, Ref
+from ..api.build.outputs import SliceInputs
+from ..api.packages.records import JSON
 
 if TYPE_CHECKING:
-    from .project import Project
-    from .route import Route, StageSpec
-    from .variants import ConfiguredPackage
-
-
-def file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def fingerprint(document: JSON) -> str:
-    encoded = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(encoded.encode()).hexdigest()
+    from ..api.build.route import Route, StageInputs, StageSpec
+    from ..api.packages.variants import ConfiguredPackage
+    from ..api.projects.project import Project
 
 
 def _git(source: Path, *arguments: str) -> str:
@@ -66,51 +51,6 @@ def committed_slice(source: Path, capture: Callable[[str], SliceInputs]) -> Iter
         raise ValueError("Project inputs changed while building the slice")
 
 
-@dataclass(frozen=True)
-class SliceInputs:
-    """Inputs that identify a project slice independently of the requested stage."""
-
-    project: Ref
-    commit: str | None
-    lockfile: Path
-    dependencies: tuple[Ref, ...]
-    environment: JSON
-    variants: Mapping[str, str] = field(default_factory=dict)
-    local_outputs: Mapping[str, Path] = field(default_factory=dict)
-    input_files: Mapping[str, Path | None] | None = None
-
-    def key(self) -> str:
-        """Hash the resolved inputs, including output bytes for an unpublished worktree."""
-        local_outputs = self.local_outputs if self.commit is None else {}
-        inputs: dict[str, JSON] = {
-            "project": str(self.project),
-            "local_outputs": {name: file_digest(path) for name, path in local_outputs.items()},
-            "lockfile": file_digest(self.lockfile),
-            "dependencies": tuple(sorted(map(str, self.dependencies))),
-            "variants": self.variants,
-            "environment": self.environment,
-        }
-        if self.input_files is None:
-            return fingerprint({"schema_version": 1, "commit": self.commit, **inputs})
-        files = _input_digests(self.input_files)
-        return fingerprint(
-            {"schema_version": 2, "worktree": self.commit is None, "files": files, **inputs}
-        )
-
-
-def _input_digests(files: Mapping[str, Path | None]) -> dict[str, str | None]:
-    digests = {path: file_digest(path) for path in set(files.values()) if path is not None}
-    return {name: digests[path] if path is not None else None for name, path in files.items()}
-
-
-@dataclass(frozen=True)
-class StageInputs:
-    """External files and configuration that identify a stage before its outputs exist."""
-
-    files: Mapping[str, Path] = field(default_factory=dict)
-    configuration: JSON = None
-
-
 class Snapshot:
     """Capture a project slice from the declared inputs of its release stages."""
 
@@ -120,12 +60,12 @@ class Snapshot:
         route: Route,
         *,
         stage_inputs: Callable[[StageSpec], StageInputs],
-        variants: Callable[[], Mapping[str, ConfiguredPackage]] | None = None,
+        variants: Callable[[], Mapping[str, ConfiguredPackage]],
     ) -> None:
         self._project = project
         self._route = route
         self._stage_inputs = stage_inputs
-        self._variants = variants if variants is not None else project.install_variants
+        self._variants = variants
 
     def inputs(self, commit: str | None, outputs: Mapping[str, Path] | None = None) -> SliceInputs:
         """Read the complete release route independently of the current build target."""

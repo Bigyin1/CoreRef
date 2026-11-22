@@ -13,8 +13,8 @@ from conan.tools.scm import Git  # type: ignore[import-untyped]
 from requests.sessions import Session
 
 from coreref._internal.recipe import StoredRecipe
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord
 from tests.performance.support import Registry, Shape, check_files
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]

@@ -26,8 +26,8 @@ class Ref:
     """Package coordinates independent of any client, cache or registry."""
 
     def __init__(self, reference: str) -> None:
-        from .._internal.references import parse_package_name, to_conan_reference
-        from .errors import InvalidPackage
+        from ..._internal.references import parse_package_name, to_conan_reference
+        from ..errors import InvalidPackage
 
         try:
             logical, _, revision = reference.partition("#")
@@ -51,7 +51,7 @@ class Ref:
         revision: str | None = None,
     ) -> Ref:
         """Construct from separate coordinates using the same canonical text parser."""
-        from .errors import InvalidPackage
+        from ..errors import InvalidPackage
 
         reference = f"{namespace}.{component}/{version}"
         if revision is not None:
@@ -136,7 +136,7 @@ class Requirement:
     """An unresolved dependency with a Conan version range."""
 
     def __init__(self, reference: str) -> None:
-        from .._internal.references import parse_package_name, validate_version_range
+        from ..._internal.references import parse_package_name, validate_version_range
 
         name, _, version = reference.partition("/")
         parse_package_name(name)

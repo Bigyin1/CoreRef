@@ -216,8 +216,8 @@ record.json/conandata.yml и собственные маркеры в рабоч
 это не гарантированная revision опубликованной версии рабочей копии.
 
 ```python
-from coreref.api.graph import Graph
-from coreref.api.workspace import Workspace
+from coreref.api.projects.graph import Graph
+from coreref.api.projects.workspace import Workspace
 
 workspace = Workspace(catalog)  # запускаем из корня проекта
 workspace.add("../cpu", record=cpu_record, dependencies=cpu_dependencies)
@@ -284,7 +284,7 @@ dependencies:
 
 ## Варианты компонентов
 
-`coreref.api.variants.Variants` устанавливает бинарные варианты нативных
+`coreref.api.packages.variants.Variants` устанавливает бинарные варианты нативных
 Conan-рецептов по `PackageInput` с опциями и проектному lockfile. Обычные
 зависимости проекта можно сначала зафиксировать через `Graph.create_lockfile()`,
 а затем дополнить тот же файл через `Variants.extend_lockfile()`. Для двух
@@ -312,47 +312,35 @@ Conan-рецептов по `PackageInput` с опциями и проектно
 
 ## Проект и стадии
 
-`coreref.api.project.Project` связывает манифест, рабочую директорию и каталог.
+`coreref.api.projects.project.Project` связывает манифест, рабочую директорию и каталог.
 Он создаёт `LocalRecord`, разрешает граф по `manifest.lock` и обновляет lockfile
-вместе с именованными вариантами. `run_route()` передаёт исполнителю замыкание
-запрошенных стадий. `pack_build()` и `publish_build()` сохраняют
-результаты сборки и оглавление. Реализация flow связывает описанные стадии с действиями над
+вместе с именованными вариантами. `Route.run()` передаёт исполнителю замыкание
+запрошенных стадий. Реализация flow связывает описанные стадии с действиями над
 инструментами.
 
 `Graph.dependencies(transitive=True, stop_at=...)` оставляет пограничные
 пакеты и общие зависимости, достижимые через другие ветви. Flow может
 использовать это для замены RTL макроблока его физическими представлениями.
 
-`Snapshot(project, route, stage_inputs=...)` собирает входы всего маршрута
-выпуска. Обработчик каждой стадии возвращает `StageInputs` с внешними файлами
-и конфигурацией, доступными до сборки. CoreRef добавляет файлы из манифеста,
-lockfile, точные зависимости, выбранные варианты и настройки манифеста, включая
-`flow_version` и закреплённые инструменты. `committed_slice()` проверяет
-чистоту Git и сверяет отпечаток этих входов до и после сборки.
+`Project.pack_build()` и `publish_build()` принимают маршрут и описание входов
+стадий через `StageInputs`. CoreRef сам собирает срез, добавляет файлы из манифеста,
+lockfile, точные зависимости, выбранные варианты и закреплённые инструменты.
+При публикации CoreRef проверяет чистоту Git и сверяет входы до и после сборки.
 
+В `coreref.api.build.route` класс `StageSpec` описывает стадию, её `needs` и
+`outputs`, а `BuildStage` связывает её с действием и файлами в рабочей директории.
+`Route.load()` читает YAML-граф и локальные импорты, `Route.run()` выполняет
+запрошенные стадии с предпосылками, а `Route.ready()` учитывает критерий
+готовности от flow.
 
-`coreref.api.pipeline.BuildStage` задаёт имя, действие, входные и выходные
-файлы и конфигурацию стадии. `needs` задаёт дополнительные связи порядка.
-`Pipeline(directory, stages).run(target, *additional_targets)` запускает выбранные
-стадии и их предпосылки. Изменения входных файлов определяют пересборку,
-а `always_run=True` запускает действие при каждом выборе стадии. Состояние сохраняется в директории сборки. Flow задаёт сами команды EDA
-и способ их запуска.
-
-`coreref.api.route.Route.load(project, path)` читает граф стадий и его локальные
-YAML-импорты. `StageSpec` задаёт имя, `needs`, `outputs` и назначение стадии.
-Flow проверяет объявления через `validate_handlers()` и реализует действия
-через `BuildStage`. `Route.ready()` отбирает ветви выпуска по признаку готовности,
-который передаёт Flow.
-
-`coreref.api.producers.ProducerRecipes` экспортирует группы стадий с
-назначенными входами и выходами в Conan. Flow передаёт описания `RecipeStage`,
-упаковываемые группы и Python-файл с функцией
-`run_pipeline(configuration, stages, directory)`. Эта функция выполняет
-стадии в подготовленной директории и пишет объявленные результаты.
+`Project.publish_producers()` экспортирует группы `RecipeStage` для последующей
+пересборки. Flow передаёт файл с функцией
+`run_pipeline(configuration, stages, directory)`, которая выполняет стадии
+и записывает объявленные результаты.
 
 ## Именованные выходы и общий кэш стадий
 
-`coreref.api.outputs.Outputs` позволяет упаковать выходы локально (`pack`),
+`coreref.api.build.outputs.Outputs` позволяет упаковать выходы локально (`pack`),
 опубликовать их для разрешённого проекта (`publish`) и получить нужные файлы
 закреплённой ревизии по именам (`get`). Публикация загружает файлы перед
 оглавлением и добавляет новые выходы к предыдущим выходам того же среза.
@@ -399,7 +387,7 @@ dependencies:
 и именованные конфигурации вида `{name: cache, ref: demo.sram/1.0, options: {depth: 4}}`.
 Сами допустимые значения генератора задаются в `options` проекта, например
 `options: {depth: [4, 8], width: [4, 8]}`. Все flow используют одну схему
-`coreref.api.manifest.Manifest`. Поле `type` задаёт тип проекта, а
+`coreref.api.projects.manifest.Manifest`. Поле `type` задаёт тип проекта, а
 `release_through` ссылается на стадию выпуска из flow.yml. В `tools` можно
 закрепить образ по SHA-256 или версию исполняемой команды. При загрузке с
 `flow_package=` CoreRef проверяет установленную версию flow по `flow_version`.

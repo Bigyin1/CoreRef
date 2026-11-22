@@ -10,9 +10,9 @@ from typing import Literal
 
 from dulwich import porcelain
 
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer
 
 Shape = Literal["chain", "wide", "shared"]

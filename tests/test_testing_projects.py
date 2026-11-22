@@ -8,8 +8,8 @@ import pytest
 from dulwich.objects import Commit, Tree
 from dulwich.repo import Repo
 
-from coreref.api.manifest import ManifestFile
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.manifest import ManifestFile
 from coreref.testing import LocalServer, Sandbox, environment, git_repository
 
 PROJECTS = Path(__file__).with_name("test_projects")

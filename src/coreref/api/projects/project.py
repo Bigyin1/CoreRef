@@ -7,17 +7,17 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .artifacts import SliceInputs, clean_commit, committed_slice
+from ..._internal.producers import ProducerRecipes
+from ..._internal.snapshot import Snapshot, clean_commit, committed_slice
+from ..build.outputs import Outputs, Producer, SliceInputs
+from ..packages.records import JSON, InstalledRecord, Record
+from ..packages.variants import ConfiguredPackage, PackageInput, Variants
 from .graph import Graph
-from .outputs import Outputs, Producer
-from .pipeline import BuildStage, Pipeline
-from .records import JSON, InstalledRecord, Record
-from .variants import ConfiguredPackage, PackageInput, Variants
 
 if TYPE_CHECKING:
-    from .catalog import Catalog
+    from ..build.route import RecipeStage, Route, StageInputs, StageSpec
+    from ..packages.catalog import Catalog
     from .manifest import Manifest
-    from .route import Route, StageSpec
 
 
 class Project:
@@ -78,43 +78,66 @@ class Project:
             build_missing=build_missing,
         )
 
-    def output_files(self, outputs: Mapping[str, Path]) -> dict[str, Path]:
+    def _slice_variants(self) -> Mapping[str, ConfiguredPackage]:
+        return self.install_variants()
+
+    def publish_producers(
+        self,
+        stages: tuple[RecipeStage, ...],
+        *,
+        runner: Path,
+        configuration: Mapping[str, JSON],
+        members: Mapping[str, tuple[str, ...]],
+        external: Mapping[str, tuple[Producer, str]],
+    ) -> dict[str, Producer]:
+        """Publish rebuild recipes for the project's named output groups."""
+        recipes = ProducerRecipes(
+            self.catalog, self.build, runner=runner, configuration=configuration
+        )
+        return recipes.publish(
+            self.record.ref,
+            stages,
+            members=members,
+            outputs=self.outputs._groups,
+            external=external,
+        )
+
+    def _output_files(self, outputs: Mapping[str, Path]) -> dict[str, Path]:
         """Combine declared files, build outputs and the lockfile for a project slice."""
         return {**self.record.files, **outputs, "lockfile": self.require_lockfile()}
 
-    def run_route(
-        self,
-        route: Route,
-        targets: tuple[str, ...],
-        bind: Callable[[tuple[StageSpec, ...]], tuple[BuildStage, ...]],
-    ) -> dict[str, Path]:
-        """Bind and execute only the selected route closure, then locate its outputs."""
-        stages = route.closure(targets)
-        Pipeline(self.build, bind(stages)).run(*targets)
-        return {name: self.build / name for stage in stages for name in stage.outputs}
-
     def pack_build(
         self,
+        route: Route,
         build: Callable[[], Mapping[str, Path]],
         *,
-        capture: Callable[[str | None, Mapping[str, Path]], SliceInputs],
+        stage_inputs: Callable[[StageSpec], StageInputs],
         metadata: Callable[[SliceInputs], Mapping[str, JSON]],
     ) -> InstalledRecord:
         """Build named outputs and pack them under the current project slice."""
-        files = self.output_files(build())
-        inputs = capture(clean_commit(self.source), files)
-        return self.outputs.pack(inputs, files, metadata(inputs))
+        snapshot = Snapshot(self, route, stage_inputs=stage_inputs, variants=self._slice_variants)
+        files = self._output_files(build())
+        inputs = snapshot.inputs(clean_commit(self.source), files)
+        return self.outputs.pack(inputs, files, {**snapshot.metadata(inputs), **metadata(inputs)})
 
     def publish_build(
         self,
+        route: Route,
         build: Callable[[], Mapping[str, Path]],
         *,
-        capture: Callable[[str], SliceInputs],
+        stage_inputs: Callable[[StageSpec], StageInputs],
         metadata: Callable[[SliceInputs], Mapping[str, JSON]],
         producers: Callable[[], Mapping[str, Producer]] | None = None,
     ) -> InstalledRecord:
         """Build from a stable checkout and publish output packages before their index."""
-        with committed_slice(self.source, capture) as inputs:
-            files = self.output_files(build())
+        snapshot = Snapshot(self, route, stage_inputs=stage_inputs, variants=self._slice_variants)
+        with committed_slice(self.source, snapshot.inputs) as inputs:
+            files = self._output_files(build())
             recipes = producers() if producers is not None else {}
-        return self.outputs.publish(self.graph, inputs, files, metadata(inputs), producers=recipes)
+        return self.outputs.publish(
+            self.graph,
+            inputs,
+            files,
+            {**snapshot.metadata(inputs), **metadata(inputs)},
+            producers=recipes,
+        )

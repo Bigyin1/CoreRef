@@ -9,10 +9,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ..api.artifacts import file_digest
-from ..api.catalog import Catalog
 from ..api.errors import NotFound
-from ..api.records import JSON, LocalRecord, Record, Ref
+from ..api.packages.catalog import Catalog
+from ..api.packages.records import JSON, LocalRecord, Record, Ref
+from .hashing import file_digest
 
 Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 

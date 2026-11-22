@@ -8,10 +8,10 @@ from unittest.mock import patch
 import pytest
 
 from coreref._internal.types import NativeGraph
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 
 
 class Payload:

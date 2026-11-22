@@ -20,7 +20,7 @@ class BlockDulwich(importlib.abc.MetaPathFinder):
             raise AssertionError("Server helpers must not import Dulwich")
 
 sys.meta_path.insert(0, BlockDulwich())
-from coreref.api.records import Ref
+from coreref.api.packages.records import Ref
 from coreref.testing import configured_home, local_server, Sandbox
 from coreref.testing.server import LocalServer
 

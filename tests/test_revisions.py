@@ -9,11 +9,11 @@ import pytest
 
 from coreref._internal.recipe import LocalRecipe
 from coreref._internal.references import from_conan_reference, to_conan_reference
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage, NotFound
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 
 
 def test_revision_identity_and_snapshots() -> None:

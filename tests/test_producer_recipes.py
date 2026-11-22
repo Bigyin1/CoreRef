@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
-from coreref.api.producers import ProducerRecipes, RecipeStage
-from coreref.api.records import Ref
-from coreref.api.route import StageSpec
-from coreref.api.variants import PackageInput, Variants
+from coreref._internal.producers import ProducerRecipes
+from coreref.api.build.route import RecipeStage, StageSpec
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import Ref
+from coreref.api.packages.variants import PackageInput, Variants
 from coreref.testing import Sandbox, environment
 
 

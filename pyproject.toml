@@ -94,5 +94,5 @@ addopts = "-ra -m 'not performance'"
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = [
-    "coreref.api.query.SearchQuery",
+    "coreref.api.packages.query.SearchQuery",
 ]

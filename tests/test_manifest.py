@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage, NotFound
-from coreref.api.manifest import ManifestFile
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
-from coreref.api.workspace import Workspace
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.projects.manifest import ManifestFile
+from coreref.api.projects.workspace import Workspace
 
 
 @pytest.fixture

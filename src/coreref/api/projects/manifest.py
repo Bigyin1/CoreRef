@@ -11,22 +11,22 @@ from typing import TYPE_CHECKING, cast
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
 
-from .._internal.recipe import LocalRecipe
-from .environment import ToolPins
-from .errors import Conflict, InvalidPackage, NotFound
+from ..._internal.recipe import LocalRecipe
+from ..build.environment import ToolPins
+from ..errors import Conflict, InvalidPackage, NotFound
+from ..packages.records import JSON, Dependency, LocalRecord, Ref, Requirement, parse_dependency
+from ..packages.variants import PackageInput, Variants
 from .graph import Graph
-from .records import JSON, Dependency, LocalRecord, Ref, Requirement, parse_dependency
-from .variants import PackageInput, Variants
 
 if TYPE_CHECKING:
-    from .catalog import Catalog
+    from ..packages.catalog import Catalog
     from .workspace import Workspace
 
 
 _OptionValue = str | int | bool
 
 
-class ConfiguredDependency(BaseModel):
+class _ConfiguredDependency(BaseModel):
     """A named configuration of a package recipe."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -43,7 +43,7 @@ class Manifest(BaseModel):
     type: str | None = Field(default=None, min_length=1)
     flow_version: str | None = Field(default=None, min_length=1)
     release_through: str | None = Field(default=None, min_length=1)
-    dependencies: list[str | ConfiguredDependency] = Field(default_factory=list)
+    dependencies: list[str | _ConfiguredDependency] = Field(default_factory=list)
     files: dict[str, str] = Field(default_factory=dict)
     tools: ToolPins = Field(default_factory=dict)
     options: dict[str, list[_OptionValue]] = Field(default_factory=dict)
@@ -99,13 +99,13 @@ class Manifest(BaseModel):
         return {
             item.name: PackageInput(Ref(item.ref), item.options)
             for item in self.dependencies
-            if isinstance(item, ConfiguredDependency)
+            if isinstance(item, _ConfiguredDependency)
         }
 
     @model_validator(mode="after")
     def _unique_dependencies(self) -> Manifest:
         configured_names = [
-            item.name for item in self.dependencies if isinstance(item, ConfiguredDependency)
+            item.name for item in self.dependencies if isinstance(item, _ConfiguredDependency)
         ]
         if len(set(configured_names)) != len(configured_names):
             raise ValueError("Duplicate configured dependency name")
@@ -254,4 +254,4 @@ class ManifestFile:
         self.path.write_text(content, encoding="utf-8")
 
 
-__all__ = ["ConfiguredDependency", "Manifest", "ManifestFile"]
+__all__ = ["Manifest", "ManifestFile"]

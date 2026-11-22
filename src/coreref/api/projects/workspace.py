@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .._internal.recipe import LocalRecipe
-from .catalog import Catalog
-from .errors import InvalidPackage
-from .records import Dependency, LocalRecord, Ref
+from ..._internal.recipe import LocalRecipe
+from ..errors import InvalidPackage
+from ..packages.catalog import Catalog
+from ..packages.records import Dependency, LocalRecord, Ref
 
 
 class Workspace:

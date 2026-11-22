@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -10,7 +11,8 @@ from typing import Literal
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
-from .records import JSON
+from ..._internal.pipeline import Pipeline
+from ..packages.records import JSON
 
 
 class StageSpec(BaseModel):
@@ -20,6 +22,36 @@ class StageSpec(BaseModel):
     outputs: tuple[str, ...] = Field(strict=False)
     needs: tuple[str, ...] = Field(default=(), strict=False)
     purpose: Literal["release", "development"] = "release"
+
+
+@dataclass(frozen=True, kw_only=True)
+class BuildStage:
+    """Declare one action, its input files, and its outputs in the build directory."""
+
+    name: str
+    action: Callable[[], object]
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
+    configuration: Mapping[str, JSON] = field(default_factory=dict)
+    needs: tuple[str, ...] = ()
+    always_run: bool = False
+
+
+@dataclass(frozen=True)
+class StageInputs:
+    """External files and configuration that identify a stage before its outputs exist."""
+
+    files: Mapping[str, Path] = field(default_factory=dict)
+    configuration: JSON = None
+
+
+@dataclass(frozen=True)
+class RecipeStage:
+    """A stage declaration with the inputs and arguments its runner accepts."""
+
+    spec: StageSpec
+    inputs: tuple[str, ...]
+    command: tuple[str, ...]
 
 
 class _Document(BaseModel):
@@ -106,6 +138,17 @@ class Route:
                 selected.add(name)
                 pending.extend(stage.needs)
         return tuple(self[name] for name in self.order if name in selected)
+
+    def run(
+        self,
+        directory: Path,
+        targets: tuple[str, ...],
+        bind: Callable[[tuple[StageSpec, ...]], tuple[BuildStage, ...]],
+    ) -> dict[str, Path]:
+        """Execute the selected stages and return the paths of their outputs."""
+        stages = self.closure(targets)
+        Pipeline(directory, bind(stages)).run(*targets)
+        return {name: directory / name for stage in stages for name in stage.outputs}
 
     def release(self, cap: str | None = None) -> tuple[StageSpec, ...]:
         if cap is not None:
@@ -197,4 +240,4 @@ def _output_path(name: str) -> PurePosixPath:
     return path
 
 
-__all__ = ["Route", "StageSpec"]
+__all__ = ["BuildStage", "RecipeStage", "Route", "StageInputs", "StageSpec"]

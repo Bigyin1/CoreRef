@@ -8,13 +8,13 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .errors import CatalogError, InvalidPackage
-from .records import Dependency, InstalledRecord, LocalRecord, Record, Ref
+from ..errors import CatalogError, InvalidPackage
+from ..packages.records import Dependency, InstalledRecord, LocalRecord, Record, Ref
 
 if TYPE_CHECKING:
-    from .._internal.package import LocalPackage
-    from .catalog import Catalog
-    from .query import SearchQuery
+    from ..._internal.package import LocalPackage
+    from ..packages.catalog import Catalog
+    from ..packages.query import SearchQuery
 
 
 @dataclass(init=False)

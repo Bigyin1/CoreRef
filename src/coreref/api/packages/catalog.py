@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .._internal.client import ConanClient
-from .._internal.package import LocalPackage, StoredPackage
-from .._internal.references import from_conan_reference
-from .errors import InvalidPackage
-from .graph import Graph
+from ..._internal.client import ConanClient
+from ..._internal.package import LocalPackage, StoredPackage
+from ..._internal.references import from_conan_reference
+from ..errors import InvalidPackage
+from ..projects.graph import Graph
 from .query import SearchQuery
 from .records import Dependency, InstalledRecord, LocalRecord, Record, Ref
 

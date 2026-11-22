@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 
 
 def test_transitive_filters_do_not_prune_intermediate_nodes(catalog: Catalog) -> None:

@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from coreref.api.errors import CatalogError
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
+from coreref.api.packages.query import SearchQuery
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer, Sandbox, local_server, trace_operations
 
 pytestmark = pytest.mark.conan_remote

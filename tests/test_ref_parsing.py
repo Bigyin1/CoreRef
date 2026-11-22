@@ -8,7 +8,7 @@ import pytest
 
 from coreref._internal.references import from_conan_reference
 from coreref.api.errors import InvalidPackage
-from coreref.api.records import Ref
+from coreref.api.packages.records import Ref
 
 
 @pytest.mark.parametrize(

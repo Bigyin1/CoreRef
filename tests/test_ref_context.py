@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import local_server
 
 

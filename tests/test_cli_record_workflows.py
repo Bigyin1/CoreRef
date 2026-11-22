@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import Conflict
-from coreref.api.graph import Graph
-from coreref.api.manifest import ManifestFile
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
+from coreref.api.projects.manifest import ManifestFile
 from coreref.testing import git_commit
 from tests.test_models import UserPayload
 

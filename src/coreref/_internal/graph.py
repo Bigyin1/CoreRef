@@ -7,7 +7,7 @@ from functools import cached_property
 from pathlib import Path
 
 from ..api.errors import InvalidPackage
-from ..api.records import LocalRecord, Record, Ref
+from ..api.packages.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
 
 GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[tuple[Ref, Ref], ...]]

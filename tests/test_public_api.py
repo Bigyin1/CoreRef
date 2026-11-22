@@ -6,7 +6,7 @@ import subprocess
 import sys
 from textwrap import dedent
 
-from coreref.api.catalog import Catalog
+from coreref.api.packages.catalog import Catalog
 
 
 def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
@@ -22,11 +22,11 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
 
         from coreref.api import errors
 
-        assert "coreref.api.records" not in sys.modules
+        assert "coreref.api.packages.records" not in sys.modules
         assert "pydantic" not in sys.modules
         assert "conan" not in sys.modules
 
-        from coreref.api import records
+        from coreref.api.packages import records
 
         assert "networkx" not in sys.modules
         assert "pydantic" not in sys.modules
@@ -35,11 +35,11 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         assert str(offline) == "public.offline/v1"
         assert "conan" not in sys.modules
 
-        from coreref.api.graph import Graph
+        from coreref.api.projects.graph import Graph
         assert "conan" not in sys.modules
 
-        from coreref.api import catalog
-        from coreref.api import query
+        from coreref.api.packages import catalog
+        from coreref.api.packages import query
 
         manifest: dict[str, records.JSON] = {"views": ["rtl", "timing"]}
         instance = catalog.Catalog(Path(sys.argv[1]))

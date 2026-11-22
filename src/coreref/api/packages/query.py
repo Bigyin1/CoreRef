@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .._internal.references import NAME_PART, REVISION, VERSION
-from .errors import InvalidPackage
+from ..._internal.references import NAME_PART, REVISION, VERSION
+from ..errors import InvalidPackage
 from .records import LocalRecord, Record, Ref
 
 

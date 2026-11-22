@@ -8,8 +8,8 @@ import pytest
 from dulwich import porcelain
 from dulwich.repo import Repo
 
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer, Sandbox, environment, git_repository, git_upstream
 
 pytestmark = pytest.mark.conan_remote

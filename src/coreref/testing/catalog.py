@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from ..api.catalog import Catalog
-from ..api.graph import Graph
-from ..api.records import Dependency, InstalledRecord, LocalRecord, Ref
+from ..api.packages.catalog import Catalog
+from ..api.packages.records import Dependency, InstalledRecord, LocalRecord, Ref
+from ..api.projects.graph import Graph
 
 
 class _RecordingCatalog(Catalog):

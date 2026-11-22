@@ -27,10 +27,10 @@ CI проверяет обе группы тестов с общим порог�
 | Модуль | Ответственность |
 |---|---|
 | `cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
-| `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
-| `api/pipeline.py`, `api/outputs.py` | Локальное исполнение стадий и именованные результаты |
-| `api/manifest.py` | Стандартный манифест, пути и прямые объявления зависимостей |
-| `api/graph.py`, `workspace.py` | Разрешённые зависимости, рабочий LocalRecord и Git-копии |
+| `api/packages/` | Публикация/поиск, координаты и записи, фильтры |
+| `api/build/` | Локальное исполнение стадий и именованные результаты |
+| `api/projects/` | Стандартный манифест, проект, граф зависимостей и рабочие копии |
+| `api/errors.py` | Общие ошибки API |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
 | `_internal/recipe.py`, `templates/` | Чтение метаданных и Jinja-шаблоны временных рецептов |
 | `_internal/graph.py`, `client.py` | Нативный граф и команды Conan API |
@@ -81,7 +81,7 @@ Manifest описывает стандартный формат manifest.yml. Ma
 lockfile, отдельный lock разрешает объявления заново. CLI не добавляет зависимости,
 которые flow находит динамически; такой flow сохраняет lockfile итогового Graph сам.
 
-`api/` содержит стандартный манифест и инфраструктуру проектов.
+Публичные модули сгруппированы в `api/packages/`, `api/projects/` и `api/build/`.
 `coreref.cli` предоставляет подключаемые команды Typer. Основные операции
 API принимают LocalRecord и Ref; собственные форматы flow остаются возможны.
 Workspace.add(directory, record=..., dependencies=...) принимает данные собственного flow.
@@ -144,8 +144,8 @@ uv run --frozen pytest tests/performance -m performance --benchmark-compare
 cache без публичных remotes. Окружение процесса и пользовательский cache не меняются.
 
 ```python
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
+from coreref.api.packages.records import LocalRecord, Ref
 from coreref.testing import environment
 
 
@@ -307,7 +307,7 @@ tests/
 ```python
 from pathlib import Path
 from coreref.testing import environment
-from coreref.api.manifest import ManifestFile
+from coreref.api.projects.manifest import ManifestFile
 
 
 def test_soc(tmp_path):

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.records import Ref
-from coreref.api.variants import PackageInput, Variants
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import Ref
+from coreref.api.packages.variants import PackageInput, Variants
 from coreref.testing import LocalServer
 
 

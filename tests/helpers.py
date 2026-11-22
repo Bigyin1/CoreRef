@@ -7,9 +7,9 @@ from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
 
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import JSON, InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 
 
 class ProjectTypeId(str, Enum):

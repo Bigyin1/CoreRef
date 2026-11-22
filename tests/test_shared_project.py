@@ -7,26 +7,21 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from coreref.api.artifacts import (
-    SliceInputs,
-    Snapshot,
-    StageInputs,
-    clean_commit,
-    committed_slice,
-)
-from coreref.api.catalog import Catalog
-from coreref.api.environment import (
+from coreref._internal.snapshot import Snapshot, clean_commit, committed_slice
+from coreref.api.build.environment import (
     CheckedCommand,
     CommandPin,
     ImagePin,
     pinned_image,
 )
+from coreref.api.build.outputs import SliceInputs
+from coreref.api.build.route import Route, StageInputs, StageSpec
 from coreref.api.errors import CatalogError
-from coreref.api.manifest import Manifest, ManifestFile
-from coreref.api.project import Project
-from coreref.api.records import LocalRecord, Ref, Requirement
-from coreref.api.route import Route, StageSpec
-from coreref.api.variants import PackageInput, Variants
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import LocalRecord, Ref, Requirement
+from coreref.api.packages.variants import PackageInput, Variants
+from coreref.api.projects.manifest import Manifest, ManifestFile
+from coreref.api.projects.project import Project
 from coreref.cli import create_deps_app
 from coreref.testing import git_repository
 
@@ -155,7 +150,9 @@ def test_snapshot_tracks_inputs_of_release_stages(tmp_path: Path, catalog: Catal
             configuration={"flags": tuple(flags)},
         )
 
-    snapshot = Snapshot(project, route, stage_inputs=stage_inputs)
+    snapshot = Snapshot(
+        project, route, stage_inputs=stage_inputs, variants=project.install_variants
+    )
     original = snapshot.inputs("first")
     before = original.key()
     assert snapshot.metadata(original)["commit"] == "first"

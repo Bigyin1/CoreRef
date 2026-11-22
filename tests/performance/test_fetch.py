@@ -7,8 +7,8 @@ from functools import partial
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from coreref.api.graph import Graph
-from coreref.api.records import InstalledRecord
+from coreref.api.packages.records import InstalledRecord
+from coreref.api.projects.graph import Graph
 from tests.performance.support import Content, Registry, check_files, fetch, graph_setup
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]

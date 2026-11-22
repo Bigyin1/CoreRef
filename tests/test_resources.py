@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
-from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Record, Ref
 
 
 def test_installed_paths_and_payload_are_detached_and_read_only(tmp_path: Path) -> None:

@@ -8,7 +8,7 @@ from typing import Literal
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from coreref.api.graph import Graph
+from coreref.api.projects.graph import Graph
 from tests.performance.support import Registry
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]

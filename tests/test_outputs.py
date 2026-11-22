@@ -5,13 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.artifacts import SliceInputs
-from coreref.api.catalog import Catalog
+from coreref.api.build.outputs import Outputs, Producer, SliceInputs
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.graph import Graph
-from coreref.api.outputs import Outputs, Producer, read_producers
-from coreref.api.records import LocalRecord, Ref
-from coreref.api.variants import Variants
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.packages.variants import Variants
+from coreref.api.projects.graph import Graph
 from coreref.testing import Sandbox, environment
 from coreref.testing.operations import trace_operations
 
@@ -93,7 +92,7 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         index = store.publish(
             graph, inputs, {"abstract.lef": output}, {}, producers={"layout": producer}
         )
-        assert read_producers(index) == {"layout": producer}
+        assert Outputs.producers(index) == {"layout": producer}
         assert store.publish(graph, inputs, {}, {}).ref == index.ref
 
         reader = env.new_catalog()

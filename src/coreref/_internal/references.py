@@ -5,7 +5,7 @@ from __future__ import annotations
 from edify import RegexBuilder
 
 from ..api.errors import InvalidPackage
-from ..api.records import Ref
+from ..api.packages.records import Ref
 
 _ALPHANUMERIC = RegexBuilder().any_of().range("a", "z").range("0", "9").end()
 _NAME_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).any_of_chars("_-").end()

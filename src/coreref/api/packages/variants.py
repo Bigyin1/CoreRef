@@ -10,11 +10,11 @@ from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
-from .._internal.recipe import _RECIPE_ENV
-from .._internal.references import from_conan_reference
-from .._internal.types import NativeGraph
-from .errors import InvalidPackage
-from .graph import Graph
+from ..._internal.recipe import _RECIPE_ENV
+from ..._internal.references import from_conan_reference
+from ..._internal.types import NativeGraph
+from ..errors import InvalidPackage
+from ..projects.graph import Graph
 from .records import Dependency, LocalRecord, Ref
 
 if TYPE_CHECKING:

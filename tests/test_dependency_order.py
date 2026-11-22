@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage
-from coreref.api.graph import Graph
+from coreref.api.packages.catalog import Catalog
+from coreref.api.projects.graph import Graph
 from tests.helpers import local_record, release
 
 

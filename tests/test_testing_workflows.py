@@ -7,9 +7,9 @@ import pytest
 from dulwich.objects import Commit
 from dulwich.repo import Repo
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError
-from coreref.api.graph import Graph
+from coreref.api.packages.catalog import Catalog
+from coreref.api.projects.graph import Graph
 from coreref.testing import (
     FixtureFile,
     LocalServer,

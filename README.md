@@ -12,9 +12,9 @@ uv sync --frozen
 ```
 
 ```python
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.projects.graph import Graph
+from coreref.api.packages.records import Ref
 
 catalog = Catalog()
 cpu = Ref("soc.cpu/1.0")

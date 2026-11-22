@@ -4,32 +4,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from shutil import copyfile
 from tempfile import TemporaryDirectory
 
-from .._internal.recipe import _RECIPE_ENV
-from .artifacts import fingerprint
-from .catalog import Catalog
-from .outputs import PRODUCER_NAMESPACE, Producer
-from .records import JSON, Ref
-from .route import StageSpec
-from .variants import Variants
+from ..api.build.outputs import PRODUCER_NAMESPACE, Producer
+from ..api.build.route import RecipeStage
+from ..api.packages.catalog import Catalog
+from ..api.packages.records import JSON, Ref
+from ..api.packages.variants import Variants
+from .hashing import fingerprint
+from .recipe import _RECIPE_ENV
 
 # Staged name -> exact producer and filename in its binary package.
 Bindings = Mapping[str, tuple[Producer, str]]
 _PRODUCER_TEMPLATE = _RECIPE_ENV.get_template("producer.py.j2")
-
-
-@dataclass(frozen=True)
-class RecipeStage:
-    """A stage declaration with the inputs and arguments its runner accepts."""
-
-    spec: StageSpec
-    inputs: tuple[str, ...]
-    command: tuple[str, ...]
 
 
 class ProducerRecipes:
@@ -183,6 +173,3 @@ def _bindings(
         for name in sorted((inputs & set(outputs[group])) - produced):
             bindings[name] = (producer, name)
     return bindings
-
-
-__all__ = ["ProducerRecipes", "RecipeStage"]

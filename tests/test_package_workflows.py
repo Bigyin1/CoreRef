@@ -13,11 +13,11 @@ from dulwich import porcelain
 from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer
 
 pytestmark = pytest.mark.conan_remote

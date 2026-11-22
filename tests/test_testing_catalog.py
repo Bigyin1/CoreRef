@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.graph import Graph
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer, Sandbox
 
 pytestmark = pytest.mark.conan_remote

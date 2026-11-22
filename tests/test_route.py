@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.route import Route
+from coreref.api.build.route import Route
 
 
 def test_imports_share_named_stages_in_a_diamond(tmp_path: Path) -> None:

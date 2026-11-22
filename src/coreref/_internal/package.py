@@ -9,14 +9,21 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from ..api.errors import Conflict, InvalidPackage, NotFound
-from ..api.records import Dependency, InstalledRecord, LocalRecord, Record, Ref, Requirement
+from ..api.packages.records import (
+    Dependency,
+    InstalledRecord,
+    LocalRecord,
+    Record,
+    Ref,
+    Requirement,
+)
 from .graph import GraphData, ResolvedConanGraph
 from .recipe import ConsumerRecipe, LocalRecipe, StoredRecipe
 from .references import from_conan_reference, to_conan_reference
 from .types import NativePackage
 
 if TYPE_CHECKING:
-    from ..api.catalog import Catalog
+    from ..api.packages.catalog import Catalog
 
 
 class StoredPackage:

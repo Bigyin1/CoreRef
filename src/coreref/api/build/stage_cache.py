@@ -9,11 +9,11 @@ from enum import Enum
 from pathlib import Path
 from shutil import copyfile
 
-from .._internal.artifacts import ArtifactStore, OutputIndex
-from .artifacts import file_digest, fingerprint
-from .catalog import Catalog
-from .query import SearchQuery
-from .records import JSON, LocalRecord, Ref
+from ..._internal.artifacts import ArtifactStore, OutputIndex
+from ..._internal.hashing import file_digest, fingerprint
+from ..packages.catalog import Catalog
+from ..packages.query import SearchQuery
+from ..packages.records import JSON, LocalRecord, Ref
 
 
 class CacheMode(str, Enum):

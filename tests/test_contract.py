@@ -7,11 +7,11 @@ from typing import cast
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import JSON, LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import JSON, LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 from tests.helpers import graph_json, local_record, release, resolve_published
 
 
