@@ -70,6 +70,8 @@ classDiagram
 | `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
 | `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
 | `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
+| `catalog.pack(record, *, dependencies=(), lockfile=None)` | Упаковать локально и получить `InstalledRecord` с точной ревизией |
+| `catalog.upload(ref)` | Загрузить в реестр уже упакованную точную ревизию из локального кэша |
 | `Ref.from_fields(namespace, component, version, *, revision=None)` | Создание из отдельных координат |
 | `catalog.info(ref)` | Метаданные `Record` |
 | `catalog.get(ref)` / `catalog.get_with_sources(ref)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
@@ -318,6 +320,28 @@ Conan-рецептов по `PackageInput` с опциями и проектно
 `build_missing=True` разрешает Conan собрать указанный компонент, если
 нужный бинарный вариант отсутствует. Публикация рецепта и готового варианта
 имеют отдельные вызовы `publish_recipe()` и `publish()`.
+
+## Файлы артефактов и общий кэш стадий
+
+`coreref.tools.artifacts` хранит каждый файл в отдельном Conan-пакете с SHA-256
+в версии. `ArtifactStore.pack_index(key, files)` возвращает `OutputIndex` с
+точными Ref, размерами и хешами. Flow может сохранить `index.document()` в
+`payload["output_index"]` своего пакета. Потребитель читает оглавление через
+`OutputIndex.from_record(record)` и получает нужный файл через
+`ArtifactStore.get(index.outputs[name])`. Хранилище проверяет размер и SHA-256
+после установки.
+
+Conan lockfile фиксирует RREV выбранного пакета оглавления. Ссылки на файлы
+содержатся внутри этой ревизии оглавления. Обычное разрешение графа охватывает
+зависимости проекта, а файлы запрашиваются по мере использования.
+[Conan lockfiles](https://docs.conan.io/2/tutorial/versioning/lockfiles.html)
+
+`coreref.tools.stage_cache.StageInvocation.key(directory, inputs)` рассчитывает
+ключ по именам и байтам входов, аргументам команды, платформе и digest образа.
+`StageCache` восстанавливает и публикует файлы через тот же `ArtifactStore`.
+`SliceInputs.key()` рассчитывает ключ среза по Git-коммиту, lockfile,
+точным зависимостям и окружению, которые передаёт Flow. Flow также
+определяет порядок запуска стадий и файлы, доступные потребителям.
 
 ## Стандартный manifest.yml
 

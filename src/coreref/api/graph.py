@@ -100,13 +100,13 @@ class Graph:
             neighbors[source].append(target)
         return {ref: tuple(targets) for ref, targets in neighbors.items()}
 
-    def _publish(self) -> InstalledRecord:
+    def _pack(self) -> InstalledRecord:
         if self._local is None:
             raise InvalidPackage(
-                "Only a local graph can be published; use a LocalRecord for a new package"
+                "Only a local graph can be packed; use a LocalRecord for a new package"
             )
         _ = self.record
-        return self._local.publish(resolved=self._package.graph)
+        return self._local.pack(resolved=self._package.graph)
 
     @property
     def requirements(self) -> tuple[Ref, ...]:

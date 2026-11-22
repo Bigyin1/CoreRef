@@ -14,7 +14,7 @@ from .records import Dependency, InstalledRecord, LocalRecord, Record, Ref
 
 
 class Catalog:
-    """Publish and search packages using an already configured Conan client."""
+    """Pack, publish, and search packages using an already configured Conan client."""
 
     def __init__(
         self, home: str | Path | None = None, *, remote: str | None = None, timeout: float = 60
@@ -66,15 +66,35 @@ class Catalog:
     ) -> InstalledRecord:
         """Publish a local description or reuse a previously resolved local graph."""
         self._client.require_remote()
+        installed = self.pack(record, dependencies=dependencies, lockfile=lockfile)
+        self._client.upload(str(installed.ref))
+        return installed
+
+    def pack(
+        self,
+        record: LocalRecord | Graph,
+        *,
+        dependencies: tuple[Dependency, ...] = (),
+        lockfile: Path | None = None,
+    ) -> InstalledRecord:
+        """Export a package to the local cache and return its exact reference."""
         if isinstance(record, Graph):
             if dependencies or lockfile is not None:
                 raise InvalidPackage(
                     "A resolved graph already defines its dependencies and lockfile"
                 )
             if record.catalog is not self:
-                raise InvalidPackage("Publish the graph through its own catalog")
-            return record._publish()
-        return self._local_package(record, dependencies, lockfile).publish()
+                raise InvalidPackage("Pack the graph through its own catalog")
+            return record._pack()
+        return self._local_package(record, dependencies, lockfile).pack()
+
+    def upload(self, ref: Ref) -> None:
+        """Upload an exact recipe and its locally packed binaries."""
+        self._client.require_remote()
+        if ref.revision is None:
+            raise InvalidPackage("Upload requires an exact recipe revision")
+        self._client.cache_path(str(ref))
+        self._client.upload(str(ref))
 
     def _package(self, ref: Ref) -> StoredPackage:
         return StoredPackage(self, ref)

@@ -219,7 +219,11 @@ class ConanClient:
             raise CatalogError("Conan returned an invalid recipe index") from exc
         entries: dict[str, RecipeRevisions] = {}
         for group in groups.values():
-            if "error" in group:
+            error = group.get("error")
+            if isinstance(error, str):
+                # Conan's list output serializes RecipeNotFoundException as text.
+                if error.startswith("Recipe not found: '"):
+                    continue
                 raise CatalogError("Could not search the package registry")
             entries.update(
                 (key, value) for key, value in group.items() if isinstance(value, RecipeRevisions)

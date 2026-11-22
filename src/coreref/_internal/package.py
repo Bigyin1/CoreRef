@@ -341,12 +341,12 @@ class LocalPackage:
     def resolved(self) -> PackageGraph:
         return PackageGraph(self._catalog, self.record, self.graph, packages={})
 
-    def publish(self, *, resolved: ResolvedConanGraph | None = None) -> InstalledRecord:
+    def pack(self, *, resolved: ResolvedConanGraph | None = None) -> InstalledRecord:
         record = self._publication_record()
         if resolved is None and self.dependencies:
             resolved = self.resolved.graph
         recipe = LocalRecipe(record, tuple(str(dep) for dep in self.dependencies))
-        with TemporaryDirectory(prefix="coreref-publish-") as temporary:
+        with TemporaryDirectory(prefix="coreref-pack-") as temporary:
             directory = Path(temporary)
             recipe.write(directory)
             recipe.copy_files(directory)
@@ -401,9 +401,7 @@ class LocalPackage:
             raise InvalidPackage("Conan did not return the exported recipe reference")
         pinned = reference.repr_notime()
         recipe = StoredRecipe(self._client.cache_path(pinned), reference=pinned)
-        installed = recipe.installed(native.root.conanfile, with_sources=False)
-        self._client.upload(pinned)
-        return installed
+        return recipe.installed(native.root.conanfile, with_sources=False)
 
     @staticmethod
     def _local_path(path: Path) -> Path:
