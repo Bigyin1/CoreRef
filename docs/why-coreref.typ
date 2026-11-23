@@ -134,9 +134,9 @@
   )
 ]
 
-CMake задаёт правила сборки и генерации исходников. Исходники подключают
-заголовки, например из стандартной библиотеки и Boost. Линкер подключает нужные
-скомпилированные библиотеки.
+*Исходники, файлы CMake, проектные флаги компилятора и скрипт линкера
+разрабатываются вместе в одном репозитории.* Внешние заголовки и библиотеки
+подключаются отдельно.
 #link("https://cmake.org/cmake/help/latest/command/add_custom_command.html#examples-generating-files")[CMake]
 · #link("https://clang.llvm.org/docs/Toolchain.html")[Clang]
 · #link("https://sourceware.org/binutils/docs/ld.html#Scripts")[Линкерные скрипты]
