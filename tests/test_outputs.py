@@ -1,6 +1,8 @@
 """Check publication, selective retrieval, and on-demand outputs through the SDK."""
 
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -183,3 +185,104 @@ def test_indexed_output_fetch_can_be_retried_after_the_exact_artifact_is_uploade
         uploaded = env.publish(LocalRecord(artifact_ref.without_revision(), files={"data": source}))
         assert uploaded.ref == artifact_ref
         assert consumer.get(record, (source.name,))[source.name].read_text() == "macro layout"
+
+
+def test_outputs_with_same_names_keep_their_own_artifact_paths(tmp_path: Path) -> None:
+    with environment(tmp_path) as env:
+        names = ("abstract.lef", "timing.lib")
+        cpu, dma = (
+            _publish_views(env, component, (*names, "final.gds")) for component in ("cpu", "dma")
+        )
+        reader = Outputs(env.new_catalog())
+        with trace_operations() as operations:
+            cpu_files = reader.get(cpu, names)
+            dma_files = reader.get(dma, names)
+            assert reader.get(cpu, names) == cpu_files
+        for record, files in ((cpu, cpu_files), (dma, dma_files)):
+            for name in names:
+                assert files[name].read_text() == f"{record.ref.component}:{name}"
+        assert operations.package_downloads == 4
+
+
+def _publish_views(env: Sandbox, component: str, names: tuple[str, ...]) -> Record:
+    graph = Graph(env.catalog, LocalRecord(env.ref(component)))
+    lock = graph.create_lockfile(env.root / f"{component}.lock")
+    inputs = SliceInputs(graph.record.ref, "first", lock, (), {})
+    files = env.package(
+        graph.record.ref, files={name: f"{component}:{name}" for name in names}
+    ).files
+    return Outputs(env.catalog)._publish(graph, inputs, files, {})
+
+
+def test_second_artifact_upload_failure_keeps_the_previous_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with environment(tmp_path) as env:
+        names = ("abstract.lef", "timing.lib")
+        first = _publish_views(env, "block", names)
+        publish = _second_release(env, names)
+        uploaded = _interrupt_upload(env.catalog, monkeypatch, publish)
+        reader = env.new_catalog()
+        assert reader.get(uploaded).files["data"].read_text().startswith("second:")
+        assert reader.info(first.ref.without_revision()).ref == first.ref
+        locked = Graph(reader, first.ref.without_revision()).create_lockfile(
+            tmp_path / "consumer.lock"
+        )
+        assert _read_views(reader, first, names) == {name: f"block:{name}" for name in names}
+
+        second = publish()
+        cold = env.new_catalog()
+        assert cold.info(first.ref.without_revision()).ref == second.ref
+        assert _read_views(cold, second, names) == {name: f"second:{name}" for name in names}
+        pinned = Graph(cold, first.ref.without_revision(), lockfile=locked).record
+        assert isinstance(pinned, Record) and pinned.ref == first.ref
+        assert _read_views(cold, pinned, names) == {name: f"block:{name}" for name in names}
+
+
+def _second_release(env: Sandbox, names: tuple[str, ...]) -> Callable[[], Record]:
+    graph, inputs = _project(env)
+    files = env.package(graph.record.ref, files={name: f"second:{name}" for name in names}).files
+    return partial(
+        Outputs(env.catalog)._publish, graph, replace(inputs, commit="second"), files, {}
+    )
+
+
+def _interrupt_upload(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch, publish: Callable[[], Record]
+) -> Ref:
+    upload = catalog._upload
+    uploaded: list[Ref] = []
+
+    def fail_second(ref: Ref) -> None:
+        if uploaded:
+            raise RuntimeError("Second upload interrupted")
+        upload(ref)
+        uploaded.append(ref)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(catalog, "_upload", fail_second)
+        with pytest.raises(RuntimeError, match="Second upload interrupted"):
+            publish()
+    (first,) = uploaded
+    return first
+
+
+def _read_views(catalog: Catalog, record: Record, names: tuple[str, ...]) -> dict[str, str]:
+    return {name: path.read_text() for name, path in Outputs(catalog).get(record, names).items()}
+
+
+def test_zero_byte_drc_report_is_a_present_output(tmp_path: Path) -> None:
+    with environment(tmp_path) as env:
+        graph, inputs = _project(env)
+        names = ("routing_drc.rpt", "timing.rpt")
+        files = env.package(
+            graph.record.ref, files={"routing_drc.rpt": "", "timing.rpt": "timing"}
+        ).files
+        record = Outputs(env.catalog)._publish(graph, inputs, files, {})
+        cold = env.new_catalog()
+        metadata = cold.info(record.ref)
+        reader = Outputs(cold)
+        assert reader.available(metadata) == set(names)
+        assert _read_views(cold, metadata, names) == {"routing_drc.rpt": "", "timing.rpt": "timing"}
+        with pytest.raises(ValueError, match=r"missing outputs.*absent\.rpt"):
+            reader.get(metadata, ("absent.rpt",))

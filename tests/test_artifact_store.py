@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from shutil import rmtree
 
 import pytest
 
@@ -193,3 +194,70 @@ def test_shared_cache_refuses_multiple_revisions_for_one_key(
             invocation, tmp_path, inputs=(), outputs=("netlist.v",), action=unexpected_build
         )
     assert output.read_text() == "working result"
+
+
+def test_failed_multi_output_cache_restore_keeps_previous_files(
+    conan_server: LocalServer, tmp_path: Path
+) -> None:
+    publisher = Catalog(conan_server.configure(tmp_path / "publisher"))
+    consumer = Catalog(conan_server.configure(tmp_path / "consumer"))
+    invocation = StageInvocation("route", ("openroad",), f"tool@sha256:{'a' * 64}", "linux/amd64")
+    names = ("abstract.lef", "timing.lib")
+
+    def write_outputs(label: str) -> None:
+        for name in names:
+            (tmp_path / name).write_text(f"{label} {name}")
+
+    def no_build() -> None:
+        pytest.fail("An invalid cache hit must surface the verification failure")
+
+    StageCache(publisher, CacheMode.WRITE).run(
+        invocation, tmp_path, inputs=(), outputs=names, action=lambda: write_outputs("new")
+    )
+    (entry,) = consumer.search_refs(SearchQuery(namespace="coreref-stage"))
+    index = OutputIndex.from_record(consumer.info(entry))
+    assert index is not None
+    installed = consumer.get(Ref(index.outputs[names[1]].ref))
+    timing = installed.files["data"]
+    timing.write_text("broken")
+    write_outputs("old")
+
+    cache = StageCache(consumer, CacheMode.READ)
+    with pytest.raises(ValueError, match="Artifact verification failed"):
+        cache.run(invocation, tmp_path, inputs=(), outputs=names, action=no_build)
+    assert [(tmp_path / name).read_text() for name in names] == [f"old {name}" for name in names]
+    timing.write_text("new timing.lib")
+    assert cache.run(invocation, tmp_path, inputs=(), outputs=names, action=no_build)
+    assert [(tmp_path / name).read_text() for name in names] == [f"new {name}" for name in names]
+
+
+def test_stage_cache_survives_moving_between_checkouts(
+    conan_server: LocalServer, tmp_path: Path
+) -> None:
+    writer = Catalog(conan_server.configure(tmp_path / "writer"))
+    producer = tmp_path / "producer"
+    consumer = tmp_path / "consumer checkout"
+    for checkout in (producer, consumer):
+        checkout.mkdir()
+        (checkout / "constraints.sdc").write_text("create_clock -period 10")
+    invocation = StageInvocation(
+        "synth", ("yosys", "synth.tcl"), f"tool@sha256:{'a' * 64}", "linux/amd64"
+    )
+    files = ("constraints.sdc",)
+    names = ("netlist.v",)
+
+    def synthesize() -> None:
+        (producer / names[0]).write_bytes((producer / files[0]).read_bytes())
+
+    def no_build() -> None:
+        pytest.fail("The second checkout should reuse the stage")
+
+    StageCache(writer, CacheMode.WRITE).run(
+        invocation, producer, inputs=files, outputs=names, action=synthesize
+    )
+    rmtree(producer)
+    reader = Catalog(conan_server.configure(tmp_path / "reader"))
+    assert StageCache(reader, CacheMode.READ).run(
+        invocation, consumer, inputs=files, outputs=names, action=no_build
+    )
+    assert (consumer / names[0]).read_text() == "create_clock -period 10"

@@ -1,16 +1,20 @@
 """Exercise the common manifest, routes and release inputs used by a tool flow."""
 
 import json
+from collections.abc import Mapping
 from importlib.metadata import version
+from os import utime
 from pathlib import Path
 from types import MappingProxyType
 
 import pytest
 from typer.testing import CliRunner
 
+from coreref._internal.artifacts import OutputIndex
+from coreref._internal.cache import StageInvocation
 from coreref._internal.editor import ManifestFile
 from coreref._internal.snapshot import SliceInputs, Snapshot, clean_commit, committed_slice
-from coreref.api.build import Route, Stage, StageSpec
+from coreref.api.build import Outputs, Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
 from coreref.api.packages import Catalog, LocalRecord, PackageInput, Ref, Requirement, SearchQuery
 from coreref.api.projects import Manifest, Project
@@ -325,3 +329,59 @@ def test_publish_rtl_registers_ready_recipe_groups_without_building_them(
     assert len(refs) == 3
     assert len([ref for ref in refs if ref.component.startswith("uv-runtime-")]) == 1
     assert all(ref.revision is not None for ref in refs)
+
+
+class _ClockProject(Project):
+    @property
+    def route(self) -> Route:
+        return Route([StageSpec(name="timing", outputs=("timing.rpt",))])
+
+    def _stage(self, _spec: StageSpec) -> Stage:
+        constraints = self.source / "constraints.sdc"
+        return Stage(
+            action=lambda: (self.build_dir / "timing.rpt").write_bytes(constraints.read_bytes()),
+            files={"constraints.sdc": constraints},
+            always_run=True,
+        )
+
+
+def test_readme_and_same_size_sdc_edits_have_different_slice_effects(
+    tmp_path: Path, catalog: Catalog
+) -> None:
+    checkout = git_repository(
+        tmp_path / "block",
+        {".gitignore": ".build/\n", "constraints.sdc": "create_clock -period 10\n"},
+    )
+    git_upstream(checkout, tmp_path / "upstream.git")
+    project = _ClockProject(checkout, Manifest(ref="demo.clock/1.0"), catalog)
+    lock = project.lock()
+    git_commit(checkout, {lock.name: lock.read_bytes()}, push=True)
+    first = project.publish("timing")
+
+    readme = git_commit(checkout, {"README.md": "Documentation update"}, push=True)
+    documented = project.publish("timing")
+    assert isinstance(first.payload, Mapping) and isinstance(documented.payload, Mapping)
+    assert first.payload["commit"] != documented.payload["commit"] == readme
+    initial = OutputIndex.from_record(first)
+    assert initial is not None
+    assert OutputIndex.from_record(documented) == initial
+
+    changed = _commit_sdc_with_original_stat(checkout)
+    revised = project.publish("timing")
+    assert isinstance(revised.payload, Mapping) and revised.payload["commit"] == changed
+    updated = OutputIndex.from_record(revised)
+    assert updated is not None and updated.key != initial.key
+    assert Outputs(catalog).get(revised, ("timing.rpt",))["timing.rpt"].read_text().endswith("20\n")
+
+
+def _commit_sdc_with_original_stat(checkout: Path) -> str:
+    constraints = checkout / "constraints.sdc"
+    origin = constraints.stat()
+    invocation = StageInvocation("timing", ("openroad",), f"tool@sha256:{'a' * 64}", "linux/amd64")
+    stage_key = invocation._key(checkout, (constraints.name,))
+    changed = git_commit(checkout, {"constraints.sdc": "create_clock -period 20\n"}, push=True)
+    utime(constraints, ns=(origin.st_atime_ns, origin.st_mtime_ns))
+    assert constraints.stat().st_size == origin.st_size
+    assert constraints.stat().st_mtime_ns == origin.st_mtime_ns
+    assert invocation._key(checkout, (constraints.name,)) != stage_key
+    return changed

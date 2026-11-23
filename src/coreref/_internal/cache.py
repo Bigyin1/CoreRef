@@ -90,10 +90,12 @@ class StageCache:
         index = OutputIndex.from_record(self._catalog.info(refs[0]))
         if index is None or index.key != key or set(index.outputs) != set(outputs):
             raise ValueError(f"Invalid shared cache index {refs[0]}")
-        for name, artifact in index.outputs.items():
+        # Verify the complete cache entry before replacing any working output.
+        restored = {name: self._artifacts.get(artifact) for name, artifact in index.outputs.items()}
+        for name, source in restored.items():
             output = directory / name
             output.parent.mkdir(parents=True, exist_ok=True)
-            copyfile(self._artifacts.get(artifact), output)
+            copyfile(source, output)
         return True
 
     def _publish(self, stage: str, key: str, directory: Path, outputs: tuple[str, ...]) -> None:
