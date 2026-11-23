@@ -24,6 +24,7 @@ sources = graph.get_sources((graph.record.ref,))
 Стандартный формат проекта CoreRef — `manifest.yml`. С дополнением `coreref[cli]`
 доступны группы Typer `deps` и `workspace` для включения в CLI своего flow. Собственные форматы также поддерживаются.
 
+- [Зачем CoreRef. Сравнение сборки C++ и RTL-to-GDS (Typst)](docs/why-coreref.typ).
 - [Публичный API и связи классов](docs/interfaces.md).
 - [Примеры работы с RTL, LIB/LEF и результатами маршрута](docs/use-cases.md).
 - [Разработка и проверки](docs/development.md).
