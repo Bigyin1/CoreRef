@@ -14,7 +14,8 @@
 #show heading.where(level: 2): set text(size: 15pt)
 #show link: set text(fill: rgb("#235d92"))
 
-#let columns(count) = (1fr,) + (13pt, 1fr) * (count - 1)
+#let stage-gap = 13pt
+#let columns(count) = (1fr,) + (stage-gap, 1fr) * (count - 1)
 #let arrow = text(size: 12pt, fill: muted)[→]
 
 #let card(title, detail, fill: white) = block(
@@ -60,6 +61,32 @@
   )
 }
 
+#let technology-library() = layout(size => {
+  let middle = size.width / 2
+  let step = (size.width + stage-gap) / 5
+  let synthesis = middle - step
+  let implementation = middle + step
+  let wire = 0.7pt + muted
+
+  block(width: 100%, height: 26pt, above: 0pt, below: 0pt)[
+    #place(top + left, dx: synthesis, dy: 15pt,
+      line(length: 2 * step, stroke: wire))
+    #place(top + left, dx: middle, dy: 15pt,
+      line(end: (0pt, 11pt), stroke: wire))
+    #for x in (synthesis, implementation) [
+      #place(top + left, dx: x, line(end: (0pt, 15pt), stroke: wire))
+      #place(top + left, dx: x - 2.5pt,
+        polygon((0pt, 4pt), (2.5pt, 0pt), (5pt, 4pt), fill: muted))
+    ]
+  ]
+  align(center)[
+    #block(above: 0pt, inset: (x: 10pt, y: 5pt), radius: 4pt, fill: rgb("#f1edf7"))[
+      #text(size: 9.6pt, weight: "bold")[Технологическая библиотека] \
+      #text(size: 8.7pt, fill: muted)[Зависимость проекта · Liberty, LEF]
+    ]
+  ]
+})
+
 = Зачем CoreRef
 
 Как и сборка C++, аппаратный маршрут проходит через промежуточные представления.
@@ -98,9 +125,9 @@ CMake конфигурирует сборку. Её правила могут з
 #block(breakable: false)[
   #inputs(
     [],
-    feed[SDC, Tcl синтеза \ Liberty],
+    feed[SDC, Tcl синтеза],
     feed[Tcl для DFT],
-    feed[SDC, Tcl для BE \ LEF и Liberty],
+    feed[SDC, Tcl для BE],
     feed[Модели RC],
   )
   #pipeline(
@@ -110,6 +137,7 @@ CMake конфигурирует сборку. Её правила могут з
     card([Физическая реализация], [Innovus \ разведённый дизайн], fill: blue),
     card([Экспорт и анализ], [GDS \ LIB (Liberty), LEF \ SPEF, отчёты], fill: green),
   )
+  #technology-library()
 ]
 
 *Проектные ограничения SDC и Tcl-скрипты — часть исходного кода наравне с RTL.*
