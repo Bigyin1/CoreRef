@@ -51,6 +51,15 @@
   #text(size: 11pt, fill: muted)[↓]
 ]
 
+#let inputs(..cells) = {
+  let items = cells.pos()
+  grid(
+    columns: columns(items.len()),
+    align: center + bottom,
+    ..items.intersperse([]),
+  )
+}
+
 = Зачем CoreRef
 
 Как и сборка C++, аппаратный маршрут проходит через промежуточные представления.
@@ -59,30 +68,39 @@
 
 == Сборка C++ на примере Clang и LLVM
 
-#pipeline(
-  card([Исходники C++], [`.cpp` и заголовки], fill: blue),
-  card([Подготовка], [CMake \ кодогенерация \ (если нужна)], fill: amber),
-  card([Фронтенд], [Clang \ AST], fill: blue),
-  card([Оптимизация], [LLVM IR], fill: blue),
-  card([Генерация кода], [объектные файлы `.o`], fill: blue),
-  card([Компоновка], [исполняемый файл], fill: green),
-)
+#block(breakable: false)[
+  #inputs(
+    [],
+    feed[Опции CMake],
+    feed[Флаги компилятора],
+    [],
+    [],
+    feed[Скрипт линкера \ Флаги линковки],
+  )
+  #pipeline(
+    card([Исходники C++], [`.cpp` и заголовки], fill: blue),
+    card([Подготовка], [CMake \ кодогенерация \ (если нужна)], fill: amber),
+    card([Фронтенд], [Clang \ AST], fill: blue),
+    card([Оптимизация], [LLVM IR], fill: blue),
+    card([Генерация кода], [объектные файлы `.o`], fill: blue),
+    card([Компоновка], [исполняемый файл], fill: green),
+  )
+]
 
 CMake конфигурирует сборку. Её правила могут запускать генераторы, чьи
 результаты компилируются вместе с остальными исходниками.
 #link("https://cmake.org/cmake/help/latest/command/add_custom_command.html#examples-generating-files")[CMake]
 · #link("https://clang.llvm.org/docs/Toolchain.html")[Clang]
+· #link("https://sourceware.org/binutils/docs/ld.html#Scripts")[Линкерные скрипты]
 
 == Аппаратный маршрут от RTL до GDS
 
 #block(breakable: false)[
-  #grid(
-    columns: columns(5),
-    align: center + bottom,
-    [], [],
-    feed[SDC, Tcl синтеза \ Liberty], [],
-    feed[Tcl для DFT], [],
-    feed[SDC, Tcl для BE \ LEF и Liberty], [],
+  #inputs(
+    [],
+    feed[SDC, Tcl синтеза \ Liberty],
+    feed[Tcl для DFT],
+    feed[SDC, Tcl для BE \ LEF и Liberty],
     feed[Модели RC],
   )
   #pipeline(
