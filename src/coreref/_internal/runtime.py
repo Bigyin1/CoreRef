@@ -21,9 +21,11 @@ class ProducerRuntime:
     """Run a Python module with packages locked in a producer's project."""
 
     project: Path
-    module: str
+    module: str | None = None
 
     def _arguments(self) -> tuple[str, ...]:
+        if self.module is None:
+            return ("-m", "coreref._internal.producer")
         if ":" in self.module:
             return ("-m", "coreref._internal.producer", self.module)
         return ("-m", self.module)

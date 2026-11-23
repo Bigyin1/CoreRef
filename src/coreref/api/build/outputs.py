@@ -149,9 +149,9 @@ class Outputs:
         bindings = {}
         for target, (record, name) in external.items():
             available = self._producers(record)
-            for group, files in self._groups.items():
-                if name in files and group in available:
-                    bindings[target] = available[group], name
+            for group, producer in available.items():
+                if name in self._group_files(group, producer):
+                    bindings[target] = producer, name
                     break
         return bindings
 
@@ -185,8 +185,8 @@ class Outputs:
             available.update(links)
             if not self._build_missing:
                 return available
-        for group in self._producers(record):
-            available.update(self._groups.get(group, ()))
+        for group, producer in self._producers(record).items():
+            available.update(self._group_files(group, producer))
         return available
 
     def get(self, record: Record, names: tuple[str, ...]) -> dict[str, Path]:
@@ -218,18 +218,19 @@ class Outputs:
         missing: set[str],
     ) -> dict[str, Path]:
         declared = self._producers(record)
-        selected = {
-            group: missing.intersection(names)
-            for group, names in self._groups.items()
-            if group in declared and missing.intersection(names)
-        }
+        groups = {name: self._group_files(name, producer) for name, producer in declared.items()}
+        selected = {name: missing.intersection(files) for name, files in groups.items()}
         unavailable = missing - set().union(*selected.values())
         if unavailable:
             raise ValueError(f"{record.ref} is missing outputs: {', '.join(sorted(unavailable))}")
         files: dict[str, Path] = {}
         for group, names in selected.items():
-            files.update(self._get_group(declared[group], index, names, self._groups[group]))
+            if names:
+                files.update(self._get_group(declared[group], index, names, groups[group]))
         return files
+
+    def _group_files(self, group: str, producer: Producer) -> tuple[str, ...]:
+        return producer.outputs if producer.outputs is not None else self._groups.get(group, ())
 
     def _get_group(
         self, producer: Producer, index: OutputIndex, names: set[str], group: tuple[str, ...]

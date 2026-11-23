@@ -16,7 +16,9 @@ from typing import Literal
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..packages.records import JSON
+from ..packages.records import JSON, Record
+
+StageTransform = Callable[[Path, Path, Mapping[str, JSON]], None]
 
 
 class CacheMode(str, Enum):
@@ -36,8 +38,9 @@ class StageSpec(BaseModel):
 
     ``needs`` names direct predecessor stages. ``outputs`` lists relative
     paths within the build directory. ``purpose`` determines whether the
-    stage can participate in publication. Release stages can depend on
-    other release stages.
+    stage can participate in publication. During publication ``checks``
+    adds validation stages. ``recipe`` groups stages in a rebuildable
+    package, and ``recipe_outputs`` selects which of their files it exports.
     """
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -46,28 +49,69 @@ class StageSpec(BaseModel):
     outputs: tuple[str, ...] = Field(strict=False)
     needs: tuple[str, ...] = Field(default=(), strict=False)
     purpose: Literal["release", "development"] = "release"
+    checks: tuple[str, ...] = Field(default=(), strict=False)
+    recipe: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$")
+    recipe_outputs: tuple[str, ...] | None = Field(default=None, strict=False)
 
 
 @dataclass(frozen=True, kw_only=True)
 class Stage:
     """Bind a declared stage to a callable and its tracked inputs.
 
-    ``action`` is called with no arguments. ``inputs`` lists filenames
-    prepared in the build directory. ``files`` identifies source paths for
-    the release snapshot. ``configuration`` contributes to both local
+    A transform receives an isolated working directory, a log path and
+    JSON configuration. CoreRef stages its declared inputs and checks
+    its outputs before making them available. Use a module-level function
+    to publish the same transform as a rebuild recipe. Set cache=True
+    when the inputs and configuration fully determine its outputs.
+
+    If a transform omits ``inputs``, CoreRef uses its ``files`` and all
+    outputs of direct predecessors. Explicit ``inputs`` select filenames
+    from those sources or from the build directory. The keys in ``files``
+    are staged names and its values are source paths.
+
+    ``action`` is called with no arguments and uses the build directory
+    directly. ``configuration`` contributes to both local
     execution and release inputs, while ``local_configuration`` applies
     only to local runs. ``bundled_inputs`` identifies inputs already
     shipped with the producer's implementation. Set ``always_run`` when
     the action must execute even if the local executor can reuse its outputs.
+    ``ready()`` checks stage-specific prerequisites. A shared
+    ``prepare(stages)`` callback can compute inputs for selected stages in one
+    operation. ``artifacts`` binds staged input names to named outputs from
+    published packages. CoreRef fetches them locally or pins their producers
+    in the rebuild recipe.
     """
 
-    action: Callable[[], object]
-    inputs: tuple[str, ...] = ()
+    action: Callable[[], object] | None = None
+    transform: StageTransform | None = None
+    cache: bool = False
+    inputs: tuple[str, ...] | None = None
     files: Mapping[str, Path] = field(default_factory=dict)
     configuration: Mapping[str, JSON] = field(default_factory=dict)
     local_configuration: Mapping[str, JSON] = field(default_factory=dict)
     bundled_inputs: tuple[str, ...] = ()
     always_run: bool = False
+    ready: Callable[[], bool] | None = None
+    prepare: Callable[[tuple[StageSpec, ...]], None] | None = None
+    artifacts: Mapping[str, tuple[Record, str]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (self.action is None) == (self.transform is None):
+            raise ValueError("A stage must declare exactly one action or transform")
+        if self.transform is None:
+            if self.cache or self.artifacts:
+                raise ValueError("Stage cache and artifact inputs require a transform")
+        else:
+            self._validate_transform_inputs()
+
+    def _validate_transform_inputs(self) -> None:
+        overlap = self.files.keys() & self.artifacts.keys()
+        if overlap:
+            raise ValueError(f"Stage has two sources for {', '.join(sorted(overlap))}")
+        if any(record.ref.revision is None for record, _ in self.artifacts.values()):
+            raise ValueError("Stage artifacts require an exact package revision")
+        for name in (*self.files, *self.artifacts, *(self.inputs or ())):
+            _output_path(name)
 
 
 class _Override(BaseModel):
@@ -116,6 +160,7 @@ class Route:
         _validate_outputs(stages)
         for stage in stages:
             self._validate_needs(stage)
+            self._validate_publication(stage)
         try:
             self.order = tuple(
                 TopologicalSorter({stage.name: stage.needs for stage in stages}).static_order()
@@ -196,6 +241,13 @@ class Route:
                     f"Release stage {stage.name!r} depends on development stage {name!r}"
                 )
 
+    def _validate_publication(self, stage: StageSpec) -> None:
+        if set(stage.recipe_outputs or ()) - set(stage.outputs):
+            raise ValueError(f"Stage {stage.name!r} exports unknown recipe outputs")
+        for name in stage.checks:
+            if self[name].purpose != "release":
+                raise ValueError(f"Publication check {name!r} must be a release stage")
+
     def __getitem__(self, name: str) -> StageSpec:
         """Return the stage specification or raise ``ValueError`` for an unknown name."""
         try:
@@ -247,6 +299,13 @@ class Route:
                 "name": stage.name,
                 "needs": tuple(sorted(stage.needs)),
                 "outputs": tuple(sorted(stage.outputs)),
+                **({"checks": tuple(sorted(stage.checks))} if stage.checks else {}),
+                **({"recipe": stage.recipe} if stage.recipe is not None else {}),
+                **(
+                    {"recipe_outputs": tuple(sorted(stage.recipe_outputs))}
+                    if stage.recipe_outputs is not None
+                    else {}
+                ),
             }
             for stage in sorted(self._release(), key=lambda stage: stage.name)
         ]

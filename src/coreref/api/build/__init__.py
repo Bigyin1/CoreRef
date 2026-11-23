@@ -7,6 +7,6 @@ shared stage cache access.
 """
 
 from .outputs import Outputs
-from .route import CacheMode, Route, Stage, StageSpec
+from .route import CacheMode, Route, Stage, StageSpec, StageTransform
 
-__all__ = ["CacheMode", "Outputs", "Route", "Stage", "StageSpec"]
+__all__ = ["CacheMode", "Outputs", "Route", "Stage", "StageSpec", "StageTransform"]

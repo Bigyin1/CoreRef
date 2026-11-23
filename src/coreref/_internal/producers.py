@@ -29,6 +29,9 @@ class RecipeStage:
     inputs: tuple[str, ...]
     command: tuple[str, ...] = ()
     configuration: Mapping[str, JSON] = field(default_factory=dict)
+    transform: str | None = None
+    files: Mapping[str, Path] = field(default_factory=dict)
+    artifacts: Bindings = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -135,7 +138,11 @@ class ProducerRecipes:
             )
             (directory / "conanfile.py").write_text(recipe, encoding="utf-8")
             exact = self._variants.publish_recipe(directory)
-        return Producer(ref=str(exact), prerequisites=tuple(sorted(closure)))
+        return Producer(
+            ref=str(exact),
+            prerequisites=tuple(sorted(closure)),
+            outputs=outputs if any(stage.transform is not None for stage in stages) else None,
+        )
 
     def _stage_inputs(
         self, directory: Path, stages: tuple[RecipeStage, ...], bindings: Bindings
@@ -143,12 +150,19 @@ class ProducerRecipes:
         staged = directory / "inputs"
         staged.mkdir()
         available = set(bindings)
+        sources: dict[str, Path] = {}
         commands: list[JSON] = []
         for stage in stages:
-            for name in sorted(set(stage.inputs) - available):
+            for name in stage.inputs:
+                source = stage.files.get(name)
+                if name in available and source is not None and sources.get(name) != source:
+                    raise ValueError(f"Conflicting input {name!r} in producer recipe")
+                if name in available:
+                    continue
                 target = staged / name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                copyfile(self._prepared / name, target)
+                copyfile(source or self._prepared / name, target)
+                sources[name] = source or self._prepared / name
             available.update(stage.inputs)
             available.update(stage.spec.outputs)
             commands.append(
@@ -158,6 +172,7 @@ class ProducerRecipes:
                     "inputs": stage.inputs,
                     "outputs": tuple(sorted(stage.spec.outputs)),
                     **({"configuration": stage.configuration} if stage.configuration else {}),
+                    **({"transform": stage.transform} if stage.transform is not None else {}),
                 }
             )
         return commands
@@ -207,10 +222,15 @@ def _bindings(
     outputs: Mapping[str, tuple[str, ...]],
     external: Bindings,
 ) -> dict[str, tuple[Producer, str]]:
-    inputs = {name for stage in stages for name in stage.inputs}
+    inputs = {name for stage in stages for name in stage.inputs if name not in stage.files}
     produced = {name for stage in stages for name in stage.spec.outputs}
-    bindings = {name: external[name] for name in sorted(inputs & external.keys())}
+    explicit: dict[str, tuple[Producer, str]] = {}
+    for stage in stages:
+        for name, source in stage.artifacts.items():
+            if explicit.setdefault(name, source) != source:
+                raise ValueError(f"Conflicting artifact binding {name!r} in producer recipe")
+    bindings = {name: external[name] for name in sorted(inputs & external.keys())} | explicit
     for group, producer in published.items():
-        for name in sorted((inputs & set(outputs[group])) - produced):
+        for name in sorted((inputs & set(outputs[group])) - produced - explicit.keys()):
             bindings[name] = (producer, name)
     return bindings

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from ..api.packages.records import JSON, Ref
 from .hashing import file_digest, fingerprint
+from .producer import transform_identity
 from .runtime import producer_files
 
 if TYPE_CHECKING:
@@ -118,7 +119,9 @@ class Snapshot:
             for stage, inputs in stages.items()
             for name, path in inputs.files.items()
         )
-        if project._producer_handler is not None:
+        if project._producer_handler is not None or any(
+            stage.transform for stage in stages.values()
+        ):
             files.update(
                 (f"producer/{name}", path if path.is_file() else None)
                 for name, path in producer_files(project.source).items()
@@ -135,7 +138,20 @@ class Snapshot:
                     mode="json", exclude={"ref", "dependencies", "files", "payload"}
                 ),
                 "route": self._route._release_document(),
-                "stages": {name: inputs.configuration for name, inputs in stages.items()},
+                "stages": {
+                    name: inputs.configuration
+                    if inputs.transform is None
+                    else {
+                        "configuration": dict(inputs.configuration),
+                        "transform": transform_identity(inputs.transform),
+                        "inputs": inputs.inputs,
+                        "artifacts": {
+                            alias: (str(record.ref), output)
+                            for alias, (record, output) in inputs.artifacts.items()
+                        },
+                    }
+                    for name, inputs in stages.items()
+                },
             },
             variants={name: package.binary_reference for name, package in self._variants().items()},
             local_outputs=outputs or {},

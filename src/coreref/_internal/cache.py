@@ -49,6 +49,28 @@ class StageInvocation:
         )
 
 
+@dataclass(frozen=True)
+class TransformInvocation:
+    """Identify a declared Python transform and its execution configuration."""
+
+    name: str
+    environment: dict[str, JSON]
+    configuration: dict[str, JSON]
+    outputs: tuple[str, ...]
+
+    def _key(self, directory: Path, inputs: tuple[str, ...]) -> str:
+        return fingerprint(
+            {
+                "schema_version": 2,
+                "stage": self.name,
+                "transform": self.environment,
+                "configuration": self.configuration,
+                "outputs": tuple(sorted(self.outputs)),
+                "inputs": {name: file_digest(directory / name) for name in inputs},
+            }
+        )
+
+
 class StageCache:
     """Restore or upload verified outputs for an exact build invocation."""
 
@@ -59,7 +81,7 @@ class StageCache:
 
     def run(
         self,
-        invocation: StageInvocation,
+        invocation: StageInvocation | TransformInvocation,
         directory: Path,
         *,
         inputs: tuple[str, ...],

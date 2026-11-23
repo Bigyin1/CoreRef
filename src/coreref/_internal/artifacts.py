@@ -43,6 +43,12 @@ class Artifact(BaseModel):
             raise ValueError(f"Artifact verification failed for {self.ref}")
 
 
+def _check_output_name(name: str) -> None:
+    path = Path(name)
+    if path.is_absolute() or not path.parts or ".." in path.parts or name != path.as_posix():
+        raise ValueError(f"Invalid output name {name!r}")
+
+
 class OutputIndex(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -54,14 +60,7 @@ class OutputIndex(BaseModel):
     @classmethod
     def _output_names(cls, outputs: dict[str, Artifact]) -> dict[str, Artifact]:
         for name in outputs:
-            path = Path(name)
-            if (
-                path.is_absolute()
-                or not path.parts
-                or ".." in path.parts
-                or name != path.as_posix()
-            ):
-                raise ValueError(f"Invalid output name {name!r}")
+            _check_output_name(name)
         return outputs
 
     def extend(self, previous: OutputIndex) -> OutputIndex:
@@ -143,6 +142,14 @@ class Producer(BaseModel):
 
     ref: str
     prerequisites: tuple[str, ...] = ()
+    outputs: tuple[str, ...] | None = None
+
+    @field_validator("outputs")
+    @classmethod
+    def _check_outputs(cls, values: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        for value in values or ():
+            _check_output_name(value)
+        return values
 
     @model_validator(mode="after")
     def _check_refs(self) -> Producer:
@@ -153,4 +160,7 @@ class Producer(BaseModel):
         return self
 
     def _document(self) -> JSON:
-        return {"ref": self.ref, "prerequisites": self.prerequisites}
+        value: dict[str, JSON] = {"ref": self.ref, "prerequisites": self.prerequisites}
+        if self.outputs is not None:
+            value["outputs"] = self.outputs
+        return value

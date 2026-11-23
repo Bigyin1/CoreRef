@@ -319,32 +319,89 @@ options=..., inputs=..., runner=...)`. Например, `options={"depth": (128
 пакеты и общие зависимости, достижимые через другие ветви. Flow может
 использовать это для замены RTL макроблока его физическими представлениями.
 
-Для реализации маршрута Flow предоставляет `Route` и по одному `Stage` на
-каждый `StageSpec`. `StageSpec` задаёт имя, связи и выходы, а `Stage` связывает
-его с действием, файлами и параметрами. CoreRef использует это описание
-для локального выполнения, среза и сборки по рецепту. Готовность стадии
-и обязательные проверки перед выпуском определяет Flow.
+Flow описывает граф в `Route` и связывает имена узлов с функциями
+преобразования через `Project.stages`. `StageSpec` задаёт зависимости и
+выходы. Если `Stage` не уточняет входы, CoreRef подаёт ему указанные
+исходные файлы и выходы прямых предшественников.
 
-`Route.load(project, fragments=...)` собирает `flow.yml` из локальных
-`imports`, именованных фрагментов `use` и стадий проекта.
-`overrides.<stage>.add_needs` добавляет зависимости к любой стадии маршрута.
-Flow может передать `select`, чтобы обработать свои поля корневого YAML
-и выбрать стадии до валидации графа.
+```python
+from collections.abc import Mapping
+from functools import cached_property
+from pathlib import Path
 
-`publish(with_producers=True)` вместе с результатами публикует рецепты
-пересборки, если их объявил flow. Flow задаёт путь к функции
-`module:function` и сопоставляет имена входов с выходами других пакетов.
-CoreRef закрепляет точные рецепты и запускает обработчик в Python-окружении
-производителя по его `uv.lock`. Обработчик получает имя стадии, рабочую
-директорию, путь лога и настройки стадии и маршрута. Если проект объявляет
-обработчик пересборки, CoreRef автоматически включает `pyproject.toml`,
-`uv.lock` и `.python-version` производителя в идентичность среза.
+from coreref.api.build import Route, Stage, StageSpec
+from coreref.api.packages import JSON
+from coreref.api.projects import Project
+
+
+def normalize(work: Path, _log: Path, _config: Mapping[str, JSON]) -> None:
+    text = (work / "input.txt").read_text(encoding="utf-8")
+    (work / "normalized.txt").write_text(text.strip() + "\n", encoding="utf-8")
+
+
+class ExampleFlow(Project):
+    route = Route([StageSpec(name="normalize", outputs=("normalized.txt",))])
+
+    @cached_property
+    def stages(self) -> Mapping[str, Stage]:
+        return {
+            "normalize": Stage(
+                transform=normalize,
+                files={"input.txt": self.source / "data.txt"},
+            ),
+        }
+```
+
+CoreRef подготавливает отдельную рабочую директорию и сохраняет выходы
+после их проверки. По умолчанию `Project` может загрузить граф из
+`flow.yml` через `Route.load()`. Flow может определить свой граф и дать
+проектам только выбор готового маршрута и путей к входным файлам.
+
+`StageSpec.checks` добавляет узлы, обязательные для публикации, даже если
+они не нужны при локальной сборке цели. `recipe` позволяет объединить
+несколько стадий в один рецепт, а `recipe_outputs` перечисляет их выходы для
+этого рецепта. Если нужны готовые артефакты зависимого пакета, в `Stage.artifacts`
+можно указать пару из точной записи и имени файла. CoreRef получает только
+артефакты выбранных стадий и подаёт их под заданными именами.
+
+`publish(with_producers=True)` выводит рецепты для готовых стадий с
+`transform` из того же графа. Функция должна быть доступна на уровне модуля
+в установленном Flow производителя. CoreRef запускает её в окружении из
+`pyproject.toml`, `uv.lock` и `.python-version` и сохраняет имена выходов
+в метаданных рецепта. Для общего кэша стадия может выбрать `cache=True`,
+если её объявленные данные, параметры и закреплённое окружение определяют
+результат.
+
+### Генерация модуля Flow
+
+Автор Flow может задать маршрут и функции узлов в YAML и один раз
+сгенерировать Python-модуль командой
+`python -m coreref.api.build.codegen stage-map.yml generated_route.py`.
+Например, узел можно описать так.
+
+```yaml
+modules:
+  rtl:
+    - name: normalize
+      transform: example_flow.stages:normalize
+      files: {input.txt: rtl-source}
+      outputs: [normalized.txt]
+```
+
+`make_route(("rtl",))` выбирает модуль, а `bind_stages(project, route,
+files={"rtl-source": path})` связывает его с файлами конкретного проекта.
+Рёбра `needs` подключают выходы предыдущих преобразований. Для узлов,
+которым требуется подготовка окружения, можно объявить именованный
+адаптер в `adapters` и выбрать его полем `bind`.
+
+Модуль включается в исходники Flow. Его импорт не читает карту стадий и
+не запускает генератор.
 
 ## Именованные выходы
 
 `Outputs(catalog).get(record, names)` загружает только указанные выходы
-закреплённой ревизии. В подклассе `Project` доступен `project.outputs`,
-настроенный по группам выходов flow. С `build_missing=True` CoreRef может
+закреплённой ревизии. В `Project` те же операции доступны через
+`project.outputs`. С `build_missing=True` CoreRef может
 собрать запрошенный результат, если для него опубликован рецепт.
 `outputs.available(record)` перечисляет доступные имена без загрузки,
 `Outputs.links(record)` возвращает точные Ref готовых файлов.

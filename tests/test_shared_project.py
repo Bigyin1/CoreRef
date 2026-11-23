@@ -16,7 +16,15 @@ from coreref._internal.editor import ManifestFile
 from coreref._internal.snapshot import SliceInputs, Snapshot, clean_commit, committed_slice
 from coreref.api.build import Outputs, Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
-from coreref.api.packages import Catalog, LocalRecord, PackageInput, Ref, Requirement, SearchQuery
+from coreref.api.packages import (
+    JSON,
+    Catalog,
+    LocalRecord,
+    PackageInput,
+    Ref,
+    Requirement,
+    SearchQuery,
+)
 from coreref.api.projects import Manifest, Project
 from coreref.cli import create_deps_app
 from coreref.testing import git_commit, git_repository, git_upstream, trace_operations
@@ -404,3 +412,66 @@ def test_snapshot_tracks_producer_runtime_without_attaching_it_to_a_stage(
         assert ordinary._snapshot().inputs("committed").key() == ordinary_key
         file.write_text("original")
     assert project._snapshot().inputs("committed").key() == producer_key
+
+
+def _strip_input(work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> None:
+    assert {path.name for path in work.iterdir()} == {"input.txt"}
+    (work / "clean.txt").write_text(
+        (work / "input.txt").read_text(encoding="utf-8").strip(), encoding="utf-8"
+    )
+
+
+def _uppercase(work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> None:
+    assert {path.name for path in work.iterdir()} == {"clean.txt"}
+    (work / "upper.txt").write_text(
+        (work / "clean.txt").read_text(encoding="utf-8").upper(), encoding="utf-8"
+    )
+
+
+def test_transforms_infer_inputs_and_recipe_outputs_from_the_same_graph(
+    tmp_path: Path, catalog: Catalog
+) -> None:
+    directory = git_repository(
+        tmp_path / "project",
+        {
+            ".gitignore": ".build/\n",
+            ".python-version": "3.13.14\n",
+            "pyproject.toml": '[project]\nname = "producer-fixture"\n',
+            "uv.lock": (
+                'version = 1\n[[package]]\nname = "producer-fixture"\nsource = {virtual = "."}\n'
+            ),
+            "source": " hello world \n",
+            "flow.yml": (
+                "stages:\n"
+                "  - {name: clean, outputs: [clean.txt]}\n"
+                "  - {name: upper, needs: [clean], outputs: [upper.txt]}\n"
+            ),
+        },
+    )
+    git_upstream(directory, tmp_path / "upstream.git")
+    project = Project(directory, Manifest(ref="demo.transform/1.0"), catalog)
+    project.stages = {
+        "clean": Stage(transform=_strip_input, files={"input.txt": directory / "source"}),
+        "upper": Stage(transform=_uppercase),
+    }
+    lockfile = project.lock()
+    git_commit(directory, {lockfile.name: lockfile.read_bytes()}, push=True)
+
+    published = project.publish("clean", with_producers=True)
+    assert not (project.build_dir / "upper.txt").exists()
+    assert Outputs(catalog).available(published, producer_only=True) == {"clean.txt", "upper.txt"}
+    assert (
+        Outputs(catalog).get(published, ("clean.txt",))["clean.txt"].read_text(encoding="utf-8")
+        == "hello world"
+    )
+
+    first = project.build("upper")["upper.txt"]
+    assert first.read_text(encoding="utf-8") == "HELLO WORLD"
+    mtime = first.stat().st_mtime_ns
+    assert project.build("upper")["upper.txt"].stat().st_mtime_ns == mtime
+    source = directory / "source"
+    before = source.stat()
+    source.write_text(" hello again \n", encoding="utf-8")
+    utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert source.stat().st_size == before.st_size
+    assert project.build("upper")["upper.txt"].read_text(encoding="utf-8") == "HELLO AGAIN"
