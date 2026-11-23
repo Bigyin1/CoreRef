@@ -129,13 +129,13 @@
   )
   #dependencies(
     6,
-    dependency([Заголовки], [stdlib, Boost], ((2, 0pt),)),
+    dependency([Заголовки], [stdlib, Boost], ((0, 0pt),)),
     dependency([Бинарные библиотеки], [stdlib, Boost], ((5, 0pt),)),
   )
 ]
 
-CMake задаёт правила сборки и генерации исходников. Компилятор читает заголовки,
-например из стандартной библиотеки и Boost. Линкер подключает нужные
+CMake задаёт правила сборки и генерации исходников. Исходники подключают
+заголовки, например из стандартной библиотеки и Boost. Линкер подключает нужные
 скомпилированные библиотеки.
 #link("https://cmake.org/cmake/help/latest/command/add_custom_command.html#examples-generating-files")[CMake]
 · #link("https://clang.llvm.org/docs/Toolchain.html")[Clang]
