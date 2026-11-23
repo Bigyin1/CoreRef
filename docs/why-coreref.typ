@@ -4,6 +4,7 @@
 #let blue = rgb("#eaf2fa")
 #let green = rgb("#e9f4ef")
 #let amber = rgb("#faf2e5")
+#let violet = rgb("#f1edf7")
 
 #set document(title: "Зачем CoreRef")
 #set page(paper: "a4", margin: (x: 16mm, y: 17mm))
@@ -41,11 +42,11 @@
   )
 }
 
-#let feed(body) = align(center)[
+#let feed(body, fill: amber) = align(center)[
   #block(
     width: 100%,
     height: 33pt,
-    fill: amber,
+    fill: fill,
     inset: 4pt,
     radius: 4pt,
   )[#align(horizon, text(size: 8.7pt, body))]
@@ -91,7 +92,7 @@
           polygon((0pt, 4pt), (2.5pt, 0pt), (5pt, 4pt), fill: muted))
       ]
       #place(top + left, dx: middle - width / 2, dy: 26pt)[
-        #block(width: width, height: 38pt, inset: 4pt, radius: 4pt, fill: rgb("#f1edf7"))[
+        #block(width: width, height: 38pt, inset: 4pt, radius: 4pt, fill: violet)[
           #align(center + horizon)[
             #text(size: 9.1pt, weight: "bold", package.title) \
             #text(size: 8.5pt, fill: muted, package.detail)
@@ -190,10 +191,27 @@
 
 #pagebreak()
 
-= Текущий маршрут
+= Текущий маршрут одного проекта
 
-RTL, DFT и физическая реализация (BE) ведутся как три почти независимые
-части. Команды связывают их передачей файлов между этапами.
+*Все три части относятся к одному проекту* — хардмакроблоку или
+верхнеуровневому модулю микросхемы. RTL, DFT и физическая реализация (BE)
+ведутся почти независимо. Границы передачи RTL и DFT совпадают с границами
+их Git-репозиториев.
+
+#block(breakable: false)[
+  #inputs(
+    [],
+    feed[*Git-репозиторий DFT* \ Скрипты DFT],
+    feed(fill: violet)[*Внешние hard macro* \ Зависимости с NFS],
+    [],
+  )
+  #pipeline(
+    card([Git-репозиторий RTL], [RTL и SDC], fill: amber),
+    card([Входы BE], [BE размещает на NFS], fill: violet),
+    card([Физическая реализация], [Рабочие каталоги вне Git], fill: blue),
+    card([Результаты BE], [NFS], fill: green),
+  )
+]
 
 #table(
   columns: (21mm, 49mm, 1fr),
@@ -210,9 +228,9 @@ RTL, DFT и физическая реализация (BE) ведутся как
   [Управляющие скрипты подготовки DFT.],
   [*BE*],
   [Рабочие каталоги вне Git],
-  [Команда получает исходники от RTL и DFT и выгружает результаты физической
-   реализации на NFS.],
+  [На NFS команда хранит полученные от RTL и DFT входы и результаты
+   физической реализации. Hard macro берёт с NFS как зависимости.],
 )
 
 Чтобы повторить выпуск, нужно сопоставить версии из двух репозиториев
-с файлами, которые получила BE-команда, и результатами на NFS.
+с входными файлами BE, использованными hard macro и результатами на NFS.
