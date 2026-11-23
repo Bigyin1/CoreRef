@@ -61,28 +61,43 @@
   )
 }
 
-#let technology-library() = layout(size => {
-  let middle = size.width / 2
-  let step = (size.width + stage-gap) / 5
-  let synthesis = middle - step
-  let implementation = middle + step
+#let dependency(title, detail, ports) = (
+  title: title,
+  detail: detail,
+  ports: ports,
+)
+
+#let dependencies(count, ..packages) = layout(area => {
+  let step = (area.width + stage-gap) / count
+  let first = (step - stage-gap) / 2
+  let width = step - 6pt
   let wire = 0.7pt + muted
 
-  block(width: 100%, height: 26pt, above: 0pt, below: 0pt)[
-    #place(top + left, dx: synthesis, dy: 15pt,
-      line(length: 2 * step, stroke: wire))
-    #place(top + left, dx: middle, dy: 15pt,
-      line(end: (0pt, 11pt), stroke: wire))
-    #for x in (synthesis, implementation) [
-      #place(top + left, dx: x, line(end: (0pt, 15pt), stroke: wire))
-      #place(top + left, dx: x - 2.5pt,
-        polygon((0pt, 4pt), (2.5pt, 0pt), (5pt, 4pt), fill: muted))
-    ]
-  ]
-  align(center)[
-    #block(above: 0pt, inset: (x: 10pt, y: 5pt), radius: 4pt, fill: rgb("#f1edf7"))[
-      #text(size: 9.6pt, weight: "bold")[Технологическая библиотека] \
-      #text(size: 8.7pt, fill: muted)[Зависимость проекта · Liberty, LEF]
+  block(width: 100%, height: 65pt, above: 0pt, below: 0pt)[
+    #for package in packages.pos() [
+      #let ports = package.ports.map(((index, offset)) => first + index * step + offset)
+      #let left-x = ports.first()
+      #let right-x = ports.last()
+      #let middle = (left-x + right-x) / 2
+      #if left-x != right-x [
+        #place(top + left, dx: left-x, dy: 14pt,
+          line(length: right-x - left-x, stroke: wire))
+      ]
+      #place(top + left, dx: middle, dy: 14pt,
+        line(end: (0pt, 12pt), stroke: wire))
+      #for x in ports [
+        #place(top + left, dx: x, line(end: (0pt, 14pt), stroke: wire))
+        #place(top + left, dx: x - 2.5pt,
+          polygon((0pt, 4pt), (2.5pt, 0pt), (5pt, 4pt), fill: muted))
+      ]
+      #place(top + left, dx: middle - width / 2, dy: 26pt)[
+        #block(width: width, height: 38pt, inset: 4pt, radius: 4pt, fill: rgb("#f1edf7"))[
+          #align(center + horizon)[
+            #text(size: 9.1pt, weight: "bold", package.title) \
+            #text(size: 8.5pt, fill: muted, package.detail)
+          ]
+        ]
+      ]
     ]
   ]
 })
@@ -112,41 +127,53 @@
     card([Генерация кода], [объектные файлы `.o`], fill: blue),
     card([Компоновка], [исполняемый файл], fill: green),
   )
+  #dependencies(
+    6,
+    dependency([Заголовки], [stdlib, Boost], ((2, 0pt),)),
+    dependency([Бинарные библиотеки], [stdlib, Boost], ((5, 0pt),)),
+  )
 ]
 
-CMake конфигурирует сборку. Её правила могут запускать генераторы, чьи
-результаты компилируются вместе с остальными исходниками.
+CMake задаёт правила сборки и генерации исходников. Компилятор читает заголовки,
+например из стандартной библиотеки и Boost. Линкер подключает нужные
+скомпилированные библиотеки.
 #link("https://cmake.org/cmake/help/latest/command/add_custom_command.html#examples-generating-files")[CMake]
 · #link("https://clang.llvm.org/docs/Toolchain.html")[Clang]
 · #link("https://sourceware.org/binutils/docs/ld.html#Scripts")[Линкерные скрипты]
+· #link("https://www.boost.org/doc/libs/latest/more/getting_started/unix-variants.html")[Boost]
 
 == Аппаратный маршрут от RTL до GDS
 
 #block(breakable: false)[
   #inputs(
     [],
-    feed[SDC, Tcl синтеза],
     feed[Tcl для DFT],
+    feed[SDC, Tcl синтеза],
     feed[SDC, Tcl для BE],
     feed[Модели RC],
   )
   #pipeline(
     card([Исходники RTL], [SystemVerilog, Verilog], fill: blue),
+    card([Подготовка DFT], [RTL с тестовой логикой], fill: blue),
     card([Синтез], [Genus \ вентильный нетлист], fill: blue),
-    card([DFT], [нетлист со scan-логикой], fill: blue),
     card([Физическая реализация], [Innovus \ разведённый дизайн], fill: blue),
     card([Экспорт и анализ], [GDS \ LIB (Liberty), LEF \ SPEF, отчёты], fill: green),
   )
-  #technology-library()
+  #dependencies(
+    5,
+    dependency([Soft IP], [RTL], ((0, 0pt),)),
+    dependency([Иерархический DFT], [RTL блока с DFT], ((1, 0pt),)),
+    dependency([Технологическая библиотека], [Liberty, LEF], ((2, 0pt), (3, -9pt))),
+    dependency([Hard IP], [Liberty, LEF, GDS], ((3, 9pt), (4, 0pt))),
+  )
 ]
 
 *Проектные ограничения SDC и Tcl-скрипты — часть исходного кода наравне с RTL.*
 Общие скрипты и настройки для DFT, синтеза и физической реализации может
 поставлять сам Flow.
 
-На выходе наряду с GDS можно получить
-временную модель блока (Liberty) и его физический абстракт (LEF). Порядок DFT
-зависит от маршрута.
+У Hard IP физическая реализация использует Liberty и LEF, а при экспорте
+топологии подключается GDS блока. Порядок DFT зависит от маршрута.
 #link("https://openroad.readthedocs.io/en/latest/main/openroad/dft/README.html")[DFT]
 · #link("https://openroad-flow-scripts.readthedocs.io/en/latest/tutorials/FlowTutorial.html")[RTL-to-GDS]
 · #link("https://openroad.readthedocs.io/en/latest/main/openroad/README.html#abstract-lef-support")[LEF]
