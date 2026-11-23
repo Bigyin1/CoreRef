@@ -15,7 +15,7 @@ from ..._internal.artifacts import Producer
 from ..._internal.cache import StageCache, StageInvocation
 from ..._internal.pipeline import BuildStage, Pipeline
 from ..._internal.producers import ProducerRecipes, RecipeStage
-from ..._internal.runtime import ProducerRuntime, producer_files
+from ..._internal.runtime import ProducerRuntime
 from ..._internal.snapshot import Snapshot, clean_commit, committed_slice
 from ..build.outputs import Outputs
 from ..build.route import CacheMode
@@ -233,9 +233,6 @@ class Project:
 
     def _announce_release(self, targets: tuple[str, ...]) -> None:
         """Report automatically selected targets before the build starts."""
-
-    def _producer_files(self) -> dict[str, Path]:
-        return {f"producer/{name}": path for name, path in producer_files(self.source).items()}
 
     def _producer_members(self) -> Mapping[str, tuple[str, ...]]:
         """Map each rebuildable output group to the stage names it runs.

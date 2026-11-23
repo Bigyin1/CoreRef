@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from ..api.packages.records import JSON, Ref
 from .hashing import file_digest, fingerprint
+from .runtime import producer_files
 
 if TYPE_CHECKING:
     from ..api.build.route import Route, Stage, StageSpec
@@ -117,6 +118,11 @@ class Snapshot:
             for stage, inputs in stages.items()
             for name, path in inputs.files.items()
         )
+        if project._producer_handler is not None:
+            files.update(
+                (f"producer/{name}", path if path.is_file() else None)
+                for name, path in producer_files(project.source).items()
+            )
         return SliceInputs(
             project=project.record.ref,
             commit=commit,

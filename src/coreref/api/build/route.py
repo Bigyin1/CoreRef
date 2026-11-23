@@ -70,11 +70,31 @@ class Stage:
     always_run: bool = False
 
 
+class _Override(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    add_needs: tuple[str, ...] = Field(default=(), strict=False)
+
+
 class _Document(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     imports: list[str] = Field(default_factory=list)
+    use: list[str] = Field(default_factory=list)
     stages: list[StageSpec] = Field(default_factory=list)
+    overrides: dict[str, _Override] = Field(default_factory=dict)
+
+    def expand(self, fragments: Mapping[str, tuple[StageSpec, ...]]) -> list[StageSpec]:
+        if len(self.use) != len(set(self.use)):
+            raise ValueError("Duplicate route module in use")
+        missing = set(self.use) - fragments.keys()
+        if missing:
+            raise ValueError(f"Unknown route module in use: {', '.join(sorted(missing))}")
+        return [stage for name in self.use for stage in fragments[name]] + self.stages
+
+
+class _ConfiguredDocument(_Document):
+    model_config = ConfigDict(extra="allow", strict=True)
 
 
 class Route:
@@ -104,16 +124,34 @@ class Route:
             raise ValueError(f"Cycle in flow stages: {exc.args[1]}") from exc
 
     @classmethod
-    def load(cls, project: Path, path: Path = Path("flow.yml")) -> Route:
-        """Load a route YAML file within the project directory.
+    def load(
+        cls,
+        project: Path,
+        path: Path = Path("flow.yml"),
+        *,
+        fragments: Mapping[str, tuple[StageSpec, ...]] | None = None,
+        select: Callable[[list[StageSpec], Mapping[str, object]], list[StageSpec]] | None = None,
+    ) -> Route:
+        """Compose a route and validate the selected stage graph.
 
-        ``path`` defaults to ``flow.yml`` relative to the project. Each
-        import is relative to the YAML file that declares it and must resolve
-        inside the project directory. Loading validates the route without
-        invoking any stage handlers.
+        Imports are relative to the YAML file that declares them and must
+        resolve inside the project. Names in ``use`` select supplied route
+        fragments. Entries in ``overrides`` can extend a stage's ``needs``
+        with ``add_needs``.
+
+        A flow can supply ``select`` to interpret its own keys from the root
+        YAML document and choose stages before graph validation. The callback
+        receives the composed stages and the flow-specific keys. It validates
+        those keys and returns the stages to use. Loading invokes no stage
+        handlers.
         """
         project = project.resolve()
-        return cls(_read_stages(project, project / path))
+        documents = _read_documents(project, project / path, allow_options=select is not None)
+        stages = [stage for document in documents for stage in document.expand(fragments or {})]
+        stages = _apply_overrides(stages, documents)
+        if select is not None:
+            stages = select(stages, documents[-1].model_extra or {})
+        return cls(stages)
 
     def validate_handlers(
         self,
@@ -214,10 +252,11 @@ class Route:
         ]
 
 
-def _read_stages(project: Path, path: Path) -> list[StageSpec]:
+def _read_documents(project: Path, path: Path, *, allow_options: bool) -> list[_Document]:
+    root = path.resolve()
     seen: set[Path] = set()
     visiting: set[Path] = set()
-    stages: list[StageSpec] = []
+    documents: list[_Document] = []
 
     def visit(file: Path) -> None:
         file = file.resolve()
@@ -228,26 +267,43 @@ def _read_stages(project: Path, path: Path) -> list[StageSpec]:
         if file in seen:
             return
         visiting.add(file)
-        document = _read_document(file)
+        document = _read_document(file, allow_options=allow_options and file == root)
         for dependency in document.imports:
             visit(file.parent / dependency)
-        stages.extend(document.stages)
+        documents.append(document)
         visiting.remove(file)
         seen.add(file)
 
-    visit(path)
-    return stages
+    visit(root)
+    return documents
 
 
-def _read_document(file: Path) -> _Document:
+def _read_document(file: Path, *, allow_options: bool) -> _Document:
+    schema = _ConfiguredDocument if allow_options else _Document
     try:
-        document = _Document.model_validate(yaml.safe_load(file.read_text(encoding="utf-8")))
+        document = schema.model_validate(yaml.safe_load(file.read_text(encoding="utf-8")))
     except (ValueError, yaml.YAMLError) as exc:
         raise ValueError(f"Invalid flow YAML {file}: {exc}") from exc
     for dependency in document.imports:
         if Path(dependency).is_absolute():
             raise ValueError(f"Expected a relative flow import in {file}: {dependency}")
     return document
+
+
+def _apply_overrides(stages: list[StageSpec], documents: list[_Document]) -> list[StageSpec]:
+    needs: dict[str, tuple[str, ...]] = {}
+    for document in documents:
+        for name, override in document.overrides.items():
+            needs[name] = (*needs.get(name, ()), *override.add_needs)
+    unknown = needs.keys() - {stage.name for stage in stages}
+    if unknown:
+        raise ValueError(f"Unknown stage in overrides: {', '.join(sorted(unknown))}")
+    return [
+        stage.model_copy(update={"needs": (*stage.needs, *needs[stage.name])})
+        if stage.name in needs
+        else stage
+        for stage in stages
+    ]
 
 
 def _validate_outputs(stages: list[StageSpec]) -> None:

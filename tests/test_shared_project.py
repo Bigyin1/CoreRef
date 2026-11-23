@@ -288,12 +288,10 @@ class ProducerProject(Project):
                 pytest.fail(f"Publication of RTL must not run {spec.name}")
             (self.build_dir / "rtl.v").write_text("module block; endmodule")
 
-        return Stage(action=emit, files=self._producer_files())
+        return Stage(action=emit)
 
     def _stage_ready(self, spec: StageSpec, *, for_recipe: bool) -> bool:
-        if for_recipe:
-            return all(path.is_file() for path in self._producer_files().values())
-        return super()._stage_ready(spec, for_recipe=False)
+        return for_recipe or super()._stage_ready(spec, for_recipe=False)
 
     def _producer_members(self) -> dict[str, tuple[str, ...]]:
         return {"synth": ("synth",), "layout": ("layout",)}
@@ -385,3 +383,24 @@ def _commit_sdc_with_original_stat(checkout: Path) -> str:
     assert constraints.stat().st_mtime_ns == origin.st_mtime_ns
     assert invocation._key(checkout, (constraints.name,)) != stage_key
     return changed
+
+
+def test_snapshot_tracks_producer_runtime_without_attaching_it_to_a_stage(
+    tmp_path: Path, catalog: Catalog
+) -> None:
+    manifest = Manifest(ref="demo.block/1.0")
+    project = ProducerProject(tmp_path, manifest, catalog)
+    project.lock()
+    ordinary = _ClockProject(tmp_path, manifest, catalog)
+    runtime = {name: tmp_path / name for name in (".python-version", "pyproject.toml", "uv.lock")}
+    for file in runtime.values():
+        file.write_text("original")
+
+    producer_key = project._snapshot().inputs("committed").key()
+    ordinary_key = ordinary._snapshot().inputs("committed").key()
+    for file in runtime.values():
+        file.write_text("changed")
+        assert project._snapshot().inputs("committed").key() != producer_key
+        assert ordinary._snapshot().inputs("committed").key() == ordinary_key
+        file.write_text("original")
+    assert project._snapshot().inputs("committed").key() == producer_key
