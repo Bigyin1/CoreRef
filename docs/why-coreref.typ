@@ -156,7 +156,11 @@ CMake задаёт правила сборки и генерации исход�
     card([Исходники RTL], [SystemVerilog, Verilog], fill: amber),
     card([Подготовка DFT], [RTL с тестовой логикой], fill: blue),
     card([Синтез], [Genus \ вентильный нетлист], fill: blue),
-    card([Физическая реализация], [Innovus \ разведённый дизайн], fill: blue),
+    card(
+      [Физическая реализация],
+      [Innovus \ #text(size: 8pt)[floorplan / placement / \ CTS / routing]],
+      fill: blue,
+    ),
     card([Экспорт и анализ], [GDS \ LIB (Liberty), LEF \ SPEF, отчёты], fill: green),
   )
   #dependencies(
