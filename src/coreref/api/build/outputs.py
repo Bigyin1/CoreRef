@@ -9,7 +9,7 @@ stored directly in their binary.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter
 
 from ..._internal.artifacts import ArtifactStore, OutputIndex, Producer
+from ..._internal.hashing import file_digest
 from ..errors import InvalidPackage, NotFound
 from ..packages.catalog import Catalog
 from ..packages.query import SearchQuery
@@ -25,14 +26,6 @@ from ..packages.records import JSON, InstalledRecord, LocalRecord, PackageInput,
 if TYPE_CHECKING:
     from ..._internal.snapshot import SliceInputs
     from ..projects.graph import Graph
-
-
-def _merge_producers(
-    older: Mapping[str, Producer], newer: Mapping[str, Producer]
-) -> dict[str, Producer]:
-    if any(older[group] != newer[group] for group in older.keys() & newer.keys()):
-        raise ValueError("Producer recipes changed for the same project slice")
-    return dict(older) | dict(newer)
 
 
 def _metadata(
@@ -89,7 +82,25 @@ class Outputs:
         )
         return self._catalog._pack(record)
 
-    def _publish(
+    def _published_slice(
+        self, inputs: SliceInputs, files: Mapping[str, Path]
+    ) -> InstalledRecord | None:
+        """Return a matching publication or reject different outputs for an existing slice."""
+        self._catalog._client.require_remote()
+        key = inputs.key()
+        digests = None
+        for record, index in self._slice_revisions(inputs.project, key):
+            if digests is None:
+                digests = {name: file_digest(path) for name, path in files.items()}
+            if digests == {name: artifact.sha256 for name, artifact in index.outputs.items()}:
+                return InstalledRecord(record)
+        if digests is not None:
+            raise ValueError(
+                f"Slice {key} of {inputs.project} is already published with different outputs"
+            )
+        return None
+
+    def _publish_new_slice(
         self,
         graph: Graph,
         inputs: SliceInputs,
@@ -98,42 +109,35 @@ class Outputs:
         *,
         producers: Mapping[str, Producer] | None = None,
     ) -> InstalledRecord:
-        """Publish files before exposing the index, extending previous outputs of that slice."""
+        """Publish the files of a new slice before exposing its index."""
         if graph.catalog is not self._catalog or not isinstance(graph.record, LocalRecord):
             raise InvalidPackage("Publishing outputs requires a local graph for this catalog")
         if graph.record.ref != inputs.project or inputs.commit is None:
             raise InvalidPackage("Publishing outputs requires a matching, committed project")
         self._catalog._client.require_remote()
-        current = self._store.pack_index(inputs.key(), files)
-        previous, registered = self._previous(inputs.project, current.key)
-        index = current.extend(previous) if previous is not None else current
-        merged = _merge_producers(registered, producers or {})
-        record = replace(graph.record, payload=_metadata(index, payload, merged), files={})
-        self._store.upload(current.outputs)
+        index = self._store.pack_index(inputs.key(), files)
+        record = replace(graph.record, payload=_metadata(index, payload, producers or {}), files={})
+        self._store.upload(index.outputs)
         return self._catalog._publish_graph(graph, record)
 
-    def _previous(self, root: Ref, key: str) -> tuple[OutputIndex | None, dict[str, Producer]]:
+    def _slice_revisions(self, root: Ref, key: str) -> Iterator[tuple[Record, OutputIndex]]:
         try:
             latest = self._catalog.info(root)
         except NotFound:
-            return None, {}
+            return
         index = OutputIndex.from_record(latest)
         if index is not None and index.key == key:
-            return index, self._producers(latest)
+            yield latest, index
         query = SearchQuery(
             namespace=root.namespace, component=root.component, version=root.version
         )
-        merged = None
-        producers: dict[str, Producer] = {}
         for ref in self._catalog.search_refs(query, all_revisions=True):
             if ref == latest.ref:
                 continue
             record = self._catalog.info(ref)
-            previous = OutputIndex.from_record(record)
-            if previous is not None and previous.key == key:
-                merged = previous if merged is None else merged.extend(previous)
-                producers = _merge_producers(producers, self._producers(record))
-        return merged, producers
+            index = OutputIndex.from_record(record)
+            if index is not None and index.key == key:
+                yield record, index
 
     @staticmethod
     def _producers(record: Record) -> dict[str, Producer]:

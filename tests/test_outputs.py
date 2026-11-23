@@ -24,34 +24,37 @@ def _project(env: Sandbox) -> tuple[Graph, SliceInputs]:
     return graph, SliceInputs(graph.record.ref, "first", lock, (), {})
 
 
-def test_publish_extends_same_slice_across_other_revisions(tmp_path: Path) -> None:
+def test_retry_finds_existing_slice_across_other_revisions(tmp_path: Path) -> None:
     with environment(tmp_path) as env:
         graph, inputs = _project(env)
         output = tmp_path / "output"
         output.write_text("LEF")
         store = Outputs(env.catalog)
-        local = store._pack(inputs, {"abstract.lef": output}, {})
-        assert store.get(local, ("abstract.lef",))["abstract.lef"].read_text() == "LEF"
-        first = store._publish(graph, inputs, {"abstract.lef": output}, {"type": "macro"})
+        first = store._publish_new_slice(graph, inputs, {"abstract.lef": output}, {"type": "macro"})
         assert graph.record.payload == {"author": "flow"}
         assert isinstance(graph.record, LocalRecord) and not graph.record.files
         assert str(first.ref) in env.diagnostics()
 
-        output.write_text("Liberty")
-        store._publish(graph, replace(inputs, commit="other"), {"timing.lib": output}, {})
-        assert env.new_catalog().info(first.ref.without_revision()).ref != first.ref
-        updated = store._publish(graph, inputs, {"timing.lib": output}, {})
-        with trace_operations() as operations:
-            links = store.links(updated)
-        assert links is not None and set(links) == {"abstract.lef", "timing.lib"}
-        assert all(ref.revision is not None for ref in links.values())
-        assert not operations.commands
+        liberty = tmp_path / "timing.lib"
+        liberty.write_text("Liberty")
+        newer = store._publish_new_slice(
+            graph, replace(inputs, commit="other"), {"timing.lib": liberty}, {}
+        )
         consumer = Outputs(env.new_catalog())
+        retry = consumer._published_slice(inputs, {"abstract.lef": output})
+        assert retry is not None and retry.ref == first.ref
+        with trace_operations() as operations:
+            links = store.links(first)
+        assert links is not None and set(links) == {"abstract.lef"}
+        assert links["abstract.lef"].revision is not None
+        assert not operations.commands
         assert consumer.get(first, ()) == {}
-        paths = consumer.get(updated, ("timing.lib", "abstract.lef"))
-        assert list(map(Path.read_text, paths.values())) == ["Liberty", "LEF"]
-        with pytest.raises(ValueError, match="Previously published"):
-            store._publish(graph, inputs, {"abstract.lef": output}, {})
+        assert consumer.get(retry, ("abstract.lef",))["abstract.lef"].read_text() == "LEF"
+        with pytest.raises(ValueError, match="already published with different outputs"):
+            consumer._published_slice(inputs, {"abstract.lef": output, "timing.lib": liberty})
+        with pytest.raises(ValueError, match="already published with different outputs"):
+            consumer._published_slice(inputs, {"abstract.lef": liberty})
+        assert env.catalog.info(first.ref.without_revision()).ref == newer.ref
 
 
 def test_outputs_reject_uncommitted_or_mismatched_project(tmp_path: Path, catalog: Catalog) -> None:
@@ -60,13 +63,13 @@ def test_outputs_reject_uncommitted_or_mismatched_project(tmp_path: Path, catalo
     lock = graph.create_lockfile(tmp_path / "lock")
     inputs = SliceInputs(local.ref, None, lock, (), {})
     with pytest.raises(InvalidPackage, match="matching, committed project"):
-        Outputs(catalog)._publish(graph, inputs, {}, {})
+        Outputs(catalog)._publish_new_slice(graph, inputs, {}, {})
     with pytest.raises(InvalidPackage, match="local graph for this catalog"):
-        Outputs(Catalog(tmp_path / "another-home"))._publish(graph, inputs, {}, {})
+        Outputs(Catalog(tmp_path / "another-home"))._publish_new_slice(graph, inputs, {}, {})
     release = catalog.publish(local)
     installed = Graph(catalog, release.ref)
     with pytest.raises(InvalidPackage, match="local graph"):
-        Outputs(catalog)._publish(installed, inputs, {}, {})
+        Outputs(catalog)._publish_new_slice(installed, inputs, {}, {})
 
 
 def _producer(env: Sandbox) -> Producer:
@@ -92,11 +95,13 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         output = tmp_path / "output"
         output.write_text("LEF")
         store = Outputs(env.catalog)
-        index = store._publish(
+        index = store._publish_new_slice(
             graph, inputs, {"abstract.lef": output}, {}, producers={"layout": producer}
         )
         assert Outputs._producers(index) == {"layout": producer}
-        assert store._publish(graph, inputs, {}, {}).ref == index.ref
+        retry = store._published_slice(inputs, {"abstract.lef": output})
+        assert retry is not None and retry.ref == index.ref
+        assert Outputs._producers(retry) == {"layout": producer}
 
         reader = env.new_catalog()
         groups = {"layout": ("abstract.lef", "timing.lib", "unproduced")}
@@ -113,10 +118,6 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         assert outputs.get(index, ("timing.lib",))["timing.lib"].read_text() == "Liberty"
         with pytest.raises(ValueError, match="did not produce"):
             outputs.get(index, ("unproduced",))
-
-        different = Producer(ref=str(producer.ref).replace("layout", "different"))
-        with pytest.raises(ValueError, match="Producer recipes changed"):
-            store._publish(graph, inputs, {}, {}, producers={"layout": different})
 
 
 def test_plain_packaged_files_remain_available(catalog: Catalog, tmp_path: Path) -> None:
@@ -211,7 +212,7 @@ def _publish_views(env: Sandbox, component: str, names: tuple[str, ...]) -> Reco
     files = env.package(
         graph.record.ref, files={name: f"{component}:{name}" for name in names}
     ).files
-    return Outputs(env.catalog)._publish(graph, inputs, files, {})
+    return Outputs(env.catalog)._publish_new_slice(graph, inputs, files, {})
 
 
 def test_second_artifact_upload_failure_keeps_the_previous_index(
@@ -243,7 +244,7 @@ def _second_release(env: Sandbox, names: tuple[str, ...]) -> Callable[[], Record
     graph, inputs = _project(env)
     files = env.package(graph.record.ref, files={name: f"second:{name}" for name in names}).files
     return partial(
-        Outputs(env.catalog)._publish, graph, replace(inputs, commit="second"), files, {}
+        Outputs(env.catalog)._publish_new_slice, graph, replace(inputs, commit="second"), files, {}
     )
 
 
@@ -278,7 +279,7 @@ def test_zero_byte_drc_report_is_a_present_output(tmp_path: Path) -> None:
         files = env.package(
             graph.record.ref, files={"routing_drc.rpt": "", "timing.rpt": "timing"}
         ).files
-        record = Outputs(env.catalog)._publish(graph, inputs, files, {})
+        record = Outputs(env.catalog)._publish_new_slice(graph, inputs, files, {})
         cold = env.new_catalog()
         metadata = cold.info(record.ref)
         reader = Outputs(cold)

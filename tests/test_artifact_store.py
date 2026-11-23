@@ -150,7 +150,7 @@ def test_shared_stage_cache_and_content_deduplication(
     )
 
 
-def test_index_rejects_inconsistent_and_corrupted_artifact(tmp_path: Path) -> None:
+def test_reading_an_indexed_artifact_rejects_corruption(tmp_path: Path) -> None:
     catalog = Catalog(configured_home(tmp_path / "home"))
     path = tmp_path / "source"
     path.write_text("netlist")
@@ -158,12 +158,6 @@ def test_index_rejects_inconsistent_and_corrupted_artifact(tmp_path: Path) -> No
     original = store.pack(path)
     previous = OutputIndex(key="1" * 64, outputs={"netlist.v": original})
     assert previous.outputs["netlist.v"].sha256 == file_digest(path)
-    path.write_text("updated")
-    changed = store.pack(path)
-    next_index = OutputIndex(key=previous.key, outputs={"netlist.v": changed})
-    with pytest.raises(ValueError, match="Previously published outputs changed"):
-        next_index.extend(previous)
-
     installed = catalog.get(Ref(original.ref))
     installed.files["data"].write_text("garbage")
     with pytest.raises(ValueError, match="Artifact verification failed"):

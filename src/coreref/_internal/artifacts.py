@@ -63,19 +63,6 @@ class OutputIndex(BaseModel):
             _check_output_name(name)
         return outputs
 
-    def extend(self, previous: OutputIndex) -> OutputIndex:
-        """Merge earlier outputs of the same slice, rejecting conflicting files."""
-        if self.key != previous.key:
-            raise ValueError("Cannot combine outputs of different slices")
-        changed = {
-            name
-            for name in self.outputs.keys() & previous.outputs.keys()
-            if self.outputs[name] != previous.outputs[name]
-        }
-        if changed:
-            raise ValueError(f"Previously published outputs changed: {', '.join(sorted(changed))}")
-        return OutputIndex(key=self.key, outputs=previous.outputs | self.outputs)
-
     def document(self) -> JSON:
         return {
             "schema_version": self.schema_version,

@@ -336,6 +336,12 @@ def test_publish_rtl_registers_ready_recipe_groups_without_building_them(
     assert len([ref for ref in refs if ref.component.startswith("uv-runtime-")]) == 1
     assert all(ref.revision is not None for ref in refs)
 
+    with trace_operations() as retry:
+        repeated = project.publish("rtl", with_producers=True)
+    assert repeated.ref == release.ref
+    assert repeated.payload == release.payload
+    assert all(command[0] != "upload" for command in retry.commands)
+
 
 class _ClockProject(Project):
     @property
@@ -366,8 +372,10 @@ def test_readme_and_same_size_sdc_edits_have_different_slice_effects(
 
     readme = git_commit(checkout, {"README.md": "Documentation update"}, push=True)
     documented = project.publish("timing")
-    assert isinstance(first.payload, Mapping) and isinstance(documented.payload, Mapping)
-    assert first.payload["commit"] != documented.payload["commit"] == readme
+    assert isinstance(first.payload, Mapping)
+    assert first.payload["commit"] != readme
+    assert documented.ref == first.ref
+    assert documented.payload == first.payload
     initial = OutputIndex.from_record(first)
     assert initial is not None
     assert OutputIndex.from_record(documented) == initial
@@ -378,6 +386,10 @@ def test_readme_and_same_size_sdc_edits_have_different_slice_effects(
     updated = OutputIndex.from_record(revised)
     assert updated is not None and updated.key != initial.key
     assert Outputs(catalog).get(revised, ("timing.rpt",))["timing.rpt"].read_text().endswith("20\n")
+
+    git_commit(checkout, {"constraints.sdc": "create_clock -period 10\n"}, push=True)
+    assert project.publish("timing").ref == first.ref
+    assert catalog.info(project.record.ref).ref == revised.ref
 
 
 def _commit_sdc_with_original_stat(checkout: Path) -> str:

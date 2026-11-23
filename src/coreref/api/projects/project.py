@@ -463,9 +463,10 @@ class Project:
         choose the ready terminal stages, subject to ``release_through``.
         Publication requires a clean Git checkout and an existing lockfile.
         CoreRef checks that the snapshot inputs stay unchanged during the
-        build. With ``with_producers=True``, also publish recipe groups ready
-        for rebuilding. The returned record is the published output index
-        for the project revision.
+        build. A new slice can also publish ready recipe groups with
+        ``with_producers=True``. A repeat with identical outputs returns the
+        existing publication, including its original recipe groups. Changing
+        the output names or contents of an existing slice raises ``ValueError``.
         """
         if isinstance(target, str):
             target = (target,)
@@ -477,12 +478,15 @@ class Project:
         snapshot = self._snapshot()
         with committed_slice(self.source, snapshot.inputs) as inputs:
             files = self._output_files(self.build(targets))
+            published = self.outputs._published_slice(inputs, files)
             recipes = (
                 self._publish_ready_recipes(self._ready_release(for_recipe=True))
-                if with_producers
+                if published is None and with_producers
                 else {}
             )
-        return self.outputs._publish(
+        if published is not None:
+            return published
+        return self.outputs._publish_new_slice(
             self.graph,
             inputs,
             files,
