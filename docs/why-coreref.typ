@@ -153,7 +153,7 @@ CMake задаёт правила сборки и генерации исход�
     feed[Модели RC],
   )
   #pipeline(
-    card([Исходники RTL], [SystemVerilog, Verilog], fill: blue),
+    card([Исходники RTL], [SystemVerilog, Verilog], fill: amber),
     card([Подготовка DFT], [RTL с тестовой логикой], fill: blue),
     card([Синтез], [Genus \ вентильный нетлист], fill: blue),
     card([Физическая реализация], [Innovus \ разведённый дизайн], fill: blue),
