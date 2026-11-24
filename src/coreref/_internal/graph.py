@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import cached_property
-from pathlib import Path
 
 from ..api.errors import InvalidPackage
-from ..api.records import LocalRecord, Record, Ref
+from ..api.packages.records import LocalRecord, Record, Ref
 from .types import NativeGraph, NativePackage
 
 GraphData = tuple[tuple[LocalRecord | Record, ...], tuple[tuple[Ref, Ref], ...]]
@@ -33,6 +32,15 @@ class ResolvedConanGraph:
             for package in self.native.root.conanfile.dependencies.direct_host.values()
         )
 
+    def ordered_dependencies(self, root: Ref) -> tuple[str, ...]:
+        """Select the given package's dependencies in Conan's topological order."""
+        native_root = self.native.root.ref
+        if native_root is not None and native_root.name == root.package_name:
+            return self.references
+        dependencies = self.package(root).dependencies.host.values()
+        selected = {package.ref.repr_notime() for package in dependencies}
+        return tuple(reference for reference in self.references if reference in selected)
+
     def package_ref(self, ref: Ref) -> Ref:
         return Ref(self.package(ref).ref.repr_notime())
 
@@ -49,13 +57,6 @@ class ResolvedConanGraph:
             for node in self.native.nodes
             if node.recipe == "Editable"
         )
-
-    def recipe_directory(self, ref: Ref) -> Path:
-        """Return the recipe folder already loaded for this exact graph node."""
-        directory = self.package(ref).recipe_folder
-        if directory is None:
-            raise InvalidPackage(f"Conan did not provide the recipe directory for {ref}")
-        return Path(directory)
 
     def contains(self, ref: Ref) -> bool:
         if ref.revision is not None:

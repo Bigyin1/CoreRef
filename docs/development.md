@@ -4,8 +4,6 @@
 
 Python 3.10+ и uv. Минимальная версия закреплена в `.python-version`, зависимости —
 в `uv.lock`. Ruff, mypy и CI проверяют Python 3.10. Для выбора интерпретатора используйте `UV_PYTHON=3.15 make check`.
-Edify 0.3 используется на Python 3.10, Edify 1.x — на более новых версиях.
-NetworkX выбирается resolver по поддерживаемой версии Python.
 
 | Команда | Назначение |
 |---|---|
@@ -26,10 +24,11 @@ CI проверяет обе группы тестов с общим порог�
 
 | Модуль | Ответственность |
 |---|---|
-| `tools/cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
-| `api/catalog.py`, `records.py`, `query.py` | Публикация/поиск, координаты и записи, фильтры |
-| `tools/manifest.py` | Необязательный стандарт YAML, пути и прямые объявления зависимостей |
-| `api/graph.py`, `workspace.py` | Разрешённые зависимости, рабочий LocalRecord и Git-копии |
+| `cli.py` | Подключаемые группы Typer deps/workspace без отдельной точки входа; необязательная зависимость `[cli]` |
+| `api/packages/` | Публикация/поиск, координаты и записи, фильтры |
+| `api/build/` | Локальное исполнение стадий и именованные результаты |
+| `api/projects/` | Стандартный манифест, проект, граф зависимостей и рабочие копии |
+| `api/errors.py` | Общие ошибки API |
 | `_internal/package.py` | LocalPackage, StoredPackage и PackageGraph: операции и повторное использование рецептов/установок |
 | `_internal/recipe.py`, `templates/` | Чтение метаданных и Jinja-шаблоны временных рецептов |
 | `_internal/graph.py`, `client.py` | Нативный граф и команды Conan API |
@@ -61,11 +60,11 @@ Ruff ограничивает сложность: 6, аргументы: 5 (по
 
 Workspace делегирует init/add/remove и SCM open Conan. Только conanfile.py добавляется
 в директорию зависимости из LocalRecord/зависимостей или опубликованных метаданных.
-Workspace не импортирует tools и не читает манифесты. YAML-адаптер ManifestFile.add_to_workspace
-готовит рецепт, читающий выбранный YAML; соответствующий CLI также находится в tools.
+`Workspace` управляет рабочими копиями. `ManifestFile.add_to_workspace()` готовит
+рецепт из выбранного YAML. Подключаемая команда находится в `coreref.cli`.
 Состояние workspace хранит Conan; дополнительных метаданных в checkout SDK не создаёт.
 Ref содержит только координаты; Catalog и Graph получают контекст операций явно.
-Имя содержит два сегмента `namespace.component` или четыре с `view.type`.
+Имя содержит два сегмента `namespace.component`.
 Зависимости могут задавать нативные диапазоны через `Requirement`.
 При публикации сохраняйте исходные объявления зависимостей, включая диапазоны.
 Точные выбранные версии и RREV доступны в Graph и проектном lockfile.
@@ -76,11 +75,12 @@ Editable-узлы определяются по нативному статус�
 рецепта и layout. Локальные artifacts могут отсутствовать; проверка полноты скачанных
 пакетов сохраняется. InstalledRecord.is_editable показывает происхождение записи.
 
-ManifestFile — адаптер manifest.yml, не обязательный формат flow. Install читает существующий
+Manifest описывает стандартный формат manifest.yml. ManifestFile позволяет редактировать его. Install читает существующий
 lockfile, отдельный lock разрешает объявления заново. CLI не добавляет зависимости,
 которые flow находит динамически; такой flow сохраняет lockfile итогового Graph сам.
 
-`tools/` — необязательная надстройка: стандартный YAML и готовый CLI. Основные операции
+Публичные модули сгруппированы в `api/packages/`, `api/projects/` и `api/build/`.
+`coreref.cli` предоставляет подключаемые команды Typer. Основные операции
 API принимают LocalRecord и Ref; собственные форматы flow остаются возможны.
 Workspace.add(directory, record=..., dependencies=...) принимает данные собственного flow.
 ManifestFile.add_to_workspace(workspace) — надстройка для стандартного YAML.
@@ -109,7 +109,7 @@ ManifestFile.add_to_workspace(workspace) — надстройка для ста�
 Подготовка сервера, публикация fixtures, настройка клиентов и прогрев выполняются
 вне измеряемого участка. Операции Conan измеряются три раза, по одному вызову;
 повторные быстрые операции со снимком используют калибровку pytest-benchmark.
-Отчёт содержит все отсчёты, характеристики машины/Python, версии Conan/CoreRef/NetworkX
+Отчёт содержит все отсчёты, характеристики машины/Python, версии Conan и CoreRef
 и параметры сценариев. Сравнивать результаты следует на одинаковом окружении;
 локальный Conan server не моделирует задержки удалённой сети, Nexus или Artifactory.
 
@@ -142,15 +142,15 @@ uv run --frozen pytest tests/performance -m performance --benchmark-compare
 cache без публичных remotes. Окружение процесса и пользовательский cache не меняются.
 
 ```python
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.projects import Graph
+from coreref.api.packages import LocalRecord, Ref
 from coreref.testing import environment
 
 
 def test_flow(tmp_path, monkeypatch):
     with environment(tmp_path) as sandbox:
         cpu = sandbox.package(
-            Ref("soc.cpu.rtl.default/1.0"),
+            Ref("soc.cpu/1.0"),
             sources={"cpu.sv": "module cpu; endmodule\n"},
             files={"config.json": "{}"},
         )
@@ -158,15 +158,13 @@ def test_flow(tmp_path, monkeypatch):
         cpu.payload = {"flow": "example"}
         published = sandbox.publish(cpu)
         reader = sandbox.new_catalog()  # Независимый cache, тот же сервер.
-        assert reader.get_with_sources(published.ref).files["config.json"].exists()
+        assert reader.get(published.ref, with_sources=True).files["config.json"].exists()
 
         workspace = sandbox.workspace()
         workspace.add(cpu.source, record=cpu)
         monkeypatch.chdir(workspace.path.parent)
-        graph = Graph(
-            sandbox.catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(cpu.ref,)
-        )
-        assert graph.get_with_sources()[0].is_editable
+        graph = Graph(sandbox.catalog, LocalRecord(Ref("soc.top/1.0")), dependencies=(cpu.ref,))
+        assert graph.get(with_sources=True)[0].is_editable
 ```
 
 `Sandbox.package()` создаёт новый набор входов при каждом вызове: `sources` —
@@ -200,7 +198,7 @@ def test_package_graph(tmp_path):
         links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
         records = {
             name: sandbox.package(
-                Ref(f"soc.{name}.rtl.default/1.0"),
+                Ref(f"soc.{name}/1.0"),
                 sources={f"{name}.sv": f"module {name}; endmodule\n"},
             )
             for name in links
@@ -210,7 +208,7 @@ def test_package_graph(tmp_path):
 
         # Чистый клиент скачивает рецепты с Conan server, исходники — из Git origins.
         graph = Graph(sandbox.new_catalog(), published["top"].ref)
-        assert len(graph.get_with_sources()) == 4
+        assert len(graph.get(with_sources=True)) == 4
 ```
 
 Ключи `records` — произвольные короткие имена, не Conan Ref. Через них `dependencies`
@@ -232,7 +230,7 @@ with environment(tmp_path / "infra", namespace="soc") as env:
     cpu = env.package(env.ref("cpu"), sources={"cpu.sv": "module cpu; endmodule"})
     published = env.publish(cpu)
 
-    # Обычный ManifestFile: можно менять зависимости через add/remove/save.
+    # Рабочий манифест теста: зависимости можно менять через add/remove/save.
     project = env.project(env.ref("top"), path=tmp_path / "top/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
@@ -247,7 +245,7 @@ with environment(tmp_path / "infra", namespace="soc") as env:
 `Sandbox.publish(record, dependencies=(published.ref, ...), lockfile=...)`
 публикует одну запись; готовый локальный Graph также можно передать вместо record. В публикации набора значения
 `dependencies` могут смешивать короткие имена и уже опубликованные `Ref`.
-`ref(component, version="1.0", view="rtl", type="default")` использует namespace окружения.
+`ref(component, version="1.0")` использует namespace окружения.
 `project(..., dependencies=(...))` сразу записывает зависимости; параметр `path`
 позволяет выбрать собственное имя YAML и расположение проекта.
 
@@ -259,26 +257,6 @@ Git-хелперы поддерживают `FixtureFile(content, mode=0o755)` �
 Тестовый профиль определяется через Conan `profiles.detect()`; существующий профиль
 сохраняется. `LocalServer.configure()` по умолчанию разрешает локальные Git URL;
 для явного запрета передайте `local_sources=False` в новом cache.
-
-### Подключение к pytest
-
-В `conftest.py` зависимого проекта достаточно указать:
-
-```python
-pytest_plugins = ["coreref.testing.pytest_plugin"]
-```
-
-Плагин предоставляет function-scoped фикстуры `coreref_environment`, `coreref_server`,
-`coreref_catalog`, `coreref_project` (последний создаёт `tmp_path/manifest.yml`). Они используют
-один сервер и один `env.catalog` на тест; `coreref_catalog is coreref_environment.catalog`.
-Сервер автоматически освобождается после ошибки. Создание манифеста через
-`coreref_project` само по себе не настраивает Conan-клиент.
-Окружение настраивается через обычную фикстуру `coreref_options` в `conftest.py`.
-По умолчанию она возвращает пустой словарь. CoreRef не регистрирует и не обрабатывает
-собственных маркеров; группировку тестов определяет сам flow.
-Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
-директории, выбранной тестом через `monkeypatch.chdir()`. Установка `coreref[testing]`
-включает pytest; сам `environment()` по-прежнему можно использовать без плагина.
 
 ### Обычные проекты рядом с тестом
 
@@ -307,7 +285,7 @@ tests/
 ```python
 from pathlib import Path
 from coreref.testing import environment
-from coreref.tools.manifest import ManifestFile
+from coreref.api.projects import Graph, Manifest
 
 
 def test_soc(tmp_path):
@@ -316,11 +294,13 @@ def test_soc(tmp_path):
         catalog = env.catalog
         # Flow сам читает манифесты и выполняет нужные команды.
         for name in ("stdlib", "cpu"):
-            project = ManifestFile(env.projects / name / "manifest.yml")
-            record = project.record
-            catalog.publish(record, dependencies=project.dependencies)
-        soc = ManifestFile(env.projects / "soc/manifest.yml")
-        assert len(soc.resolve(env.catalog).get_with_sources()) == 2
+            directory = env.projects / name
+            manifest = Manifest.load(directory / "manifest.yml")
+            catalog.publish(manifest.local_record(directory), dependencies=manifest.requirements)
+        directory = env.projects / "soc"
+        manifest = Manifest.load(directory / "manifest.yml")
+        graph = Graph(catalog, manifest.local_record(directory), dependencies=manifest.requirements)
+        assert len(graph.get(with_sources=True)) == 2
 ```
 
 `projects` указывает на исходное дерево; `env.projects` — отдельная рабочая копия
@@ -333,8 +313,8 @@ Git-метаданные исходных репозиториев не пере
 перезаписывается. Манифесты могут иметь любой формат: helper их не разбирает
 и автоматически не публикует пакеты.
 
-В pytest можно воспользоваться тем же методом на готовой фикстуре:
-`coreref_environment.load_projects(source, repositories=("stdlib", "cpu"))`.
+Для уже созданного окружения используйте
+`env.load_projects(source, repositories=("stdlib", "cpu"))`.
 Workspace создаётся над рабочими проектами через
 `env.workspace(directory=env.projects)`. Команды flow запускаются из
 `env.projects / "soc"`, чтобы Conan обнаруживал этот workspace.
@@ -371,45 +351,7 @@ URL, credentials и опубликованных пакетов. `stop()` и `st
 `env.diagnostics()` возвращает пути рабочих проектов, созданных Conan home,
 текущего server log и список успешно опубликованных через эти клиенты Ref.
 Он не обращается к Conan или сети и не включает password или содержимое конфигурации.
-Pytest-плагин автоматически добавляет секцию `CoreRef environment` при ошибках
-setup, выполнения теста и teardown, если окружение уже было создано. Директории
-остаются под управлением pytest/tmp_path; эти хелперы не включают отдельную очистку
-или архивирование диагностических файлов.
-
-### Настройки pytest-окружения
-
-Переопределите фикстуру в общем `conftest.py`:
-
-```python
-from pathlib import Path
-
-import pytest
-from coreref.testing.pytest_plugin import EnvironmentOptions
-
-
-@pytest.fixture
-def coreref_options() -> EnvironmentOptions:
-    return {
-        "projects": Path("tests/test_projects"),
-        "repositories": ("cpu", "stdlib"),
-        "namespace": "soc",
-        "timeout": 0.2,
-    }
-```
-
-`projects` — путь к дереву исходных проектов; относительные пути считаются от корня
-pytest (`config.rootpath`, конфигурация или `--rootdir`). Это одна база для тестов из
-разных поддиректорий. Абсолютные пути также поддерживаются. Без `projects` рабочее
-дерево не копируется. `repositories` перечисляет проекты, которым нужны Git-upstreams;
-этот параметр требует `projects`.
-
-Все поля необязательны: namespace по умолчанию `test`, timeout — 5 секунд,
-repositories — пустой tuple. `EnvironmentOptions` описывает тип обычного словаря,
-отдельного объекта конфигурации создавать не нужно. Плагин не меняет возвращённый
-словарь, поэтому настройки можно также предоставлять через session-scoped фикстуру.
-Для отдельных сценариев используйте обычную параметризацию `coreref_options` через
-`@pytest.fixture(params=...)` или переопределите её в модуле тестов. Collection-хуки
-для настройки окружения не нужны.
+Для отчёта о сбое вызовите `env.diagnostics()` в тесте или его фикстуре.
 
 ### Счётчики операций
 
@@ -417,11 +359,11 @@ repositories — пустой tuple. `EnvironmentOptions` описывает т�
 from coreref.testing import trace_operations
 
 with trace_operations() as trace:
-    graph.get_with_sources()
+    graph.get(with_sources=True)
 assert trace.installs == 1
 
 with trace_operations() as cached:
-    graph.get_with_sources()
+    graph.get(with_sources=True)
 assert cached.commands == ()
 ```
 

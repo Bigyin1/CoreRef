@@ -8,12 +8,11 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, Conflict, InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import InstalledRecord, LocalRecord, Ref, Requirement
-from coreref.api.workspace import Workspace
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Ref, Requirement
+from coreref.api.projects.graph import Graph
+from coreref.api.projects.workspace import Workspace
 
 pytestmark = pytest.mark.conan_remote
 
@@ -21,7 +20,7 @@ pytestmark = pytest.mark.conan_remote
 @pytest.fixture
 def rtl(catalog: Catalog, checkout: Path, git_origin: Path) -> InstalledRecord:
     assert git_origin.is_dir()
-    return catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout))
+    return catalog.publish(LocalRecord(Ref("soc.cpu/1.0"), source=checkout))
 
 
 def test_open_writes_only_recipe_and_preserves_work(
@@ -48,7 +47,7 @@ def test_open_keeps_declared_version_range_in_editable_recipe(
 ) -> None:
     catalog.publish(LocalRecord(Ref("shared.stdlib/1.2")))
     cpu = catalog.publish(
-        LocalRecord(Ref("soc.cpu.rtl.default/1.0"), source=checkout),
+        LocalRecord(Ref("soc.cpu/1.0"), source=checkout),
         dependencies=(Requirement("shared.stdlib/[>=1 <2]"),),
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -56,23 +55,23 @@ def test_open_keeps_declared_version_range_in_editable_recipe(
     newer = catalog.publish(LocalRecord(Ref("shared.stdlib/1.3")))
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, cpu.ref.without_revision())
-    assert graph.requirements == (newer.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (newer.ref,)
 
 
 def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     catalog: Catalog, rtl: InstalledRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cached = catalog.get_with_sources(rtl.ref)
+    cached = catalog.get(rtl.ref, with_sources=True)
     assert not cached.is_editable and cached.source is not None
-    assert cached.source.is_relative_to(catalog.cache_directory)
+    assert cached.source.is_relative_to(catalog._client.cache_directory)
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, rtl.ref.without_revision())
-    installed = graph.get_with_sources()[0]
+    installed = graph.get(with_sources=True)[0]
     assert installed.is_editable and installed.source == source
-    assert not installed.source.is_relative_to(catalog.cache_directory)
-    assert catalog.get_with_sources(rtl.ref).source == source
+    assert not installed.source.is_relative_to(catalog._client.cache_directory)
+    assert catalog.get(rtl.ref, with_sources=True).source == source
     output = json.loads(json.dumps(installed.to_dict()))
     assert output["is_editable"] is True and output["source"] == str(source)
     with pytest.raises(AttributeError):
@@ -82,7 +81,7 @@ def test_native_discovery_supplies_working_sources_instead_of_cached_sources(
     assert ready_source is not None and (ready_source / "cpu.sv").read_text() == "working version"
     workspace.remove(source)
     assert (source / "conanfile.py").is_file()
-    assert not catalog.get_with_sources(rtl.ref).is_editable
+    assert not catalog.get(rtl.ref, with_sources=True).is_editable
     workspace.add(source)
     assert catalog.get(rtl.ref).is_editable
 
@@ -96,7 +95,7 @@ def test_mixed_graph_batches_only_cached_packages_and_supports_filters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0"), source=checkout),
+        LocalRecord(Ref("soc.parent/1.0"), source=checkout),
         dependencies=(rtl.ref,),
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -104,15 +103,15 @@ def test_mixed_graph_batches_only_cached_packages_and_supports_filters(
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, parent.ref)
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
-        selected = graph.get_with_sources(filters=SearchQuery(component="cpu"))
+        selected = graph.get((rtl.ref.without_revision(),), with_sources=True)
         assert len(selected) == 1 and selected[0].source == source
         assert selected[0].is_editable
         assert not commands.call_args_list
-        ready = graph.get_with_sources()
+        ready = graph.get(with_sources=True)
         assert sum(call.args[0] == "install" for call in commands.call_args_list) == 1
     assert len(ready) == 2 and sum(record.is_editable for record in ready) == 1
     with patch.object(catalog._client, "run", side_effect=AssertionError("Conan I/O")):
-        assert graph.get_with_sources() == ready
+        assert graph.get(with_sources=True) == ready
 
 
 def test_editable_artifact_paths_can_exist_only_after_local_build(
@@ -122,7 +121,7 @@ def test_editable_artifact_paths_can_exist_only_after_local_build(
     artifact.write_text("published library")
     record = catalog.publish(
         LocalRecord(
-            Ref("soc.cpu.be.lib-lef/1.0"),
+            Ref("soc.cpu--be--lib-lef/1.0"),
             source=checkout,
             files={"timing/cpu.lib": artifact},
         )
@@ -135,7 +134,7 @@ def test_editable_artifact_paths_can_exist_only_after_local_build(
     path = source / "artifacts/timing/cpu.lib"
     assert editable.is_editable and editable.files == {"timing/cpu.lib": path}
     assert not path.exists()
-    assert graph.get_with_sources()[0].source == source
+    assert graph.get(with_sources=True)[0].source == source
     path.parent.mkdir(parents=True)
     path.write_text("locally built library")
     assert graph.get()[0].files["timing/cpu.lib"].read_text() == "locally built library"
@@ -147,16 +146,16 @@ def test_workspace_consumer_can_save_and_reuse_native_lockfile(
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
-    local = LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    local = LocalRecord(Ref("soc.top/1.0"))
     graph = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),))
     lock = graph.create_lockfile(tmp_path / "project.lock")
     locked = Graph(catalog, local, dependencies=(rtl.ref.without_revision(),), lockfile=lock)
-    assert locked.get_with_sources()[0].source == source
-    assert tuple(sorted(locked.networkx.edges)) == tuple(sorted(graph.networkx.edges))
+    assert locked.get(with_sources=True)[0].source == source
+    assert tuple(sorted(locked.edges)) == tuple(sorted(graph.edges))
 
 
 def test_open_without_repository_source_is_rejected(catalog: Catalog, tmp_path: Path) -> None:
-    record = catalog.publish(LocalRecord(Ref("soc.meta.data.default/1.0")))
+    record = catalog.publish(LocalRecord(Ref("soc.meta/1.0")))
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     with pytest.raises(InvalidPackage, match="no repository source"):
         workspace.open(record.ref)
@@ -195,7 +194,7 @@ def test_a_cached_snapshot_does_not_silently_switch_to_new_editables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = catalog.publish(
-        LocalRecord(Ref("soc.parent.rtl.default/1.0"), source=checkout),
+        LocalRecord(Ref("soc.parent/1.0"), source=checkout),
         dependencies=(rtl.ref,),
     )
     snapshot = Graph(catalog, parent.ref)
@@ -203,8 +202,8 @@ def test_a_cached_snapshot_does_not_silently_switch_to_new_editables(
     source = workspace.open(rtl.ref)
     monkeypatch.chdir(workspace.path.parent)
     with pytest.raises(Conflict, match="Workspace changed"):
-        snapshot.get_with_sources()
-    ready = Graph(catalog, parent.ref).get_with_sources(filters=SearchQuery(component="cpu"))
+        snapshot.get(with_sources=True)
+    ready = Graph(catalog, parent.ref).get((rtl.ref.without_revision(),), with_sources=True)
     assert ready[0].is_editable and ready[0].source == source
 
 

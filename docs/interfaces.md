@@ -2,35 +2,31 @@
 
 ## Основная идея
 
-Каталог хранит представления аппаратных компонентов, например RTL, DFT и BE LIB/LEF,
-а также самостоятельные пакеты, например библиотеки. Поля `Ref` задают адрес
-пакета и позволяют найти другие представления того же компонента.
+Каталог хранит версии аппаратных компонентов, библиотек и других входов flow.
+Один пакет компонента может содержать Git-исходники RTL, netlist и файлы физической
+реализации. Flow получает нужные данные из ревизии, выбранной для проекта.
 
 ```text
-namespace.component.view.type/version[#revision]
 namespace.component/version[#revision]
 ```
 
 | Поле | Смысл | Пример |
 |---|---|---|
 | `namespace` | Пространство имён, обычно проект | `soc` |
-| `component` | Имя компонента или самостоятельного пакета | `cpu`, `stdlib` |
-| `view` | Представление компонента | `rtl`, `dft`, `be` |
-| `type` | Вариант внутри представления | `default`, `output`, `scan`, `lib-lef` |
+| `component` | Имя компонента или библиотеки | `cpu`, `stdlib` |
 | `version` | Версия пакета | `1.0` |
 | `revision` | Необязательная точная recipe revision Conan | Вычисляется по содержимому |
 
-Например, `soc.cpu.rtl.default/1.0` и `soc.cpu.be.lib-lef/4.0` относятся к одному
-компоненту и имеют независимые версии. По namespace/component находят
-кандидатов нужного view/type. Соответствие конкретному RTL подтверждают зависимости
-с точной revision или метаданные приложения. Само совпадение полей не гарантирует совместимость.
-Значения view/type и смысл зависимостей определяет flow; специальных типов рёбер в SDK нет.
+Пакет `soc.cpu/1.0` может сначала содержать RTL, а в следующей ревизии также netlist,
+Liberty и LEF. При публикации flow объявляет фактический состав. Зависимый проект
+закрепляет нужную ревизию через lockfile. Вид компонента и смысл его файлов
+приложение может описать в метаданных пакета.
 
 ## Основные возможности
 
-- **Формат проекта.** Готовый `ManifestFile` читает рекомендуемый manifest.yml; приложение
-  может выбрать свой формат и создать `LocalRecord` и набор зависимостей. Файл может содержать часть зависимостей; остальные
-  приложение добавляет по результатам поиска или других правил. Рецепты Conan SDK создаёт сам.
+- **Формат проекта.** `Manifest` читает стандартный manifest.yml.
+  Он описывает зависимости, версии инструментов и опции проекта. Рецепт для
+  обычной публикации создаёт SDK.
 - **Публикация и поиск.** Один пакет объединяет JSON payload, упакованные файлы и
   необязательные Git-исходники через SCM. Поиск работает по полям Ref; внешние пути,
   например NFS, приложение может хранить в payload.
@@ -46,8 +42,17 @@ namespace.component/version[#revision]
 
 ## Связи классов
 
+Из `coreref.api.packages` импортируют координаты и каталог. В
+`coreref.api.projects` находятся манифест, проект, граф и workspace.
+`coreref.api.build` предоставляет описание маршрута и доступ к его выходам.
+
 ```mermaid
 classDiagram
+    Project --> Manifest
+    Project --> Graph
+    Project --> Route
+    Route o-- StageSpec
+    Project ..> Stage : обработчик
     Catalog ..> Record : info / get
     Graph --> Catalog : операции Conan
     Graph o-- LocalRecord : локальный корень
@@ -63,39 +68,35 @@ classDiagram
 
 `Ref(reference)` — самостоятельные координаты без каталога и операций Conan.
 Один Ref можно передать любому Catalog; создание и сравнение Ref не выполняют I/O.
-В короткой форме `shared.stdlib/2.0` или `foundry.techlib-n5/3.2` свойства `view`
-и `type` равны `None`, а `to_dict()` не добавляет эти ключи. Полная форма всегда
-содержит оба поля. Имя состоит из двух или четырёх сегментов, разделённых точками.
-Подчёркивания и дефисы входят в сегменты. Версия отделена знаком `/`, revision — `#`.
-Старый формат с `subcomponent` требует нового адреса для такого пакета.
+Имя состоит из двух сегментов `namespace.component`. В сегментах допустимы
+строчные латинские буквы, цифры, подчёркивания и дефисы. Версия отделена знаком
+`/`, revision — знаком `#`. Пакеты со старыми адресами нужно опубликовать под
+новым именем, а зависимости и lockfile обновить.
 
 | Класс | Основные операции |
 |---|---|
 | `Catalog(home=None, *, remote=None, timeout=60)` | Настройки клиента; обычно достаточно `Catalog()` |
-| `catalog.search(query, *, all_revisions=False)` | Метаданные `tuple[Record, ...]` |
 | `catalog.search_refs(query, *, all_revisions=False)` | `tuple[Ref, ...]` без загрузки рецептов и payload |
 | `catalog.publish(record, *, dependencies=(), lockfile=None)` | Один `LocalRecord` → `InstalledRecord`; также принимает готовый локальный `Graph` |
-| `Ref.from_fields(namespace, component, view=None, type=None, version=None, *, revision=None)` | Создание из отдельных координат. `version` обязателен, для короткой формы передайте его по имени |
+| `Ref.from_fields(namespace, component, version, *, revision=None)` | Создание из отдельных координат |
 | `catalog.info(ref)` | Метаданные `Record` |
-| `catalog.get(ref)` / `catalog.get_with_sources(ref)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
+| `catalog.get(ref, *, with_sources=False)` | Файлы пакета / файлы и Git-исходники как `InstalledRecord` |
 | `Graph(catalog, ref, *, lockfile=None)` | Полный граф пакета из реестра или editable из workspace |
 
-`SearchQuery` задаёт точные фильтры `namespace`, `component`, `view`, `type`,
-`version` и `revision`. `None` пропускает фильтр. Поиск по namespace или component
-может вернуть пакеты обеих форм. Фильтр по `view` или `type` выбирает представления.
-`SearchQuery.for_component(ref, *, view=None, type=None, version=None, revision=None)`
-сохраняет namespace и component, а версию и revision выбирает независимо.
+`SearchQuery` задаёт точные фильтры `namespace`, `component`, `version` и
+`revision`. Поле со значением `None` пропускается.
 `matches_ref` и `matches` проверяют уже полученные ссылки и записи.
 Фильтры зависимостей задаются в Graph.
 
-`query` обязателен; поиск без ограничений — `catalog.search(SearchQuery())`.
+`query` обязателен; поиск без ограничений — `catalog.search_refs(SearchQuery())`.
 
 ## Диапазоны версий
 
 `Requirement("shared.stdlib/[>=1.0 <2.0]")` задаёт диапазон Conan для зависимости.
 Его можно передать вместе с `Ref` в `dependencies` методов `Graph`, `Catalog.publish`
 и `Workspace.add`. Диапазон не содержит `#revision`. Корень и операции получения
-конкретного пакета используют `Ref` с версией.
+конкретного пакета используют `Ref` с версией. Функция `parse_dependency(text)`
+разбирает строку манифеста в `Ref` или `Requirement`.
 
 При публикации Conan-рецепт сохраняет каждую прямую зависимость в объявленном виде.
 Это может быть диапазон, версия без revision или точный `Ref` с revision. Например, если CPU и DMA
@@ -103,8 +104,8 @@ classDiagram
 даже если CPU проверяли с 1.2. Выбор для конкретного запуска хранится в lockfile
 соответствующего проекта. SoC разрешает граф по рецептам пакетов и своему lockfile.
 
-`graph.requirements` содержит уже выбранные прямые `Ref`. Когда для результата синтеза
-важен конкретный LIB/LEF, передайте его `Ref` с revision в зависимости результата.
+`graph.dependencies()` возвращает метаданные с уже выбранными прямыми `Ref`. Потребитель LIB/LEF
+получает файлы из выбранной ревизии зависимости.
 
 ## Ревизии
 
@@ -113,8 +114,8 @@ classDiagram
 
 | Ссылка | Значение |
 |---|---|
-| `soc.cpu.rtl.default/1.0` | Версия без закрепления revision; обычный способ задать зависимость |
-| `soc.cpu.rtl.default/1.0#<RREV>` | Конкретная revision этой версии; вместо `<RREV>` подставляется её хеш |
+| `soc.cpu/1.0` | Версия без закрепления revision; обычный способ задать зависимость |
+| `soc.cpu/1.0#<RREV>` | Конкретная revision этой версии; вместо `<RREV>` подставляется её хеш |
 
 При самостоятельном info/get незакреплённый Ref выбирает последнюю revision средствами
 Conan. Полученные из каталога Record и опубликованные узлы Graph содержат точные Ref.
@@ -147,7 +148,7 @@ Graph фиксирует выбранные revisions при разрешени�
 `Record` и `InstalledRecord` доступны только для чтения, включая payload и карту файлов.
 Пути Conan cache используются для чтения; рабочие изменения выполняют в отдельной копии.
 
-Payload принимает JSON или объект с `to_json() -> str` (`JSONSerializable`).
+Payload принимает JSON или объект с методом `to_json() -> str`.
 Его схему, списки RTL-файлов, NFS-пути и их проверку определяет приложение.
 `LocalRecord.to_json()` подготавливает метаданные пакета;
 `Record.to_dict()` предоставляет данные для вывода в CLI и пользовательской сериализации.
@@ -159,30 +160,30 @@ Payload принимает JSON или объект с `to_json() -> str` (`JSON
 разрешает локальный `LocalRecord` или опубликованный `Ref` через явно переданный каталог.
 Публиковать локальный корень не требуется. Прямые зависимости опубликованного пакета
 доступны через `Graph(catalog, ref).dependencies()`.
-Связи снимка можно читать через `graph.networkx.edges`.
-Стандартный manifest.yml читает ManifestFile; собственные форматы и дополнительные зависимости
-по-прежнему может определять приложение.
+Связи снимка можно читать через `graph.edges`.
+Для проекта со стандартным манифестом готовый граф доступен через `project.graph`.
+Приложение также может построить Graph со своим набором зависимостей.
 
 | API Graph | Результат |
 |---|---|
-| `record`, `records`, `requirements` | Корень, все метаданные и прямые Ref корня |
+| `record`, `records` | Корень и все метаданные снимка |
 | `info(ref)` | Метаданные выбранного узла без I/O |
 | `dependencies(ref=None, *, transitive=False, filters=None)` | Прямые или все зависимости без корня; транзитивные — зависимости первыми |
-| `ordered_refs(root, *, stop_at=())`, `ordered_records(...)` | Обход с корнем; у stop_at не обходятся зависимости, сами узлы включены |
-| `get(refs=None, *, filters=None)`, `get_with_sources(refs=None, *, filters=None)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
+| `get(refs=None, *, with_sources=False)` | Пакетное получение файлов / файлов и SCM; `tuple[InstalledRecord, ...]` |
+| `get_sources(refs)` | Получение SCM для выбранных ссылок без загрузки бинарных пакетов. Возвращает `dict[Ref, Path]` с точными `Ref`. Для пакетов без SCM записи пропускаются. |
 | `create_lockfile(path=None)`, `lockfile` | Сохранение выбора Conan и путь проектного lockfile |
-| `networkx` | Кэшируемая топология только для чтения; `.copy()` для изменений |
+| `edges` | Неизменяемые пары Ref от потребителя к зависимости |
 
 Без refs получение охватывает все опубликованные узлы, зависимости первыми;
 локальный корень исключён. Явный `()` означает пустую выборку.
-`filters=SearchQuery(view="rtl")` выбирает узлы снимка без предварительного списка Ref
-и без дополнительного поиска на сервере.
+`graph.dependencies(filters=SearchQuery(namespace="shared"))` выбирает метаданные узлов
+в снимке. Для загрузки выбранных узлов передайте их Ref в `get()` или `get_sources()`.
 Полученные записи повторно используются в пределах Graph. Для всего дерева удобнее
 один вызов Graph, чем отдельный get для каждого Ref.
 
 Graph фиксирует зависимости и выбранные revisions, а локальный корень остаётся рабочим
 LocalRecord: `graph.record is record`, переданный в конструктор. Через `record`, `records`,
-`info` и `ordered_records` доступен тот же объект. Payload, source и files можно дополнить
+и `info` доступен тот же объект. Payload, source и files можно дополнить
 после запуска инструмента и затем вызвать `catalog.publish(graph)` без повторного разрешения.
 Payload сериализуется при публикации, а не при разрешении графа.
 Координаты корня и состав зависимостей меняют через новый Graph; старый результат
@@ -197,21 +198,6 @@ Conan, не разбирая JSON. Если переданного пути ещ
 без повторного разрешения зависимостей. Получение файлов использует уже разрешённый выбор.
 `catalog.publish(graph)` упаковывает последние данные локальной записи с выбором
 версий из этого Graph. В рецепт попадают исходные объявления прямых зависимостей.
-Если flow нашёл дополнительные пакеты, их можно добавить к объявлениям из манифеста.
-
-```python
-requirements = (*manifest.dependencies, found_be.ref)
-final_graph = Graph(catalog, manifest.record, dependencies=requirements)
-# При необходимости явно обновить проектный lockfile расширенным набором.
-final_graph.create_lockfile(project_lockfile)
-catalog.publish(final_graph)
-```
-
-Так исходные диапазоны сохранятся, а найденный BE-пакет будет закреплён на точную
-revision. Если нужно закрепить и все ранее выбранные прямые входы, передайте
-`(*graph.requirements, found_be.ref)`. Для публикации без отдельного Graph также
-доступен `catalog.publish(record, dependencies=requirements)`.
-
 `Workspace(catalog, path="conanws.yml")` — небольшая обёртка над Conan init/add/remove.
 Conan создаёт conanws.yml/conanws.py и управляет составом workspace. SDK не ведёт свой
 реестр. Из текущей директории проекта Conan автоматически выбирает рабочие пакеты:
@@ -239,21 +225,19 @@ record.json/conandata.yml и собственные маркеры в рабоч
 это не гарантированная revision опубликованной версии рабочей копии.
 
 ```python
-from coreref.api.graph import Graph
-from coreref.api.workspace import Workspace
+from coreref.api.projects import Graph, Workspace
 
 workspace = Workspace(catalog)  # запускаем из корня проекта
 workspace.add("../cpu", record=cpu_record, dependencies=cpu_dependencies)
 # cpu_record и cpu_dependencies сформированы парсером конкретного flow.
 # workspace.open(rtl_ref)       # либо Git-копия опубликованной зависимости
 graph = Graph(catalog, rtl_ref)  # Conan уже видит зарегистрированную директорию
-ready = graph.get_with_sources()
+ready = graph.get((graph.record.ref,), with_sources=True)
 local = [record for record in ready if record.is_editable]
 ```
 
 Изменение состава workspace требует нового Graph. Его метаданные — снимок,
-но файлы рабочей копии остаются изменяемыми. `Catalog.cache_directory` возвращает
-реальное хранилище пакетов, включая настройку core.cache:storage_path.
+но файлы рабочей копии остаются изменяемыми.
 Ошибки: `CatalogError` — общий сбой, `NotFound` — отсутствие пакета,
 `Conflict` — конфликт зависимостей, `InvalidPackage` — неверное описание/содержимое.
 Ошибки Conan переводятся в сообщения SDK; исходное исключение доступно через `__cause__`.
@@ -267,30 +251,29 @@ local = [record for record in ready if record.is_editable]
 
 ```python
 import typer
-from coreref.tools.cli import create_workspace_app
+from coreref.cli import create_workspace_app
 
 app = typer.Typer()
 app.add_typer(create_workspace_app(), name="workspace")
 ```
 
 ```sh
-flow workspace open soc.cpu.rtl.default/1.0 --project-dir ./project
+flow workspace open soc.cpu/1.0 --project-dir ./project
 flow workspace add ../existing-cpu --project-dir ./project
 flow workspace list --project-dir ./project
 flow workspace remove ../existing-cpu --project-dir ./project
 ```
 
-Готовая команда `add DIRECTORY` из tools читает `DIRECTORY/manifest.yml`, если рецепта ещё нет:
+Готовая команда `add DIRECTORY` из `coreref.cli` читает `DIRECTORY/manifest.yml`, если рецепта ещё нет:
 достаточно валидного YAML с `ref`. Класс Workspace от этого формата не зависит.
 `dependencies`, `files` и `payload` необязательны; пути считаются от директории YAML.
-Для Python-надстройки это `ManifestFile(path).add_to_workspace(workspace)`.
 Рецепт читает выбранный YAML при следующих вызовах Conan, поэтому его изменения
 подхватываются без повторной регистрации. Файл может называться произвольно. Например:
 
 ```yaml
-ref: soc.cpu.rtl.default/1.0
+ref: soc.cpu/1.0
 dependencies:
-  - soc.util.rtl.default/1.0
+  - soc.util/1.0
 ```
 
 `open --directory` задаёт точную директорию Git-копии. По умолчанию
@@ -304,71 +287,174 @@ dependencies:
 `create_workspace_app(catalog_factory=lambda: catalog)`, где `catalog` создан самим flow.
 Разные подключения не разделяют состояние CLI.
 
-Для собственного формата flow формирует Graph и его lockfile сам. Для стандартного
-manifest.yml ниже описана отдельная готовая группа команд.
+Готовая группа команд для manifest.yml описана ниже.
+
+## Варианты компонентов
+
+`Project.lock()` фиксирует выбор рецептов для обычных и именованных зависимостей.
+`project.install_variants(build_missing=True)` устанавливает все конфигурации из
+манифеста. Для одного варианта есть `catalog.get_variant(PackageInput(ref, options),
+lockfile=project.lockfile)`. Значение `build_missing=True` разрешает Conan
+собрать отсутствующий бинарник. Возвращаемый `ConfiguredPackage` содержит
+директорию и точные координаты бинарника.
+
+Flow публикует рецепт генератора через `catalog.publish_variant_recipe(ref,
+options=..., inputs=..., runner=...)`. Например, `options={"depth": (128, 256),
+"width": (32, 64)}` задаёт четыре комбинации, с 128×32 по умолчанию. Python-скрипт
+реализует `generate(options, source, output)`. Он читает именованные файлы из
+`source` и сохраняет результаты в `output`. Готовый вариант можно отправить
+в реестр через `catalog.publish_variant(package)`.
+
+## Проект и стадии
+
+`coreref.api.projects.Project` связывает манифест, рабочую директорию и каталог.
+Он создаёт `LocalRecord`, разрешает граф по `manifest.lock` и обновляет lockfile
+вместе с именованными вариантами. Для работы с маршрутом достаточно
+`project.build("floorplan")` и `project.publish()`. Сборка сама выбирает
+предшественников. Публикация выбирает максимальные готовые стадии выпуска
+или принимает явно указанную цель, собирает срез и проверяет неизменность
+его входов. Срез получает одно оглавление. Повтор с тем же набором файлов
+и теми же байтами возвращает прежнюю ревизию. Изменение набора или содержимого
+выходов под тем же ключом прерывает публикацию. Новый срез может получить новую
+ревизию Conan той же версии пакета. Локальные результаты лежат в `project.build_dir`.
+
+`Graph.dependencies(transitive=True, stop_at=...)` оставляет пограничные
+пакеты и общие зависимости, достижимые через другие ветви. Flow может
+использовать это для замены RTL макроблока его физическими представлениями.
+
+Flow описывает граф в `Route` и связывает имена узлов с функциями
+преобразования через `Project.stages`. `StageSpec` задаёт зависимости и
+выходы. Если `Stage` не уточняет входы, CoreRef подаёт ему указанные
+исходные файлы и выходы прямых предшественников.
+
+```python
+from collections.abc import Mapping
+from functools import cached_property
+from pathlib import Path
+
+from coreref.api.build import Route, Stage, StageSpec
+from coreref.api.packages import JSON
+from coreref.api.projects import Project
+
+
+def normalize(work: Path, _log: Path, _config: Mapping[str, JSON]) -> None:
+    text = (work / "input.txt").read_text(encoding="utf-8")
+    (work / "normalized.txt").write_text(text.strip() + "\n", encoding="utf-8")
+
+
+class ExampleFlow(Project):
+    route = Route([StageSpec(name="normalize", outputs=("normalized.txt",))])
+
+    @cached_property
+    def stages(self) -> Mapping[str, Stage]:
+        return {
+            "normalize": Stage(
+                transform=normalize,
+                files={"input.txt": self.source / "data.txt"},
+            ),
+        }
+```
+
+CoreRef подготавливает отдельную рабочую директорию и сохраняет выходы
+после их проверки. Flow задаёт `Project.route` и `Project.stages`
+в Python или через сгенерированный модуль. Проекты выбирают доступные части
+маршрута и задают пути к входным файлам.
+
+`StageSpec.checks` добавляет узлы, обязательные для публикации, даже если
+они не нужны при локальной сборке цели. `recipe` позволяет объединить
+несколько стадий в один рецепт, а `recipe_outputs` перечисляет их выходы для
+этого рецепта. Если нужны готовые артефакты зависимого пакета, в `Stage.artifacts`
+можно указать пару из точной записи и имени файла. CoreRef получает только
+артефакты выбранных стадий и подаёт их под заданными именами.
+
+`publish(with_producers=True)` при первой публикации среза выводит рецепты для готовых стадий с
+`transform` из того же графа. Функция должна быть доступна на уровне модуля
+в установленном Flow производителя. CoreRef запускает её в окружении из
+`pyproject.toml`, `uv.lock` и `.python-version` и сохраняет имена выходов
+в метаданных рецепта. Для общего кэша стадия может выбрать `cache=True`,
+если её объявленные данные, параметры и закреплённое окружение определяют
+результат.
+
+### Генерация модуля Flow
+
+Автор Flow может задать маршрут и функции узлов в YAML и один раз
+сгенерировать Python-модуль командой
+`python -m coreref.api.build.codegen stage-map.yml generated_route.py`.
+Например, узел можно описать так.
+
+```yaml
+modules:
+  rtl:
+    - name: normalize
+      transform: example_flow.stages:normalize
+      files: {input.txt: rtl-source}
+      outputs: [normalized.txt]
+```
+
+`make_route(("rtl",))` выбирает модуль, а `bind_stages(project, route,
+files={"rtl-source": path})` связывает его с файлами конкретного проекта.
+Рёбра `needs` подключают выходы предыдущих преобразований. Для узлов,
+которым требуется подготовка окружения, можно объявить именованный
+адаптер в `adapters` и выбрать его полем `bind`.
+
+Модуль включается в исходники Flow. Его импорт не читает карту стадий и
+не запускает генератор.
+
+## Именованные выходы
+
+`Outputs(catalog).get(record, names)` загружает только указанные выходы
+закреплённой ревизии. В `Project` те же операции доступны через
+`project.outputs`. С `build_missing=True` CoreRef может
+собрать запрошенный результат, если для него опубликован рецепт.
+`outputs.available(record)` перечисляет доступные имена без загрузки,
+`Outputs.links(record)` возвращает точные Ref готовых файлов.
+
+В lockfile закреплена ревизия оглавления. Точные ссылки на дочерние артефакты
+хранятся в этой ревизии. Срез вычисляется из объявленных входов, lockfile,
+разрешённых зависимостей, вариантов и окружения. Общий кэш стадий может
+использовать байты подготовленных входов и идентичность инструмента для
+переиспользования результата между срезами. [Conan lockfiles](https://docs.conan.io/2/tutorial/versioning/lockfiles.html)
 
 ## Стандартный manifest.yml
 
-`ManifestFile(path="manifest.yml")` — необязательный адаптер файла к LocalRecord и Graph.
-Чтение, редактирование, сохранение YAML и подготовка записей не требуют Catalog
-и не инициализируют Conan. Каталог передают явно только для разрешения графа и lockfile.
-Формат общий для разных представлений; конкретные flow могут полностью заменить его.
+`Manifest.load(path)` читает стандартный манифест и проверяет его схему.
+Для построения графа передайте этот манифест, корневую директорию и каталог в
+`Project`. Для редактирования YAML flow может подключить готовую группу
+команд `deps`.
 
 ```yaml
-ref: soc.top.rtl.default/1.0
+ref: soc.top/1.0
 dependencies:
-  - soc.cpu.rtl.default/1.0
-  - soc.gpio.rtl.default/2.0#exact-revision
+  - soc.cpu/1.0
+  - soc.gpio/2.0#exact-revision
   - "shared.stdlib/[>=1.0 <2.0]"
   - foundry.techlib-n5/3.2
 ```
 
 Обязателен только `ref` с конкретной версией без собственной revision.
-`dependencies` принимает обычные Ref и диапазоны Conan в квадратных скобках. `files` и `payload` необязательны.
-Пути в `files` считаются от директории YAML и сопоставляют имя внутри пакета
-локальному файлу. Поля `source` в YAML нет. `manifest.record.source` по умолчанию указывает на директорию манифеста — корень проекта
-и Git-репозитория. Для обычного RTL-проекта задавать его вручную не требуется.
-Манифест из Git доступен вместе с исходниками через `get_with_sources()`. Чтобы YAML
-был доступен через обычный `get()`, flow явно добавляет его в файлы пакета, например
-`manifest.record.files[manifest.path.name] = manifest.path`. Conan разрешает зависимости
-опубликованного пакета по его рецепту. При публикации пакета без SCM flow явно устанавливает
-`manifest.record.source = None`.
-Манифест читается один раз и содержит одну рабочую запись. Изменения в `record.payload`
-и `record.files` видны последующему `resolve(catalog)` и публикации. Файлы задаются как
-локальные Path; `save()` сохраняет их относительные пути в YAML. Исходники в YAML не записываются.
-Сохранение всегда явное: изменения записи и `add/remove` не меняют файл до `save()`.
-Прямых полей payload/files поверх record нет — рабочее состояние хранится в одном месте.
-Для обычного SCM-репозитория отдельный JSON payload обычно не нужен:
-описание исходников хранится в самом репозитории. В других пакетах payload может содержать
-дополнительные метаданные по правилам flow, например внешние пути к LIB/LEF.
-Принимаются файлы `.yaml` и `.yml`. Pydantic проверяет типы полей и запрещает неизвестные
-поля; повторные объявления одного имени пакета отклоняются. YAML читает стандартный
-SafeLoader: при повторении ключа сохраняется последнее значение. Зависимости разрешает Conan.
+`dependencies` принимает обычные Ref, диапазоны Conan в квадратных скобках
+и именованные конфигурации вида `{name: cache, ref: demo.sram/1.0, options: {depth: 4}}`.
+Сами допустимые значения генератора задаются в `options` проекта, например
+`options: {depth: [4, 8], width: [4, 8]}`. Все flow используют одну схему
+`coreref.api.projects.Manifest`. Поле `type` задаёт тип проекта, а
+`release_through` ссылается на стадию выпуска в маршруте Flow. В `tools` можно
+закрепить образ по SHA-256 или версию исполняемой команды. При загрузке с
+`flow_package=` CoreRef проверяет установленную версию flow по `flow_version`.
+Flow получает закреплённый образ через `manifest.image(name)` или проверяет
+локальный исполняемый файл через `manifest.command(name)`. Последний возвращает
+путь и подтверждённую версию.
 
-| API ManifestFile | Результат |
-|---|---|
-| `create(ref, path="manifest.yml")` | Создать файл, отказавшись от перезаписи существующего |
-| `record`, `dependencies` | Одна изменяемая LocalRecord и текущие прямые зависимости (`Ref` или `Requirement`) |
-| `add_to_workspace(workspace)` | Подготовить YAML-рецепт и зарегистрировать директорию |
-| `resolve(catalog, *, update=False)` | Разрешить зависимости с текущей рабочей записью и существующим lockfile |
-| `create_lockfile(catalog)` | Заново разрешить текущие объявления без старого lockfile и сохранить выбор |
-| `add(ref)`, `remove(ref)`, `save()` | Изменить прямые зависимости и явно сохранить YAML |
-| `path`, `lockfile` | Пути YAML и одноимённого `.lock`, например model.yaml → model.lock |
-
-`add` заменяет объявление того же имени пакета, включая его версию/revision.
-`remove` сравнивает логические координаты для Ref и полное объявление для диапазона.
-Если указан `#revision`, он тоже должен совпасть.
-Редактирование через `save` записывает канонический YAML: комментарии и оформление не сохраняются.
-Чтение, resolve и install исходный YAML не меняют. Save напрямую перезаписывает YAML
-стандартными средствами Python. Init не перезаписывает существующий файл;
-ссылки lockfile на сам манифест отклоняются.
+Поля `files` и `payload` можно опустить. `files` сопоставляет имя результата
+пути относительно корня проекта. `Project` использует этот корень как SCM-исходники.
+При публикации обычного пакета напрямую через `Catalog` исходники можно
+задать с помощью `LocalRecord.source`.
 
 Для подключения команд установите `coreref[cli]` и включите нужные группы
 в CLI своего flow. Ниже `flow` — имя приложения, подключившего группу `deps`:
 
 ```sh
-flow deps init soc.top.rtl.default/1.0
-flow deps add soc.cpu.rtl.default/1.0
+flow deps init soc.top/1.0
+flow deps add soc.cpu/1.0
 flow deps add 'shared.stdlib/[>=1.0 <2.0]'
 flow deps list
 flow deps lock
@@ -387,7 +473,7 @@ flow deps install
 
 ```python
 import typer
-from coreref.tools.cli import create_deps_app
+from coreref.cli import create_deps_app
 
 app = typer.Typer()
 app.add_typer(create_deps_app(), name="deps")
@@ -397,12 +483,12 @@ app.add_typer(create_deps_app(), name="deps")
 `init/add/remove/list` работают с YAML без каталога.
 Готовые команды используют только зависимости из YAML. Если flow добавляет найденные
 пакеты программно, он формирует итоговый Graph и его lockfile своим кодом.
-`ManifestFile.record` и `dependencies` для этого можно использовать независимо от `resolve`.
+Для этого доступны `manifest.local_record(root)` и `manifest.requirements`.
 
 Ошибка клонирования или регистрации возвращается как ошибка SDK с исходной причиной.
 SDK не удаляет рабочие директории при сбое: неполную копию можно проверить и убрать вручную.
 
 Неверные поля `SearchQuery` отклоняются при создании с `InvalidPackage`.
 Корректный запрос без совпадений возвращает пустой результат. Неизвестные Ref,
-несовпадающие revisions и некорректные `stop_at` в методах Graph также дают
-`InvalidPackage`, включая `ordered_refs()` и `ordered_records()`.
+несовпадающие revisions в методах Graph также дают
+`InvalidPackage`.

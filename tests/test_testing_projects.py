@@ -8,9 +8,9 @@ import pytest
 from dulwich.objects import Commit, Tree
 from dulwich.repo import Repo
 
-from coreref.api.records import LocalRecord, Ref
+from coreref._internal.editor import ManifestFile
+from coreref.api.packages import LocalRecord, Ref
 from coreref.testing import LocalServer, Sandbox, environment, git_repository
-from coreref.tools.manifest import ManifestFile
 
 PROJECTS = Path(__file__).with_name("test_projects")
 pytestmark = pytest.mark.conan_remote
@@ -28,7 +28,7 @@ def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
         reader = env.new_catalog()
         soc = ManifestFile(env.projects / "soc/manifest.yml")
         graph = soc.resolve(reader)
-        records = {record.ref.component: record for record in graph.get_with_sources()}
+        records = {record.ref.component: record for record in graph.get(with_sources=True)}
         assert set(records) == {"cpu", "stdlib"}
         assert records["cpu"].source is not None
         assert (records["cpu"].source / "scripts/run.sh").stat().st_mode & 0o111
@@ -38,7 +38,7 @@ def test_soc_cpu_stdlib_from_ordinary_directories(tmp_path: Path) -> None:
         assert not (PROJECTS / "cpu/.git").exists()
         # The server records SCM pointing at independent bare origins.
         shutil.rmtree(env.projects / "cpu")
-        assert env.new_catalog().get_with_sources(published["cpu"].ref).source is not None
+        assert env.new_catalog().get(published["cpu"].ref, with_sources=True).source is not None
 
 
 def test_project_copy_preserves_custom_manifest_and_can_be_editable(
@@ -60,7 +60,7 @@ def test_project_copy_preserves_custom_manifest_and_can_be_editable(
     for name in ("stdlib", "cpu"):
         ManifestFile(projects / name / "manifest.yml").add_to_workspace(workspace)
     monkeypatch.chdir(projects / "soc")
-    records = ManifestFile(projects / "soc/manifest.yml").resolve(catalog).get_with_sources()
+    records = ManifestFile(projects / "soc/manifest.yml").resolve(catalog).get(with_sources=True)
     assert all(record.is_editable for record in records)
     assert {record.source for record in records} == {projects / "stdlib", projects / "cpu"}
     assert not (projects / "stdlib/.git").exists()
@@ -171,7 +171,7 @@ def test_inline_packages_and_projects_can_extend_a_directory_fixture(tmp_path: P
         )
         published = catalog.publish(generated, dependencies=(dependency.ref,))
         consumer = env.project(env.ref("inline-soc"), dependencies=(published.ref,))
-        installed = consumer.resolve(env.new_catalog()).get_with_sources()
+        installed = consumer.resolve(env.new_catalog()).get(with_sources=True)
         assert {record.ref.component for record in installed} == {"generated", "stdlib"}
         result = next(record for record in installed if record.ref == published.ref)
         assert result.files["report.txt"].read_text() == "inline result"

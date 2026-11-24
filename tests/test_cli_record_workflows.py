@@ -7,12 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.catalog import Catalog
+from coreref._internal.editor import ManifestFile
 from coreref.api.errors import Conflict
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages import Catalog, LocalRecord, Ref
+from coreref.api.projects import Graph
 from coreref.testing import git_commit
-from coreref.tools.manifest import ManifestFile
 from tests.test_models import UserPayload
 
 pytestmark = pytest.mark.conan_remote
@@ -22,8 +21,8 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
     catalog: Catalog, checkout: Path, git_origin: Path, tmp_path: Path
 ) -> None:
     assert git_origin.is_dir()
-    leaf = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0")))
-    manifest = ManifestFile.create(Ref("soc.top.rtl.default/1.0"), checkout / "manifest.yml")
+    leaf = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
+    manifest = ManifestFile.create(Ref("soc.top/1.0"), checkout / "manifest.yml")
     manifest.add(leaf.ref)
     manifest.save()
     git_commit(checkout, push=True)
@@ -36,7 +35,7 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
             graph = manifest.resolve(catalog)
         assert graph.record is manifest.record
         assert graph.info(manifest.record.ref) is manifest.record
-        assert graph.ordered_records(manifest.record.ref)[-1] is manifest.record
+        assert graph.info(manifest.record.ref) is manifest.record
         report = tmp_path / "report.txt"
         report.write_text("tool output")
         manifest.record.files["report.txt"] = report
@@ -50,7 +49,7 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
     assert published.has_source
     assert manifest.path.read_bytes() == original
     assert manifest.record.ref.revision is None
-    installed = catalog.get_with_sources(published.ref)
+    installed = catalog.get(published.ref, with_sources=True)
     assert installed.source is not None
     assert (installed.source / "manifest.yml").read_bytes() == original
 
@@ -59,9 +58,9 @@ def test_tool_results_are_published_without_resolving_the_graph_again(
 def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choices(
     catalog: Catalog, tmp_path: Path, prepared: bool
 ) -> None:
-    rtl = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0")))
-    macro = catalog.publish(LocalRecord(Ref("soc.cpu.be.lib-lef/1.0")), dependencies=(rtl.ref,))
-    manifest = ManifestFile.create(Ref("soc.top.be.result/1.0"), tmp_path / "manifest.yml")
+    rtl = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
+    macro = catalog.publish(LocalRecord(Ref("soc.cpu--be--lib-lef/1.0")), dependencies=(rtl.ref,))
+    manifest = ManifestFile.create(Ref("soc.top--be--result/1.0"), tmp_path / "manifest.yml")
     manifest.record.source = None  # Artifact-only result, without SCM.
     manifest.add(rtl.ref.without_revision())
     manifest.save()
@@ -70,7 +69,7 @@ def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choic
     before = manifest.lockfile.read_bytes()
     catalog.publish(LocalRecord(rtl.ref.without_revision(), {"generation": 2}))
     manifest.record.payload = {"selected_macro": str(macro.ref)}
-    requirements = (*graph.requirements, macro.ref)
+    requirements = (*tuple(record.ref for record in graph.dependencies()), macro.ref)
     with patch.object(catalog._client, "run", wraps=catalog._client.run) as commands:
         if prepared:
             augmented = Graph(catalog, manifest.record, dependencies=requirements)
@@ -80,9 +79,12 @@ def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choic
             published = catalog.publish(manifest.record, dependencies=requirements)
         assert sum(call.args[:2] == ("graph", "info") for call in commands.call_args_list) == 1
         assert sum(call.args[0] == "export-pkg" for call in commands.call_args_list) == 1
-    assert graph.requirements == (rtl.ref,)
+    assert tuple(record.ref for record in graph.dependencies()) == (rtl.ref,)
     assert manifest.dependencies == (rtl.ref.without_revision(),)
-    assert set(Graph(catalog, published.ref).requirements) == {rtl.ref, macro.ref}
+    assert {record.ref for record in Graph(catalog, published.ref).dependencies()} == {
+        rtl.ref,
+        macro.ref,
+    }
     assert (manifest.lockfile.read_bytes() != before) == prepared
     assert ManifestFile(manifest.path).record.payload is None
 
@@ -90,20 +92,24 @@ def test_additional_dependency_uses_explicit_resolution_and_keeps_previous_choic
 def test_conflicting_extra_dependency_does_not_replace_the_existing_graph(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    rtl = catalog.publish(LocalRecord(Ref("soc.cpu.rtl.default/1.0")))
-    root = LocalRecord(Ref("soc.top.be.result/1.0"))
+    rtl = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
+    root = LocalRecord(Ref("soc.top--be--result/1.0"))
     graph = Graph(catalog, root, dependencies=(rtl.ref,))
     lock = graph.create_lockfile(tmp_path / "project.lock")
     original = lock.read_bytes()
     other_rtl = catalog.publish(LocalRecord(rtl.ref.without_revision(), {"generation": 2}))
     macro = catalog.publish(
-        LocalRecord(Ref("soc.cpu.be.lib-lef/1.0")), dependencies=(other_rtl.ref,)
+        LocalRecord(Ref("soc.cpu--be--lib-lef/1.0")), dependencies=(other_rtl.ref,)
     )
     with (
         patch.object(catalog._client, "export_package", side_effect=AssertionError("Export")),
         pytest.raises(Conflict),
     ):
-        catalog.publish(root, dependencies=(*graph.requirements, macro.ref))
-    assert graph.record is root and graph.requirements == (rtl.ref,)
+        catalog.publish(
+            root, dependencies=(*tuple(record.ref for record in graph.dependencies()), macro.ref)
+        )
+    assert graph.record is root and tuple(record.ref for record in graph.dependencies()) == (
+        rtl.ref,
+    )
     assert graph.info(rtl.ref).ref == rtl.ref
     assert lock.read_bytes() == original

@@ -12,18 +12,18 @@ uv sync --frozen
 ```
 
 ```python
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import Ref
+from coreref.api.packages import Catalog, Ref
+from coreref.api.projects import Graph
 
 catalog = Catalog()
-rtl = Ref("soc.cpu.rtl.default/1.0")
-packages = Graph(catalog, rtl).get_with_sources()
+cpu = Ref("soc.cpu/1.0")
+graph = Graph(catalog, cpu)
+sources = graph.get_sources((graph.record.ref,))
 ```
 
-Готовый формат проекта — необязательный `manifest.yml`. С дополнением `coreref[cli]`
+Стандартный формат проекта CoreRef — `manifest.yml`. С дополнением `coreref[cli]`
 доступны группы Typer `deps` и `workspace` для включения в CLI своего flow. Собственные форматы также поддерживаются.
 
 - [Публичный API и связи классов](docs/interfaces.md).
-- [Примеры: RTL, поиск LIB/LEF и несколько результатов проекта](docs/use-cases.md).
+- [Примеры работы с RTL, LIB/LEF и результатами маршрута](docs/use-cases.md).
 - [Разработка и проверки](docs/development.md).

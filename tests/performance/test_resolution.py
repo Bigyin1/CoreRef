@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from coreref.api.graph import Graph
+from coreref.api.projects.graph import Graph
 from tests.performance.support import Dataset, Registry, Shape
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]

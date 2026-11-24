@@ -1,33 +1,24 @@
-"""Optional YAML adapter with one mutable local record for a CLI command."""
+"""Editable manifest document shared by CLI commands and test helpers."""
 
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
-from .._internal.recipe import LocalRecipe
 from ..api.errors import Conflict, InvalidPackage, NotFound
-from ..api.graph import Graph
-from ..api.records import JSON, Dependency, LocalRecord, Ref, Requirement
+from ..api.packages.records import Dependency, Ref, Requirement, _parse_dependency
+from ..api.projects.graph import Graph
+from ..api.projects.manifest import Manifest
+from .recipe import LocalRecipe
 
 if TYPE_CHECKING:
-    from ..api.catalog import Catalog
-    from ..api.workspace import Workspace
-
-
-class _YamlManifest(BaseModel):
-    """Validate file contents at I/O boundaries; runtime state belongs to LocalRecord."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-    ref: str
-    dependencies: list[str] = Field(default_factory=list)
-    files: dict[str, str] = Field(default_factory=dict)
-    payload: JsonValue = None
+    from ..api.packages.catalog import Catalog
+    from ..api.packages.records import PackageInput
+    from ..api.projects.workspace import Workspace
 
 
 class ManifestFile:
@@ -37,28 +28,12 @@ class ManifestFile:
         self._file = Path(path).expanduser().resolve()
         if self.path.suffix.lower() not in {".yaml", ".yml"}:
             raise InvalidPackage("Manifest must use a .yaml or .yml extension")
-        try:
-            data = _YamlManifest.model_validate(yaml.safe_load(self.path.read_text()))
-        except (yaml.YAMLError, ValidationError) as error:
-            raise InvalidPackage(f"Invalid manifest {self.path}: {error}") from error
+        self._manifest = Manifest.load(self.path)
         _ = self.lockfile
-        self.record = LocalRecord(
-            Ref(data.ref),
-            cast(JSON, data.payload),
-            source=self.path.parent,
-            files={
-                name: (self.path.parent / Path(value).expanduser()).resolve()
-                for name, value in data.files.items()
-            },
-        )
-        if self.record.ref.revision is not None:
-            raise InvalidPackage("A local package root must not specify a revision")
+        self.record = self._manifest.local_record(self.path.parent)
         self._dependencies: list[Dependency] = []
-        for value in data.dependencies:
-            ref = self._dependency(value)
-            if any(current.package_name == ref.package_name for current in self._dependencies):
-                raise InvalidPackage("Duplicate package in dependencies")
-            self.add(ref)
+        for dependency in self._manifest.requirements:
+            self.add(dependency)
 
     @classmethod
     def create(cls, ref: Ref, path: str | Path = "manifest.yml") -> ManifestFile:
@@ -69,7 +44,8 @@ class ManifestFile:
         if destination.suffix.lower() not in {".yaml", ".yml"}:
             raise InvalidPackage("Manifest must use a .yaml or .yml extension")
         content = yaml.safe_dump(
-            _YamlManifest(ref=str(ref)).model_dump(exclude_none=True), sort_keys=False
+            Manifest(ref=str(ref)).model_dump(exclude_none=True, exclude_unset=True),
+            sort_keys=False,
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -86,6 +62,10 @@ class ManifestFile:
     @property
     def dependencies(self) -> tuple[Dependency, ...]:
         return tuple(self._dependencies)
+
+    @property
+    def configured_dependencies(self) -> dict[str, PackageInput]:
+        return self._manifest.configured_dependencies
 
     @property
     def lockfile(self) -> Path:
@@ -118,17 +98,19 @@ class ManifestFile:
 
     def create_lockfile(self, catalog: Catalog) -> Path:
         """Resolve current declarations afresh, then save their exact revision selection."""
-        return self.resolve(catalog, update=True).create_lockfile(self.lockfile)
-
-    @staticmethod
-    def _dependency(value: Dependency | str) -> Dependency:
-        if not isinstance(value, str):
-            return value
-        return Requirement(value) if value.partition("/")[2].startswith("[") else Ref(value)
+        configured = self.configured_dependencies
+        if not configured:
+            return self.resolve(catalog, update=True).create_lockfile(self.lockfile)
+        return catalog._variants.create_lockfile(
+            self.record,
+            requirements=self.dependencies,
+            inputs=configured.values(),
+            path=self.lockfile,
+        )
 
     def add(self, value: Dependency | str) -> None:
         """Add or replace a dependency declaration; changes are saved explicitly."""
-        ref = self._dependency(value)
+        ref = _parse_dependency(value) if isinstance(value, str) else value
         if ref.package_name == self.record.ref.package_name:
             raise InvalidPackage("A package cannot depend on itself")
         for index, current in enumerate(self._dependencies):
@@ -139,7 +121,7 @@ class ManifestFile:
 
     def remove(self, value: Dependency | str) -> None:
         """Remove a matching range or logical Ref; an explicit revision must match."""
-        ref = self._dependency(value)
+        ref = _parse_dependency(value) if isinstance(value, str) else value
         if isinstance(ref, Requirement):
             if ref not in self._dependencies:
                 raise NotFound(f"Dependency is not declared: {ref}")
@@ -161,17 +143,18 @@ class ManifestFile:
 
     def save(self) -> None:
         """Save working metadata and dependencies; SCM stays a flow policy outside YAML."""
-        data = _YamlManifest(
+        document = self._manifest.model_dump(mode="json", exclude_unset=True)
+        configured = [item for item in document.get("dependencies", ()) if isinstance(item, dict)]
+        document.update(
             ref=str(self.record.ref),
-            dependencies=list(map(str, self.dependencies)),
+            dependencies=[*map(str, self.dependencies), *configured],
             files={
                 name: os.path.relpath(path.expanduser().absolute(), self.path.parent)
                 for name, path in self.record.files.items()
             },
             payload=json.loads(self.record.to_json())["payload"],
         )
-        content = yaml.safe_dump(data.model_dump(exclude_none=True), sort_keys=False)
+        content = yaml.safe_dump(
+            {key: value for key, value in document.items() if value is not None}, sort_keys=False
+        )
         self.path.write_text(content, encoding="utf-8")
-
-
-__all__ = ["ManifestFile"]

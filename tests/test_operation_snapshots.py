@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 from coreref._internal.types import NativeGraph
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import JSON, LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import JSON, LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 from tests.test_models import UserPayload
 
 
@@ -18,9 +18,7 @@ def test_graph_shares_the_mutable_project_without_encoding_payload(
 ) -> None:
     items: list[JSON] = ["original"]
     payload = UserPayload({"items": items})
-    local = LocalRecord(
-        Ref("soc.top.rtl.default/1.0"), payload, files={"report": tmp_path / "original.txt"}
-    )
+    local = LocalRecord(Ref("soc.top/1.0"), payload, files={"report": tmp_path / "original.txt"})
     graph = Graph(catalog, local)
     assert graph.record is local and graph.records[0] is local
     assert payload.calls == 0
@@ -40,7 +38,7 @@ def test_publish_snapshots_before_conan_commands(
     artifact.write_text("report")
     payload = UserPayload({"original": True})
     local = LocalRecord(
-        Ref.from_fields("soc", "top", "be", "default", "1.0"),
+        Ref.from_fields("soc", "top", "1.0"),
         payload,
         files={"report": artifact},
     )
@@ -64,10 +62,8 @@ def test_publish_snapshots_before_conan_commands(
 def test_construction_resolves_once_and_keeps_the_working_record(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    dependency = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"))
-    )
-    local = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+    dependency = catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "1.0")))
+    local = LocalRecord(Ref.from_fields("soc", "top", "1.0"))
     resolve = catalog._client.graph
     calls = 0
 
@@ -82,8 +78,8 @@ def test_construction_resolves_once_and_keeps_the_working_record(
     monkeypatch.setattr(catalog._client, "graph", change_inputs)
     project = Graph(catalog, local, dependencies=(dependency.ref,))
     assert calls == 1
-    assert project.networkx.number_of_edges() == 1
+    assert len(project.edges) == 1
     assert project.info(local.ref) is local and project.record.payload == {"edited": True}
-    assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
-    assert project.ordered_refs(local.ref) == (dependency.ref, local.ref)
+    assert project._ordered_refs(local.ref) == (dependency.ref, local.ref)
+    assert project._ordered_refs(local.ref) == (dependency.ref, local.ref)
     assert calls == 1

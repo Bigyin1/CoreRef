@@ -10,11 +10,11 @@ from typing import Annotated
 
 import typer
 
-from ..api.catalog import Catalog
-from ..api.errors import CatalogError
-from ..api.records import Ref
-from ..api.workspace import Workspace
-from .manifest import ManifestFile
+from ._internal.editor import ManifestFile
+from .api.errors import CatalogError
+from .api.packages.catalog import Catalog
+from .api.packages.records import Ref
+from .api.projects.workspace import Workspace
 
 ProjectDir = Annotated[Path, typer.Option(help="Project containing conanws.yml.")]
 Manifest = Annotated[Path, typer.Option("--file", "-f", help="Project YAML manifest.")]
@@ -136,6 +136,8 @@ class _DepsCommands:
             document = ManifestFile(file)
             for ref in document.dependencies:
                 typer.echo(ref)
+            for name, package in document.configured_dependencies.items():
+                typer.echo(f"{name}: {package.requirement} {package.options}")
 
     def lock(self, file: Manifest = Path("manifest.yml")) -> None:
         """Refresh the lockfile from current declarations and remote revisions."""
@@ -150,9 +152,26 @@ class _DepsCommands:
     ) -> None:
         """Fetch the full dependency tree in one batch, keeping the existing lockfile."""
         with _command_errors():
-            graph = ManifestFile(file).resolve(self._catalog_factory())
-            records = graph.get_with_sources() if sources else graph.get()
-            typer.echo(json.dumps([record.to_dict() for record in records], indent=2))
+            document = ManifestFile(file)
+            catalog = self._catalog_factory()
+            graph = document.resolve(catalog)
+            refs = tuple(record.ref for record in graph.dependencies(transitive=True))
+            records = graph.get(refs, with_sources=sources)
+            installed = [record.to_dict() for record in records]
+            variants = catalog._variants.get_many(
+                document.configured_dependencies, lockfile=document.lockfile, build_missing=True
+            )
+            installed.extend(
+                {
+                    "name": name,
+                    "ref": str(package.ref),
+                    "package_id": package.package_id,
+                    "package_revision": package.package_revision,
+                    "directory": str(package.directory),
+                }
+                for name, package in variants.items()
+            )
+            typer.echo(json.dumps(installed, indent=2))
 
 
 def create_deps_app(*, catalog_factory: Callable[[], Catalog] = Catalog) -> typer.Typer:

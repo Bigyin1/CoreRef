@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
+from coreref.api.packages.catalog import Catalog
 from coreref.testing import LocalServer, git_repository, git_upstream, local_server
 
 

@@ -7,8 +7,8 @@ from functools import partial
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from coreref.api.graph import Graph
-from coreref.api.records import InstalledRecord
+from coreref.api.packages.records import InstalledRecord
+from coreref.api.projects.graph import Graph
 from tests.performance.support import Content, Registry, check_files, fetch, graph_setup
 
 pytestmark = [pytest.mark.performance, pytest.mark.conan_remote]
@@ -38,13 +38,14 @@ def test_full_tree(
 
 
 def incremental_fetch(graph: Graph) -> tuple[InstalledRecord, ...]:
-    selected = graph.ordered_refs(graph.requirements[-1])
-    first = graph.get_with_sources(selected)
+    root = graph.dependencies()[-1].ref
+    selected = (*[record.ref for record in graph.dependencies(root, transitive=True)], root)
+    first = graph.get(selected, with_sources=True)
     remaining = tuple(
-        ref for ref in graph.ordered_refs(graph.record.ref)[:-1] if ref not in selected
+        record.ref for record in graph.dependencies(transitive=True) if record.ref not in selected
     )
-    rest = graph.get_with_sources(remaining)
-    assert graph.get_with_sources(selected) == first
+    rest = graph.get(remaining, with_sources=True)
+    assert graph.get(selected, with_sources=True) == first
     return first + rest
 
 

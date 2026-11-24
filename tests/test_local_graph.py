@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import Conflict, InvalidPackage, NotFound
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import Record, Ref
+from coreref.api.projects.graph import Graph
 from tests.helpers import local_record
 
 
@@ -20,7 +20,7 @@ def local_catalog(catalog: Catalog) -> Catalog:
 
 
 def record(name: str, version: str = "1.0") -> Record:
-    return Record(Ref.from_fields("soc", name, "rtl", "default", version))
+    return Record(Ref.from_fields("soc", name, version))
 
 
 def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalog) -> None:
@@ -33,7 +33,7 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     root = Record(record("top").ref, {"local": ["working-tree"]})
     graph = Graph(local_catalog, local_record(root), dependencies=(left.ref, right.ref))
     assert {item.ref for item in graph.records} == {root.ref, leaf.ref, left.ref, right.ref}
-    assert set(graph.networkx.edges) == {
+    assert set(graph.edges) == {
         (root.ref, left.ref),
         (root.ref, right.ref),
         (left.ref, leaf.ref),
@@ -43,15 +43,15 @@ def test_unpublished_consumer_resolves_shared_dependencies(local_catalog: Catalo
     assert stored_root.payload == {"local": ("working-tree",)}
     with pytest.raises(NotFound):
         catalog.get(Ref.from_fields(**root.ref.to_dict()))
-    assert len(catalog.search(SearchQuery())) == 3
+    assert len(catalog.search_refs(SearchQuery())) == 3
 
 
 def test_local_consumer_with_no_dependencies(local_catalog: Catalog) -> None:
     root = record("top")
     graph = Graph(local_catalog, local_record(root))
     assert graph.records == (local_record(root),)
-    assert tuple(sorted(graph.networkx.edges)) == ()
-    assert local_catalog.search(SearchQuery()) == ()
+    assert tuple(sorted(graph.edges)) == ()
+    assert local_catalog.search_refs(SearchQuery()) == ()
 
 
 def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
@@ -63,7 +63,7 @@ def test_local_data_overrides_published_root(local_catalog: Catalog) -> None:
     local = Record(root.ref, {"local": True})
     graph = Graph(catalog, local_record(local), dependencies=(current.ref,))
     assert graph.records == (current, local_record(local))
-    assert tuple(sorted(graph.networkx.edges)) == ((root.ref.without_revision(), current.ref),)
+    assert tuple(sorted(graph.edges)) == ((root.ref.without_revision(), current.ref),)
     assert catalog.get(Ref.from_fields(**root.ref.to_dict())) == root
     assert Graph(catalog, Ref.from_fields(**root.ref.to_dict())).dependencies() == (old,)
 
@@ -145,7 +145,7 @@ def test_conan_local_consumer_uses_opaque_project_lockfile(
     connection._client.run(
         "lock",
         "remove",
-        "--requires=soc.leaf.rtl.default/*",
+        "--requires=soc.leaf/*",
         "--lockfile",
         str(lockfile),
         "--lockfile-out",

@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
-from coreref.api.records import InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Record, Ref
 
 
 def test_installed_paths_and_payload_are_detached_and_read_only(tmp_path: Path) -> None:
     paths = {"lib": str(tmp_path / "cpu.lib")}
     record = InstalledRecord(
         Record(
-            Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "cpu", "1.0"),
             payload={"external": paths},
             file_names=("report",),
             has_source=True,
@@ -36,7 +36,7 @@ def test_installed_paths_and_payload_are_detached_and_read_only(tmp_path: Path) 
 
 @pytest.mark.parametrize("name,path", [("lib", Path("relative")), ("", Path("/data/lib"))])
 def test_package_file_input_validation_belongs_to_caller(name: str, path: Path) -> None:
-    record = LocalRecord(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"), files={name: path})
+    record = LocalRecord(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"), files={name: path})
     assert record.files == {name: path}
     assert (
         InstalledRecord(Record(record.ref, file_names=(name,)), files=record.files).files
@@ -47,7 +47,7 @@ def test_package_file_input_validation_belongs_to_caller(name: str, path: Path) 
 @pytest.mark.parametrize("paths", [{"lib": "relative/path"}, {"": "/unmounted/data"}])
 def test_external_paths_are_opaque_payload(catalog: Catalog, paths: dict[str, str]) -> None:
     local = LocalRecord(
-        Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"),
+        Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"),
         payload={"resources": paths},
     )
     record = catalog.publish(local)

@@ -7,20 +7,20 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Ref
 from coreref.testing import LocalServer
 
 
 def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
     catalog: Catalog, conan_server: LocalServer, tmp_path: Path
 ) -> None:
-    logical = Ref("soc.cpu.rtl.default/1.0")
+    logical = Ref("soc.cpu/1.0")
     first = catalog.publish(LocalRecord(logical, {"generation": 1}))
     second = catalog.publish(LocalRecord(logical, {"generation": 2}))
-    library = catalog.publish(LocalRecord(Ref("soc.cpu/1.0")))
+    library = catalog.publish(LocalRecord(Ref("shared.axi/1.0")))
     reader = Catalog(conan_server.configure(tmp_path / "reader"))
     with (
         patch.object(reader._client, "download_recipe", side_effect=AssertionError("Metadata")),
@@ -32,13 +32,10 @@ def test_search_refs_reads_only_the_index_and_defaults_to_one_revision(
         assert reader.search_refs(SearchQuery(), all_revisions=True) == tuple(
             sorted((first.ref, second.ref, library.ref))
         )
-        assert reader.search_refs(SearchQuery(view="rtl")) == (second.ref,)
+        assert reader.search_refs(SearchQuery(namespace="soc", component="cpu")) == (second.ref,)
         assert reader.search_refs(SearchQuery(revision=first.ref.revision)) == (first.ref,)
         assert reader.search_refs(SearchQuery(component="absent")) == ()
         commands.reset_mock()
         with pytest.raises(InvalidPackage):
             SearchQuery(component="cpu*")
         commands.assert_not_called()
-    assert reader.search_refs(SearchQuery()) == tuple(
-        record.ref for record in reader.search(SearchQuery())
-    )

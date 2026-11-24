@@ -20,7 +20,7 @@ class BlockDulwich(importlib.abc.MetaPathFinder):
             raise AssertionError("Server helpers must not import Dulwich")
 
 sys.meta_path.insert(0, BlockDulwich())
-from coreref.api.records import Ref
+from coreref.api.packages import Ref
 from coreref.testing import configured_home, local_server, Sandbox
 from coreref.testing.server import LocalServer
 
@@ -30,7 +30,7 @@ with local_server(root / "server") as server:
     assert isinstance(server, LocalServer)
     server.configure(root / "reader")
     sandbox = Sandbox(server, root / "fixtures")
-    sandbox.package(Ref("test.meta.rtl.default/1.0"))
+    sandbox.package(Ref("test.meta/1.0"))
     template = root / "test_projects"
     template.mkdir()
     (template / "custom.txt").write_text("flow data")

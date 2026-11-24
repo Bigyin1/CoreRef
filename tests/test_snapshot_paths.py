@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 
 pytestmark = pytest.mark.conan_remote
 
@@ -22,7 +22,7 @@ def test_publish_and_lockfile_stay_in_original_project_after_chdir(
     (first / "result").write_text("first artifact")
     (second / "result").write_text("second artifact")
     monkeypatch.chdir(first)
-    record = LocalRecord(Ref("test.cpu.be.report/1.0"), files={"result": Path("result")})
+    record = LocalRecord(Ref("test.cpu--be--report/1.0"), files={"result": Path("result")})
     Graph(catalog, record).create_lockfile("deps.lock")
     graph = Graph(catalog, record, lockfile=Path("deps.lock"))
     monkeypatch.chdir(second)

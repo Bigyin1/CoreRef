@@ -7,9 +7,9 @@ from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
 
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import JSON, InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import JSON, InstalledRecord, LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 
 
 class ProjectTypeId(str, Enum):
@@ -26,7 +26,7 @@ def release(
     name: str, version: str = "v1", *, manifest: Mapping[str, JSON] | None = None
 ) -> Record:
     return Record(
-        Ref.from_fields("demo-ip", name, "release", "default", version),
+        Ref.from_fields("demo-ip", name, version),
         {
             "resources": [
                 {
@@ -45,7 +45,7 @@ def release(
 
 def run(name: str, *, type_id: str = RunTypeId.SYNTHESIS) -> Record:
     return Record(
-        Ref.from_fields("flow", name, "run", "default", "1.0"),
+        Ref.from_fields("flow", name, "1.0"),
         {"type_id": type_id, "purpose": "synthesis", "details": {"array": [3, 1, 2]}},
     )
 
@@ -69,7 +69,7 @@ def graph_json(result: Graph) -> str:
         ],
         "dependencies": [
             {"source": source.to_dict(), "target": target.to_dict()}
-            for source, target in sorted(result.networkx.edges)
+            for source, target in sorted(result.edges)
         ],
     }
     return json.dumps(value, sort_keys=True, separators=(",", ":"))

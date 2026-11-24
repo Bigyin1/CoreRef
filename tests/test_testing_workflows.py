@@ -7,9 +7,9 @@ import pytest
 from dulwich.objects import Commit
 from dulwich.repo import Repo
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError
-from coreref.api.graph import Graph
+from coreref.api.packages.catalog import Catalog
+from coreref.api.projects.graph import Graph
 from coreref.testing import (
     FixtureFile,
     LocalServer,
@@ -42,7 +42,7 @@ def test_existing_source_incremental_publish_and_executable_update(
     assert first.ref != second.ref
     reader = env.new_catalog()
     for published, content in ((first, "first"), (second, "second")):
-        installed = reader.get_with_sources(published.ref)
+        installed = reader.get(published.ref, with_sources=True)
         assert installed.source is not None
         assert (installed.source / "run.sh").read_text() == content
         assert (installed.source / "run.sh").stat().st_mode & 0o111
@@ -81,7 +81,7 @@ def test_consumer_deps_edit_lock_and_workspace_next_to_project(
     project = env.project(env.ref("top"), path=tmp_path / "project/manifest.yml")
     project.add(published.ref.without_revision())
     project.save()
-    assert project.resolve(catalog).get_with_sources()[0].source != cpu.source
+    assert project.resolve(catalog).get(with_sources=True)[0].source != cpu.source
     project.create_lockfile(catalog)
     assert project.lockfile.is_file()
     project.lockfile.unlink()
@@ -89,7 +89,7 @@ def test_consumer_deps_edit_lock_and_workspace_next_to_project(
     assert cpu.source is not None
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(project.path.parent)
-    editable = project.resolve(catalog).get_with_sources()[0]
+    editable = project.resolve(catalog).get(with_sources=True)[0]
     assert editable.source == cpu.source and editable.is_editable
 
 
@@ -115,7 +115,7 @@ def test_local_server_defaults_allow_local_git_sources(
     env = Sandbox(conan_server, tmp_path / "fixtures")
     catalog = Catalog(conan_server.configure(tmp_path / "client"))
     published = catalog.publish(env.package(env.ref("cpu"), sources={"cpu.sv": "RTL"}))
-    assert catalog.get_with_sources(published.ref).source is not None
+    assert catalog.get(published.ref, with_sources=True).source is not None
 
 
 def test_profile_uses_native_detection_and_preserves_existing_profile(tmp_path: Path) -> None:
@@ -140,9 +140,7 @@ def test_fixture_ref_coordinates_and_invalid_source_options(
     tmp_path: Path,
 ) -> None:
     env = Sandbox(conan_server, tmp_path, namespace="soc")
-    assert (
-        str(env.ref("cpu_core", "2.0", view="be", type="lib-lef")) == "soc.cpu_core.be.lib-lef/2.0"
-    )
+    assert str(env.ref("cpu_core", "2.0")) == "soc.cpu_core/2.0"
     with pytest.raises(ValueError, match="existing directory"):
         env.package(env.ref("cpu"), source=tmp_path, sources={})
     with pytest.raises(FileNotFoundError):
@@ -164,8 +162,8 @@ def test_single_publication_keeps_lock_choice_and_records_only_successes(
     assert first.ref != second.ref
     locked = env.publish(consumer.record, dependencies=consumer.dependencies, lockfile=lock)
     reader = env.new_catalog()
-    assert consumer.resolve(reader).requirements == (first.ref,)
-    assert Graph(reader, locked.ref).requirements == (second.ref,)
+    assert tuple(record.ref for record in consumer.resolve(reader).dependencies()) == (first.ref,)
+    assert tuple(record.ref for record in Graph(reader, locked.ref).dependencies()) == (second.ref,)
     assert env.publish(consumer.resolve(catalog)).ref == locked.ref
     with pytest.raises(CatalogError):
         env.publish(env.package(env.ref("broken")), dependencies=(env.ref("absent"),))

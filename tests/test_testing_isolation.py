@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
+from coreref.api.packages.catalog import Catalog
 from coreref.testing import LocalServer, Sandbox, configured_home
 
 pytestmark = pytest.mark.conan_remote

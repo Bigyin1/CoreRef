@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from functools import partial
 from operator import methodcaller
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from coreref.api.query import SearchQuery
-from coreref.api.records import Record, Ref
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import Record, Ref
 from coreref.testing import local_server
 from tests.performance.support import Dataset, Registry
 
@@ -37,8 +36,12 @@ def search_setup(
 ) -> Callable[[], tuple[tuple[Callable[[], object]], dict[str, object]]]:
     def setup() -> tuple[tuple[Callable[[], object]], dict[str, object]]:
         reader = registry.reader()
-        operation = reader.search if metadata else reader.search_refs
-        return (partial(operation, query),), {}
+
+        def list_packages() -> object:
+            refs = reader.search_refs(query)
+            return tuple(reader.info(ref) for ref in refs) if metadata else refs
+
+        return (list_packages,), {}
 
     return setup
 
@@ -54,9 +57,7 @@ def test_search(
 ) -> None:
     registry, dataset = search_registry
     size = len(dataset.records)
-    query = SearchQuery(
-        namespace=dataset.namespace, component="node000" if narrow else None, view="rtl"
-    )
+    query = SearchQuery(namespace=dataset.namespace, component="node000" if narrow else None)
     benchmark.extra_info.update(
         packages=size, matches=1 if narrow else size, metadata=metadata, cache="cold"
     )

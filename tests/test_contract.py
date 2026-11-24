@@ -7,11 +7,11 @@ from typing import cast
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import InvalidPackage, NotFound
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import JSON, LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import JSON, LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 from tests.helpers import graph_json, local_record, release, resolve_published
 
 
@@ -23,7 +23,7 @@ def test_get_returns_published_records_and_reports_missing(catalog: Catalog) -> 
     assert catalog.get(Ref.from_fields(**second.ref.to_dict())) == second
     with pytest.raises(NotFound):
         catalog.get(Ref.from_fields(**release("absent").ref.to_dict()))
-    assert catalog.search(SearchQuery()) == (first, second)
+    assert catalog.search_refs(SearchQuery()) == (first.ref, second.ref)
 
 
 def test_new_revision_preserves_previously_published_records(catalog: Catalog) -> None:
@@ -31,7 +31,7 @@ def test_new_revision_preserves_previously_published_records(catalog: Catalog) -
     original = catalog.publish(local_record(original))
     changed = catalog.publish(local_record(Record(original.ref, {"changed": True})))
     assert changed.ref != original.ref
-    assert catalog.search(SearchQuery()) == (changed,)
+    assert catalog.search_refs(SearchQuery()) == (changed.ref,)
     assert catalog.get(Ref.from_fields(**original.ref.to_dict())) == original
 
 
@@ -40,7 +40,7 @@ def test_publish_rejects_record_collections(catalog: Catalog, count: int) -> Non
     records = tuple(release(f"record-{index}") for index in range(count))
     with pytest.raises(InvalidPackage, match="one LocalRecord"):
         catalog.publish(cast(LocalRecord, records))
-    assert not catalog.search(SearchQuery())
+    assert not catalog.search_refs(SearchQuery())
 
 
 @pytest.mark.parametrize("problem", ["duplicate", "missing", "self", "edge-value"])
@@ -60,7 +60,7 @@ def test_invalid_dependencies_do_not_publish(catalog: Catalog, problem: str) -> 
         dependencies = (cast(Ref, (source.ref, target.ref)),)
     with pytest.raises(exception):
         source = catalog.publish(local_record(source), dependencies=dependencies)
-    assert catalog.search(SearchQuery()) == (target,)
+    assert catalog.search_refs(SearchQuery()) == (target.ref,)
 
 
 def test_dependencies_must_already_exist(catalog: Catalog) -> None:
@@ -71,9 +71,7 @@ def test_dependencies_must_already_exist(catalog: Catalog) -> None:
     first = catalog.publish(local_record(first), dependencies=(second.ref,))
     with pytest.raises(InvalidPackage, match="contains a cycle"):
         catalog.publish(local_record(second), dependencies=(first.ref,))
-    assert tuple(sorted(resolve_published(catalog, first.ref).networkx.edges)) == (
-        (first.ref, second.ref),
-    )
+    assert tuple(sorted(resolve_published(catalog, first.ref).edges)) == ((first.ref, second.ref),)
 
 
 def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> None:
@@ -95,7 +93,7 @@ def test_diamond_has_one_record_per_ref_and_exact_edges(catalog: Catalog) -> Non
         right.ref,
         shared.ref,
     }
-    assert tuple(sorted(graph.networkx.edges)) == tuple(sorted(edges))
+    assert tuple(sorted(graph.edges)) == tuple(sorted(edges))
     assert Graph(catalog, Ref.from_fields(**root.ref.to_dict())).dependencies() == (
         left,
         right,
@@ -133,7 +131,7 @@ def test_resolution_returns_the_entire_graph(catalog: Catalog, length: int) -> N
     edges = tuple((source.ref, target.ref) for source, target in pairwise(records))
     result = resolve_published(catalog, records[0].ref)
     assert result.records == records
-    assert set(result.networkx.edges) == set(edges)
+    assert set(result.edges) == set(edges)
 
 
 def test_missing_graph_roots_are_errors(catalog: Catalog) -> None:

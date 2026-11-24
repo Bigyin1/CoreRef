@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from coreref.api.errors import CatalogError
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
+from coreref.api.packages.query import SearchQuery
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer, Sandbox, local_server, trace_operations
 
 pytestmark = pytest.mark.conan_remote
@@ -54,11 +54,11 @@ def test_operation_trace_counts_real_fetch_then_cached_reuse(
     assert resolution.recipe_reads == 1
     assert resolution.installs == resolution.source_clones == resolution.package_downloads == 0
     with trace_operations() as fetch:
-        assert len(graph.get_with_sources()) == 1
+        assert len(graph.get(with_sources=True)) == 1
     assert fetch.installs == fetch.package_downloads == fetch.source_clones == 1
     assert fetch.recipe_reads == fetch.recipe_downloads == 0
     with trace_operations() as cached:
-        assert len(graph.get_with_sources()) == 1
+        assert len(graph.get(with_sources=True)) == 1
     assert cached.commands == ()
     assert cached.installs == cached.source_clones == cached.package_downloads == 0
 

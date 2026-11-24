@@ -15,14 +15,14 @@ from dulwich.refs import Ref as GitRef
 from dulwich.repo import Repo
 
 from coreref._internal.recipe import LocalRecipe, StoredRecipe
-from coreref.api.catalog import Catalog
 from coreref.api.errors import (
     CatalogError,
     NotFound,
 )
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import configured_home, local_server
 from tests.helpers import local_record, resolve_published
 
@@ -40,11 +40,11 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     remote_catalog: Catalog, tmp_path: Path
 ) -> None:
     rtl = Record(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+        Ref.from_fields("soc", "cpu", "1.0"),
         {"source": "cpu.sv"},
     )
     be = Record(
-        Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"),
+        Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"),
         {"source": "cpu.lib"},
     )
     rtl = remote_catalog.publish(local_record(rtl))
@@ -54,14 +54,14 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     native = remote_catalog._client.graph(remote_catalog._package(be.ref).recipe().directory)
     assert tuple(
         str(dep.ref) for dep in native.root.conanfile.dependencies.host.topological_sort.values()
-    ) == ("soc.cpu.rtl.default/1.0",)
+    ) == ("soc.cpu/1.0",)
     home = tmp_path / "reader"
     home.mkdir()
     shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
     reader = Catalog(configured_home(home), remote="catalog")
     assert reader.get(Ref.from_fields(**be.ref.to_dict())).payload == {"source": "cpu.lib"}
     assert resolve_published(reader, be.ref) == original_graph
-    new_rtl = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "2.0"))
+    new_rtl = Record(Ref.from_fields("soc", "cpu", "2.0"))
     external = tmp_path / "ci"
     LocalRecipe(local_record(new_rtl)).write(external)
     remote_catalog._client.create_lockfile(external)
@@ -73,14 +73,14 @@ def test_remote_round_trip_external_ci_and_cache_independence(
     assert resolve_published(reader, be.ref) == original_graph
     remote_catalog._client.run("remote", "update", "catalog", "--url", "http://127.0.0.1:1")
     with pytest.raises(CatalogError):
-        remote_catalog.search(SearchQuery.for_component(rtl.ref, view="be", type="lib-lef"))
+        remote_catalog.search_refs(SearchQuery(namespace="soc", component="cpu--be--lib-lef"))
 
 
 def test_cached_package_is_not_published_until_remote_upload_succeeds(
     remote_catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record = Record(
-        Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+        Ref.from_fields("soc", "cpu", "1.0"),
         {"source": "cpu.sv"},
     )
     catalog = remote_catalog
@@ -94,7 +94,7 @@ def test_cached_package_is_not_published_until_remote_upload_succeeds(
             record = catalog.publish(local_record(record))
     directory = remote_catalog._client.cache_path(str(record.ref))
     assert StoredRecipe(directory, reference=str(record.ref)).record == record
-    assert catalog.search(SearchQuery()) == ()
+    assert catalog.search_refs(SearchQuery()) == ()
 
     # A prepared local package must not block another attempt to publish to the server.
     record = catalog.publish(local_record(record))
@@ -106,14 +106,14 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
 ) -> None:
     # The isolated test server deliberately accepts a local SCM URL.
     (remote_catalog._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
-    dependency = Record(Ref.from_fields("tools", "flow", "run", "default", "1.0"))
+    dependency = Record(Ref.from_fields("tools", "flow", "1.0"))
     dependency = remote_catalog.publish(local_record(dependency))
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     published = remote_catalog.publish(
         local_record(
             Record(
-                Ref.from_fields("soc", "cpu", "be", "lib-lef", "1.0"),
+                Ref.from_fields("soc", "cpu--be--lib-lef", "1.0"),
                 {"corner": "tt"},
             ),
             source=checkout,
@@ -139,10 +139,10 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
     git_origin.rename(offline)
     try:
         with pytest.raises(CatalogError):
-            reader.get_with_sources(Ref.from_fields(**published.ref.to_dict()))
+            reader.get(Ref.from_fields(**published.ref.to_dict()), with_sources=True)
     finally:
         offline.rename(git_origin)
-    fetched = reader.get_with_sources(Ref.from_fields(**published.ref.to_dict()))
+    fetched = reader.get(Ref.from_fields(**published.ref.to_dict()), with_sources=True)
     assert fetched.files == installed.files
     assert fetched.source is not None
     assert (fetched.source / "cpu.sv").read_text() == "module cpu; endmodule\n"
@@ -152,7 +152,7 @@ def test_remote_keeps_artifacts_and_fetches_sources_from_git_on_demand(
 def test_one_configured_remote_is_used_automatically(
     remote_catalog: Catalog, tmp_path: Path
 ) -> None:
-    record = Record(Ref.from_fields("soc", "automatic", "rtl", "default", "1.0"))
+    record = Record(Ref.from_fields("soc", "automatic", "1.0"))
     publisher = remote_catalog
     assert remote_catalog._client.remote == "catalog"
     record = publisher.publish(local_record(record))
@@ -165,14 +165,14 @@ def test_one_configured_remote_is_used_automatically(
 def test_local_revision_does_not_override_remote_dependency(
     remote_catalog: Catalog, tmp_path: Path
 ) -> None:
-    rtl = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    rtl = Record(Ref.from_fields("soc", "cpu", "1.0"))
     rtl = remote_catalog.publish(local_record(rtl))
     # A conflicting local-only revision must never enter published requirements.
     rogue = tmp_path / "local-only-revision"
     LocalRecipe(local_record(Record(rtl.ref, {"local-only": True}))).write(rogue)
     remote_catalog._client.create_lockfile(rogue)
     remote_catalog._client.export(rogue)
-    another_be = Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "5.0"))
+    another_be = Record(Ref.from_fields("soc", "cpu--be--lib-lef", "5.0"))
     another_be = remote_catalog.publish(local_record(another_be), dependencies=(rtl.ref,))
     assert {r.ref for r in resolve_published(remote_catalog, another_be.ref).records} == {
         another_be.ref,
@@ -186,12 +186,10 @@ def test_warm_operations_do_not_redownload_recipes(
 ) -> None:
     artifact = tmp_path / "report.txt"
     artifact.write_text("report")
-    leaf = remote_catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"))
-    )
+    leaf = remote_catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "1.0")))
     root = remote_catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "root", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "root", "1.0"),
             files={"report": artifact},
         ),
         dependencies=(leaf.ref,),
@@ -207,7 +205,7 @@ def test_warm_operations_do_not_redownload_recipes(
     actions: dict[str, Callable[[], object]] = {
         "get": lambda: remote_catalog.get(root.ref),
         "resolve": lambda: Graph(remote_catalog, local_record(root), dependencies=(leaf.ref,)),
-        "search": lambda: remote_catalog.search(SearchQuery()),
+        "search": lambda: remote_catalog.search_refs(SearchQuery()),
         "publish": lambda: remote_catalog.publish(local_record(root), dependencies=(leaf.ref,)),
     }
     actions[operation]()
@@ -225,7 +223,7 @@ def test_graph_batch_downloads_sources_and_artifacts_into_a_fresh_reader(
     (remote_catalog._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
     leaf = remote_catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "leaf", "1.0"),
             source=checkout,
         )
     )
@@ -233,7 +231,7 @@ def test_graph_batch_downloads_sources_and_artifacts_into_a_fresh_reader(
     artifact.write_text("server artifact")
     parent = remote_catalog.publish(
         LocalRecord(
-            Ref.from_fields("soc", "parent", "rtl", "default", "1.0"),
+            Ref.from_fields("soc", "parent", "1.0"),
             source=checkout,
             files={"report": artifact},
         ),
@@ -248,73 +246,45 @@ def test_graph_batch_downloads_sources_and_artifacts_into_a_fresh_reader(
     reader = Catalog(configured_home(home), remote="catalog")
     graph = Graph(
         reader,
-        LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0")),
+        LocalRecord(Ref.from_fields("soc", "top", "1.0")),
         dependencies=(parent.ref,),
     )
     with patch.object(reader._client, "run", wraps=reader._client.run) as command:
-        fetched = graph.get_with_sources((leaf.ref, parent.ref))
+        fetched = graph.get((leaf.ref, parent.ref), with_sources=True)
         assert all(
             record.source is not None and (record.source / "cpu.sv").is_file() for record in fetched
         )
         assert fetched[1].files["report"].read_text() == "server artifact"
         assert graph.catalog is reader
         shutil.rmtree(git_origin)
-        assert graph.get_with_sources((parent.ref,))[0] is fetched[1]
+        assert graph.get((parent.ref,), with_sources=True)[0] is fetched[1]
         assert command.call_count == 1 and command.call_args.args[0] == "install"
-
-
-def test_be_is_searchable_from_rtl_in_a_fresh_reader(
-    remote_catalog: Catalog, tmp_path: Path
-) -> None:
-    rtl = remote_catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
-    )
-    artifact = tmp_path / "alu.lib"
-    artifact.write_text("library from server")
-    macro = remote_catalog.publish(
-        LocalRecord(
-            Ref.from_fields(
-                "soc",
-                "cpu",
-                "be",
-                "lib-lef",
-                "4.0",
-            ),
-            files={"lib": artifact},
-        ),
-        dependencies=(rtl.ref,),
-    )
-    home = tmp_path / "be-reader"
-    home.mkdir()
-    shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
-    reader = Catalog(configured_home(home), remote="catalog")
-    found = reader.search(SearchQuery(namespace="soc", component="cpu", view="be"))
-    assert tuple(record.ref for record in found) == (macro.ref,)
-    assert Graph(reader, found[0].ref).dependencies()[0].ref == rtl.ref
-    assert reader.get(found[0].ref).files["lib"].read_text() == "library from server"
 
 
 def test_remote_latest_and_locked_graphs_survive_new_revisions(
     remote_catalog: Catalog, tmp_path: Path
 ) -> None:
-    logical = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")
+    logical = Ref.from_fields("soc", "cpu", "1.0")
     first = remote_catalog.publish(LocalRecord(logical, {"generation": 1}))
     home = configured_home(tmp_path / "revision-reader")
     shutil.copyfile(remote_catalog._client.home / "remotes.json", home / "remotes.json")
     reader = Catalog(home)
     dependency = Ref.from_fields(**logical.to_dict())
-    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+    root = LocalRecord(Ref.from_fields("soc", "top", "1.0"))
     graph = Graph(reader, root, dependencies=(dependency,))
     lock = graph.create_lockfile(tmp_path / "old.lock")
     second = remote_catalog.publish(LocalRecord(logical, {"generation": 2}))
     assert reader.get(dependency).ref == second.ref
-    assert Graph(reader, root, dependencies=(dependency,)).requirements == (second.ref,)
-    assert Graph(reader, root, dependencies=(dependency,), lockfile=lock).requirements == (
-        first.ref,
-    )
+    assert tuple(
+        record.ref for record in Graph(reader, root, dependencies=(dependency,)).dependencies()
+    ) == (second.ref,)
+    assert tuple(
+        record.ref
+        for record in Graph(reader, root, dependencies=(dependency,), lockfile=lock).dependencies()
+    ) == (first.ref,)
     assert graph.get((dependency,))[0].ref == first.ref
-    assert reader.search(SearchQuery()) == (second,)
-    assert set(reader.search(SearchQuery(), all_revisions=True)) == {first, second}
+    assert reader.search_refs(SearchQuery()) == (second.ref,)
+    assert set(reader.search_refs(SearchQuery(), all_revisions=True)) == {first.ref, second.ref}
     missing = Ref.from_fields(**logical.to_dict(), revision="a" * 32)
     with pytest.raises(CatalogError):
         reader.get(missing)
@@ -338,7 +308,7 @@ def test_remote_sources_and_files_belong_to_the_requested_revision(
     remote_catalog: Catalog, tmp_path: Path, checkout: Path, git_origin: Path
 ) -> None:
     (remote_catalog._client.home / "global.conf").write_text("core.scm:local_url=allow\n")
-    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")
+    ref = Ref.from_fields("soc", "cpu", "1.0")
     file = tmp_path / "report"
     file.write_text("first")
     first = remote_catalog.publish(LocalRecord(ref, source=checkout, files={"report": file}))
@@ -350,7 +320,7 @@ def test_remote_sources_and_files_belong_to_the_requested_revision(
     reader = Catalog(home)
     shutil.rmtree(checkout)
     for record, text in ((first, "first"), (second, "second")):
-        fetched = reader.get_with_sources(Ref.from_fields(**record.ref.to_dict()))
+        fetched = reader.get(Ref.from_fields(**record.ref.to_dict()), with_sources=True)
         assert fetched.ref == record.ref
         assert fetched.files["report"].read_text() == text
         assert fetched.source is not None
@@ -360,12 +330,10 @@ def test_remote_sources_and_files_belong_to_the_requested_revision(
 def test_deleted_remote_revision_remains_available_by_exact_cached_ref(
     remote_catalog: Catalog,
 ) -> None:
-    record = remote_catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "deleted", "rtl", "default", "1.0"))
-    )
+    record = remote_catalog.publish(LocalRecord(Ref.from_fields("soc", "deleted", "1.0")))
     remote_catalog._client.run("remove", str(record.ref), "--remote", "catalog", "--confirm")
     assert remote_catalog.get(record.ref) == record
     assert Graph(remote_catalog, record.ref).record == record
-    assert remote_catalog.search(SearchQuery()) == ()
+    assert remote_catalog.search_refs(SearchQuery()) == ()
     with pytest.raises(NotFound):
         remote_catalog.get(record.ref.without_revision())

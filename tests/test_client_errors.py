@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 from conan.errors import ConanException  # type: ignore[import-untyped]
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage, NotFound
+from coreref.api.packages.catalog import Catalog
 from coreref.testing import configured_home
 
 

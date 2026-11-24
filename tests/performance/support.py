@@ -10,9 +10,9 @@ from typing import Literal
 
 from dulwich import porcelain
 
-from coreref.api.catalog import Catalog
-from coreref.api.graph import Graph
-from coreref.api.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import InstalledRecord, LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer
 
 Shape = Literal["chain", "wide", "shared"]
@@ -27,7 +27,7 @@ class Dataset:
     edges: tuple[tuple[Ref, Ref], ...]
 
     def resolve(self, catalog: Catalog, *, lockfile: Path | None = None) -> Graph:
-        root = LocalRecord(Ref(f"{self.namespace}.local.rtl.default/1.0"))
+        root = LocalRecord(Ref(f"{self.namespace}.local/1.0"))
         return Graph(
             catalog,
             root,
@@ -40,7 +40,7 @@ class Dataset:
             record.ref for record in self.records
         }
         expected = {*self.edges, *((graph.record.ref, ref) for ref in self.roots)}
-        assert set(graph.networkx.edges) == expected
+        assert set(graph.edges) == expected
 
 
 class Registry:
@@ -92,7 +92,7 @@ class Registry:
     def _record(self, namespace: str, index: int, content: Content) -> LocalRecord:
         kind = ("files", "scm", "both")[index % 3] if content == "mixed" else content
         return LocalRecord(
-            Ref(f"{namespace}.node{index:03}.rtl.default/1.0"),
+            Ref(f"{namespace}.node{index:03}/1.0"),
             payload={"index": index},
             source=self.source if kind in {"scm", "both"} else None,
             files={"result.bin": self.artifact} if kind in {"files", "both"} else {},
@@ -130,7 +130,7 @@ def graph_setup(
 
 
 def fetch(graph: Graph, sources: bool) -> tuple[InstalledRecord, ...]:
-    return graph.get_with_sources() if sources else graph.get()
+    return graph.get(with_sources=True) if sources else graph.get()
 
 
 def check_files(records: tuple[InstalledRecord, ...], *, sources: bool) -> None:

@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.records import LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 from tests.helpers import local_record
 
 
@@ -18,14 +18,12 @@ def test_project_lock_pins_publication_and_installation(
     tmp_path: Path, *, catalog: Catalog
 ) -> None:
     catalog = Catalog(catalog._client.home)
-    dependency = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
-    )
+    dependency = catalog.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
     artifact = tmp_path / "cpu.lib"
     artifact.write_text("library(cpu) {}")
     project = Graph(
         catalog,
-        LocalRecord(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0")),
+        LocalRecord(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0")),
         dependencies=(dependency.ref,),
     )
     lockfile = project.create_lockfile(tmp_path / "project/conan.lock")
@@ -34,13 +32,13 @@ def test_project_lock_pins_publication_and_installation(
     assert isinstance(local, LocalRecord)
     record = catalog.publish(
         replace(local, files={"cpu.lib": artifact}),
-        dependencies=project.requirements,
+        dependencies=tuple(record.ref for record in project.dependencies()),
         lockfile=lockfile,
     )
     assert tuple(record.files) == ("cpu.lib",)
     recipe = catalog._package(project.record.ref).recipe().directory
     assert not (recipe / "conan.lock").exists()
-    assert tuple(sorted(project.networkx.edges)) == ((project.record.ref, dependency.ref),)
+    assert tuple(sorted(project.edges)) == ((project.record.ref, dependency.ref),)
     installed = catalog.get(record.ref)
     assert installed.files["cpu.lib"].read_text() == artifact.read_text()
     assert "conan.lock" not in installed.files
@@ -58,11 +56,9 @@ def test_conan_validates_the_supplied_project_lockfile(
     tmp_path: Path, damage: str, exception: type[Exception], *, catalog: Catalog
 ) -> None:
     catalog = Catalog(catalog._client.home)
-    rtl = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
-    )
+    rtl = catalog.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
     macro = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"))),
+        local_record(Record(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"))),
         dependencies=(rtl.ref,),
     )
     project = Graph(catalog, local_record(macro), dependencies=(rtl.ref,))
@@ -71,7 +67,7 @@ def test_conan_validates_the_supplied_project_lockfile(
         catalog._client.run(
             "lock",
             "remove",
-            "--requires=soc.cpu.rtl.default/*",
+            "--requires=soc.cpu/*",
             "--lockfile",
             str(lockfile),
             "--lockfile-out",
@@ -82,19 +78,24 @@ def test_conan_validates_the_supplied_project_lockfile(
     local = project.record
     assert isinstance(local, LocalRecord)
     with pytest.raises(exception):
-        Graph(catalog, local, dependencies=project.requirements, lockfile=lockfile)
+        Graph(
+            catalog,
+            local,
+            dependencies=tuple(record.ref for record in project.dependencies()),
+            lockfile=lockfile,
+        )
     assert catalog.get(macro.ref) == macro
 
 
 def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
     catalog = Catalog(catalog._client.home)
-    root = Record(Ref.from_fields("soc", "root", "rtl", "default", "1.0"))
+    root = Record(Ref.from_fields("soc", "root", "1.0"))
     project = Graph(catalog, local_record(root))
     lockfile = project.create_lockfile(tmp_path / "empty/conan.lock")
     empty_lock = lockfile.read_bytes()
     root = catalog.publish(local_record(root), lockfile=lockfile)
     assert project.records == (local_record(root),)
-    consumer = Record(Ref.from_fields("soc", "consumer", "rtl", "default", "1.0"))
+    consumer = Record(Ref.from_fields("soc", "consumer", "1.0"))
     Graph(catalog, local_record(consumer), dependencies=(root.ref,)).create_lockfile(lockfile)
     project.create_lockfile()
     assert lockfile.read_bytes() == empty_lock
@@ -104,9 +105,9 @@ def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
 def test_missing_lockfile_is_optional_but_its_output_path_is_retained(
     catalog: Catalog, tmp_path: Path, published: bool
 ) -> None:
-    dependency = LocalRecord(Ref("soc.cpu.rtl.default/1.0"))
+    dependency = LocalRecord(Ref("soc.cpu/1.0"))
     first = catalog.publish(dependency)
-    root = dependency.ref if published else LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    root = dependency.ref if published else LocalRecord(Ref("soc.top/1.0"))
     requirements = () if published else (dependency.ref,)
     path = tmp_path / "new-project/project.lock"
     graph = Graph(catalog, root, dependencies=requirements, lockfile=path)
@@ -126,4 +127,4 @@ def test_an_existing_directory_cannot_be_ignored_as_a_missing_lockfile(
     catalog: Catalog, tmp_path: Path
 ) -> None:
     with pytest.raises(CatalogError):
-        Graph(catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), lockfile=tmp_path)
+        Graph(catalog, LocalRecord(Ref("soc.top/1.0")), lockfile=tmp_path)

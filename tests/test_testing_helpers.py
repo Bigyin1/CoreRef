@@ -8,8 +8,8 @@ import pytest
 from dulwich import porcelain
 from dulwich.repo import Repo
 
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
+from coreref.api.packages.records import LocalRecord, Ref
+from coreref.api.projects.graph import Graph
 from coreref.testing import LocalServer, Sandbox, environment, git_repository, git_upstream
 
 pytestmark = pytest.mark.conan_remote
@@ -20,17 +20,17 @@ def test_packages_roundtrip_between_independent_clients(
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path / "sandbox")
     publisher, reader = sandbox.catalog, sandbox.new_catalog()
-    assert publisher.cache_directory != reader.cache_directory
-    util = publisher.publish(sandbox.package(Ref("test.util.rtl.default/1.0")))
+    assert publisher._client.cache_directory != reader._client.cache_directory
+    util = publisher.publish(sandbox.package(Ref("test.util/1.0")))
     local = sandbox.package(
-        Ref("test.cpu.rtl.default/1.0"),
+        Ref("test.cpu/1.0"),
         sources={"rtl/cpu.sv": "module cpu; endmodule\n"},
         files={"nested/result.bin": b"\x00\x01"},
     )
     local.payload = {"custom": "flow data"}
     published = publisher.publish(local, dependencies=(util.ref,))
     graph = Graph(reader, published.ref)
-    installed = graph.get_with_sources()
+    installed = graph.get(with_sources=True)
     cpu = next(record for record in installed if record.ref == published.ref)
     assert cpu.source is not None
     assert (cpu.source / "rtl/cpu.sv").read_text() == "module cpu; endmodule\n"
@@ -45,12 +45,12 @@ def test_native_workspace_uses_fixture_sources(
     sandbox = Sandbox(conan_server, tmp_path / "sandbox")
     catalog = sandbox.catalog
     workspace = sandbox.workspace()
-    cpu = sandbox.package(Ref("test.cpu.rtl.default/1.0"), sources={"cpu.sv": "local RTL"})
+    cpu = sandbox.package(Ref("test.cpu/1.0"), sources={"cpu.sv": "local RTL"})
     assert cpu.source is not None
     workspace.add(cpu.source, record=cpu)
     monkeypatch.chdir(workspace.path.parent)
-    graph = Graph(catalog, LocalRecord(Ref("test.top.rtl.default/1.0")), dependencies=(cpu.ref,))
-    editable = graph.get_with_sources()[0]
+    graph = Graph(catalog, LocalRecord(Ref("test.top/1.0")), dependencies=(cpu.ref,))
+    editable = graph.get(with_sources=True)[0]
     assert editable.is_editable and editable.source == cpu.source
     assert (editable.source / "cpu.sv").read_text() == "local RTL"
     workspace.remove(cpu.source)
@@ -61,7 +61,7 @@ def test_repeated_package_inputs_do_not_overwrite_each_other(
     conan_server: LocalServer, tmp_path: Path
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
-    ref = Ref("test.cpu.rtl.default/1.0")
+    ref = Ref("test.cpu/1.0")
     first = sandbox.package(ref, files={"result": "first"})
     second = sandbox.package(ref, files={"result": "second"})
     assert first.files["result"] != second.files["result"]
@@ -83,7 +83,7 @@ def test_fixture_files_stay_in_owned_directory(
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
     with pytest.raises(ValueError, match="inside its directory"):
-        sandbox.package(Ref("test.cpu.rtl.default/1.0"), files={name: "bad"})
+        sandbox.package(Ref("test.cpu/1.0"), files={name: "bad"})
 
 
 def test_package_hierarchy_downloads_from_bare_upstreams(
@@ -93,7 +93,7 @@ def test_package_hierarchy_downloads_from_bare_upstreams(
     links = {"util": (), "cpu": ("util",), "io": ("util",), "top": ("cpu", "io")}
     records = {
         name: sandbox.package(
-            Ref(f"test.{name}.rtl.default/1.0"),
+            Ref(f"test.{name}/1.0"),
             sources={f"{name}.sv": f"module {name}; endmodule\n"},
         )
         for name in links
@@ -105,10 +105,10 @@ def test_package_hierarchy_downloads_from_bare_upstreams(
         assert local.source is not None
         shutil.rmtree(local.source)
     graph = Graph(sandbox.new_catalog(), published["top"].ref)
-    assert {(a.component, b.component) for a, b in graph.networkx.edges} == {
+    assert {(a.component, b.component) for a, b in graph.edges} == {
         (name, dependency) for name, dependencies in links.items() for dependency in dependencies
     }
-    installed = graph.get_with_sources()
+    installed = graph.get(with_sources=True)
     assert len(installed) == len(records)
     for record in installed:
         assert record.source is not None
@@ -123,16 +123,16 @@ def test_editable_hierarchy_can_mix_local_and_published_packages(
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
     catalog = sandbox.catalog
-    util = catalog.publish(sandbox.package(Ref("test.util.rtl.default/1.0")))
-    cpu = sandbox.package(Ref("test.cpu.rtl.default/1.0"), sources={"cpu.sv": "CPU"})
-    top = sandbox.package(Ref("test.top.rtl.default/1.0"), sources={"top.sv": "TOP"})
+    util = catalog.publish(sandbox.package(Ref("test.util/1.0")))
+    cpu = sandbox.package(Ref("test.cpu/1.0"), sources={"cpu.sv": "CPU"})
+    top = sandbox.package(Ref("test.top/1.0"), sources={"top.sv": "TOP"})
     workspace = sandbox.workspace()
     assert cpu.source is not None and top.source is not None
     workspace.add(cpu.source, record=cpu, dependencies=(util.ref,))
     workspace.add(top.source, record=top, dependencies=(cpu.ref, util.ref))
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, top.ref)
-    installed = {record.ref.component: record for record in graph.get_with_sources()}
+    installed = {record.ref.component: record for record in graph.get(with_sources=True)}
     assert installed["cpu"].source == cpu.source and installed["cpu"].is_editable
     assert installed["top"].source == top.source and installed["top"].is_editable
     assert not installed["util"].is_editable
@@ -174,9 +174,7 @@ def test_package_set_rejects_invalid_links_before_publication(
     dependencies: dict[str, tuple[str, ...]],
 ) -> None:
     sandbox = Sandbox(conan_server, tmp_path)
-    records = {
-        name: sandbox.package(Ref(f"test.{name}.rtl.default/1.0")) for name in ("cpu", "top")
-    }
+    records = {name: sandbox.package(Ref(f"test.{name}/1.0")) for name in ("cpu", "top")}
     with patch.object(conan_server, "configure") as configure:
         with pytest.raises(ValueError, match=r"Unknown fixture packages|contain a cycle"):
             sandbox.publish_set(records, dependencies=dependencies)
@@ -192,11 +190,11 @@ def test_package_set_can_be_empty(conan_server: LocalServer, tmp_path: Path) -> 
 def test_environment_owns_server_clients_and_git_origins(tmp_path: Path) -> None:
     with environment(tmp_path) as sandbox:
         records = {
-            name: sandbox.package(Ref(f"test.{name}.rtl.default/1.0"), sources={f"{name}.sv": name})
+            name: sandbox.package(Ref(f"test.{name}/1.0"), sources={f"{name}.sv": name})
             for name in ("cpu", "top")
         }
         published = sandbox.publish_set(records, dependencies={"top": ("cpu",)})
         graph = Graph(sandbox.new_catalog(), published["top"].ref)
-        assert len(graph.get_with_sources()) == 2
+        assert len(graph.get(with_sources=True)) == 2
         assert sandbox.server.url.startswith("http://127.0.0.1:")
     assert (tmp_path / "server/server.log").is_file()

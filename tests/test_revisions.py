@@ -9,15 +9,15 @@ import pytest
 
 from coreref._internal.recipe import LocalRecipe
 from coreref._internal.references import from_conan_reference, to_conan_reference
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage, NotFound
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 
 
 def test_revision_identity_and_snapshots() -> None:
-    logical = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")
+    logical = Ref.from_fields("soc", "cpu", "1.0")
     first = Ref.from_fields(**logical.to_dict(), revision="a" * 32)
     second = Ref.from_fields(**logical.to_dict(), revision="b" * 32)
     assert len({logical, first, second}) == 3
@@ -34,31 +34,31 @@ def test_revision_identity_and_snapshots() -> None:
 @pytest.mark.parametrize("revision", ["", "latest", "*", "a#b", "a/b", "a%123", "a\nb"])
 def test_revision_must_be_a_concrete_token(revision: str) -> None:
     with pytest.raises(InvalidPackage):
-        ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", revision=revision)
+        ref = Ref.from_fields("soc", "cpu", "1.0", revision=revision)
         to_conan_reference(ref)
 
 
 def test_search_selects_latest_history_and_explicit_revision(catalog: Catalog) -> None:
-    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")
+    ref = Ref.from_fields("soc", "cpu", "1.0")
     first = catalog.publish(LocalRecord(ref, {"generation": 1}))
     second = catalog.publish(LocalRecord(ref, {"generation": 2}))
     assert first.ref.revision and second.ref.revision
     assert first.ref != second.ref
     assert catalog.get(first.ref) == first
     assert catalog.get(ref) == second
-    assert catalog.search(SearchQuery()) == (second,)
-    assert set(catalog.search(SearchQuery(), all_revisions=True)) == {first, second}
+    assert catalog.search_refs(SearchQuery()) == (second.ref,)
+    assert set(catalog.search_refs(SearchQuery(), all_revisions=True)) == {first.ref, second.ref}
     query = SearchQuery(revision=first.ref.revision)
-    assert catalog.search(query) == (first,)
-    assert catalog.search(query, all_revisions=True) == (first,)
+    assert catalog.search_refs(query) == (first.ref,)
+    assert catalog.search_refs(query, all_revisions=True) == (first.ref,)
     assert catalog.publish(LocalRecord(ref, {"generation": 2})).ref == second.ref
-    assert len(catalog.search(SearchQuery(), all_revisions=True)) == 2
+    assert len(catalog.search_refs(SearchQuery(), all_revisions=True)) == 2
 
 
 def test_query_builds_revision_patterns_directly() -> None:
     query = SearchQuery(component="cpu")
-    assert query._conan_pattern() == "*.cpu*/*#latest"
-    assert query._conan_pattern(all_revisions=True) == "*.cpu*/*#*"
+    assert query._conan_pattern() == "*.cpu/*#latest"
+    assert query._conan_pattern(all_revisions=True) == "*.cpu/*#*"
     exact = SearchQuery(revision="a" * 32)
     assert exact._conan_pattern() == exact._conan_pattern(all_revisions=True)
     assert exact._conan_pattern() == f"*.*/*#{'a' * 32}"
@@ -68,33 +68,35 @@ def test_query_builds_revision_patterns_directly() -> None:
 
 @pytest.mark.parametrize("operation", ["publish", "graph"])
 def test_local_roots_cannot_claim_a_revision(catalog: Catalog, operation: str) -> None:
-    local = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0", revision="a" * 32))
+    local = LocalRecord(Ref.from_fields("soc", "cpu", "1.0", revision="a" * 32))
     with pytest.raises(InvalidPackage, match="local package root"):
         if operation == "publish":
             catalog.publish(local)
         else:
             Graph(catalog, local)
-    assert catalog.search(SearchQuery()) == ()
+    assert catalog.search_refs(SearchQuery()) == ()
 
 
 def test_lockfile_and_graph_keep_old_files_after_new_revision(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")
+    ref = Ref.from_fields("soc", "cpu", "1.0")
     file = tmp_path / "report"
     file.write_text("first")
     first = catalog.publish(LocalRecord(ref, files={"report": file}))
-    root = LocalRecord(Ref.from_fields("soc", "top", "rtl", "default", "1.0"))
+    root = LocalRecord(Ref.from_fields("soc", "top", "1.0"))
     graph = Graph(catalog, root, dependencies=(ref,))
     lock = graph.create_lockfile(tmp_path / "project.lock")
     contents = lock.read_bytes()
     file.write_text("second")
     second = catalog.publish(LocalRecord(ref, files={"report": file}))
-    assert graph.ordered_refs(root.ref) == (first.ref, root.ref)
+    assert graph.dependencies(root.ref, transitive=True) == (first,)
     assert graph.get((ref,))[0].files["report"].read_text() == "first"
-    assert Graph(catalog, root, dependencies=(ref,)).requirements == (second.ref,)
+    assert tuple(
+        record.ref for record in Graph(catalog, root, dependencies=(ref,)).dependencies()
+    ) == (second.ref,)
     locked = Graph(catalog, root, dependencies=(ref,), lockfile=lock)
-    assert locked.requirements == (first.ref,)
+    assert tuple(record.ref for record in locked.dependencies()) == (first.ref,)
     published = catalog.publish(root, dependencies=(ref,), lockfile=lock)
     assert Graph(catalog, published.ref).dependencies() == (second,)
     assert lock.read_bytes() == contents
@@ -103,11 +105,11 @@ def test_lockfile_and_graph_keep_old_files_after_new_revision(
     with pytest.raises(InvalidPackage, match="Revision"):
         graph.get((second.ref,))
     with pytest.raises(InvalidPackage, match="Revision"):
-        graph.ordered_refs(second.ref)
+        graph.dependencies(second.ref, transitive=True)
 
 
 def test_missing_explicit_revision_does_not_fall_back(catalog: Catalog) -> None:
-    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")
+    ref = Ref.from_fields("soc", "cpu", "1.0")
     catalog.publish(LocalRecord(ref))
     missing = Ref.from_fields(**ref.to_dict(), revision="a" * 32)
     with pytest.raises(NotFound):
@@ -118,10 +120,10 @@ def test_external_unpinned_requirements_resolve_independently(
     catalog: Catalog, tmp_path: Path
 ) -> None:
     leaves = tuple(
-        catalog.publish(LocalRecord(Ref.from_fields("soc", name, "rtl", "default", "1.0")))
+        catalog.publish(LocalRecord(Ref.from_fields("soc", name, "1.0")))
         for name in ("left", "right")
     )
-    root = LocalRecord(Ref.from_fields("soc", "external", "rtl", "default", "1.0"))
+    root = LocalRecord(Ref.from_fields("soc", "external", "1.0"))
     LocalRecipe(root, tuple(str(record.ref.without_revision()) for record in leaves)).write(
         tmp_path
     )

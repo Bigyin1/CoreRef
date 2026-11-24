@@ -11,11 +11,11 @@ import yaml  # type: ignore[import-untyped]
 from dulwich.repo import Repo
 
 from coreref._internal.recipe import LocalRecipe, StoredRecipe
-from coreref.api.catalog import Catalog
 from coreref.api.errors import CatalogError, InvalidPackage, NotFound
-from coreref.api.graph import Graph
-from coreref.api.query import SearchQuery
-from coreref.api.records import LocalRecord, Record, Ref
+from coreref.api.packages.catalog import Catalog
+from coreref.api.packages.query import SearchQuery
+from coreref.api.packages.records import LocalRecord, Record, Ref
+from coreref.api.projects.graph import Graph
 from tests.helpers import local_record, resolve_published
 
 
@@ -25,15 +25,13 @@ def packages(catalog: Catalog) -> Catalog:
 
 
 def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path) -> None:
-    rtl = packages.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")))
-    )
+    rtl = packages.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
     artifact = tmp_path / "cpu.lib"
     artifact.write_bytes(b"library(cpu) {}\n\x00")
     record = packages.publish(
         local_record(
             Record(
-                Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"),
+                Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"),
                 {"corner": "tt"},
             ),
             files={"timing/cpu.lib": artifact},
@@ -44,9 +42,7 @@ def test_publish_dependencies_and_stored_files(packages: Catalog, tmp_path: Path
     assert record.source is None
     assert packages.get(record.ref) == record
     assert Graph(packages, record.ref).dependencies() == (rtl,)
-    assert tuple(sorted(resolve_published(packages, record.ref).networkx.edges)) == (
-        (record.ref, rtl.ref),
-    )
+    assert tuple(sorted(resolve_published(packages, record.ref).edges)) == ((record.ref, rtl.ref),)
     artifact.unlink()
     content = packages.get(record.ref).files["timing/cpu.lib"]
     assert content.read_bytes() == b"library(cpu) {}\n\x00"
@@ -58,7 +54,7 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
     record = packages.publish(
         local_record(
             Record(
-                Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"),
+                Ref.from_fields("soc", "cpu", "1.0"),
                 {"tool": "synthesis"},
             ),
             source=checkout,
@@ -69,20 +65,20 @@ def test_local_source_is_captured_once_outside_payload(packages: Catalog, checko
     artifacts = packages.get(record.ref)
     assert artifacts.source is None
     assert artifacts.files == {}
-    fetched = packages.get_with_sources(record.ref)
+    fetched = packages.get(record.ref, with_sources=True)
     assert fetched.source is not None
     assert _commit(fetched.source) == _commit(checkout)
     assert (fetched.source / "cpu.sv").read_text() == "module cpu; endmodule\n"
     assert fetched.source.is_relative_to(packages._client.home)
     shutil.rmtree(checkout)
-    assert packages.get_with_sources(record.ref).source == fetched.source
+    assert packages.get(record.ref, with_sources=True).source == fetched.source
     assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["has_source"] is True
     assert "source" not in record.to_dict()
 
 
 def test_pinned_source_round_trip_uses_conan_scm(checkout: Path, *, catalog: Catalog) -> None:
     catalog = Catalog(catalog._client.home)
-    description = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    description = Record(Ref.from_fields("soc", "cpu", "1.0"))
     record = catalog.publish(local_record(description, source=checkout))
     folder = catalog._package(record.ref).recipe().directory
     assert "exports_sources" not in (folder / "conanfile.py").read_text()
@@ -90,12 +86,12 @@ def test_pinned_source_round_trip_uses_conan_scm(checkout: Path, *, catalog: Cat
     assert "scm" not in json.loads((folder / "record.json").read_text())
     assert "scm" in (folder / "conandata.yml").read_text()
     assert str(checkout) not in (folder / "conanfile.py").read_text()
-    fetched = catalog.get_with_sources(record.ref)
+    fetched = catalog.get(record.ref, with_sources=True)
     assert fetched.source is not None
     assert (fetched.source / "cpu.sv").is_file()
     changed = catalog.publish(local_record(description))
     assert changed.ref != record.ref
-    assert catalog.get_with_sources(record.ref).source == fetched.source
+    assert catalog.get(record.ref, with_sources=True).source == fetched.source
 
 
 def test_dirty_source_fails_before_publication(checkout: Path, *, catalog: Catalog) -> None:
@@ -104,13 +100,13 @@ def test_dirty_source_fails_before_publication(checkout: Path, *, catalog: Catal
     with pytest.raises(CatalogError, match="Could not prepare the package") as error:
         catalog.publish(
             local_record(
-                Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")),
+                Record(Ref.from_fields("soc", "cpu", "1.0")),
                 source=checkout,
             )
         )
     assert error.value.__cause__ is not None
     assert "dirty" in str(error.value.__cause__)
-    assert not catalog.search(SearchQuery())
+    assert not catalog.search_refs(SearchQuery())
 
 
 @pytest.mark.parametrize("name", ["../escape", "/absolute"])
@@ -120,11 +116,11 @@ def test_copy_cannot_escape_package_directory(packages: Catalog, tmp_path: Path,
     with pytest.raises(InvalidPackage):
         packages.publish(
             local_record(
-                Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0")),
+                Record(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0")),
                 files={name: artifact},
             )
         )
-    assert not packages.search(SearchQuery())
+    assert not packages.search_refs(SearchQuery())
 
 
 @pytest.mark.parametrize("problem", ["missing", "directory", "overlap"])
@@ -133,7 +129,7 @@ def test_invalid_artifact_inputs_do_not_publish(
 ) -> None:
     artifact = tmp_path / "input.txt"
     artifact.write_text("input")
-    record = Record(Ref.from_fields("soc", "cpu", "be", "lib-lef", "4.0"))
+    record = Record(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"))
     files = {"a": artifact}
     if problem == "missing":
         files = {"a": tmp_path / "missing"}
@@ -143,7 +139,7 @@ def test_invalid_artifact_inputs_do_not_publish(
         files["a/b"] = artifact
     with pytest.raises(InvalidPackage):
         record = packages.publish(local_record(record, files=files))
-    assert not packages.search(SearchQuery())
+    assert not packages.search_refs(SearchQuery())
 
 
 @pytest.mark.parametrize("problem", ["missing", "file"])
@@ -151,16 +147,16 @@ def test_invalid_source_inputs_do_not_publish(
     packages: Catalog, tmp_path: Path, problem: str
 ) -> None:
     source_path = tmp_path / "checkout"
-    record = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    record = Record(Ref.from_fields("soc", "cpu", "1.0"))
     if problem == "file":
         source_path.write_text("not a checkout")
     with pytest.raises(InvalidPackage):
         record = packages.publish(local_record(record, source=source_path))
-    assert not packages.search(SearchQuery())
+    assert not packages.search_refs(SearchQuery())
 
 
 def test_missing_content_and_record(packages: Catalog) -> None:
-    record = Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    record = Record(Ref.from_fields("soc", "cpu", "1.0"))
     with pytest.raises(NotFound):
         packages.get(record.ref)
     record = packages.publish(local_record(record))
@@ -172,7 +168,7 @@ def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
 ) -> None:
     record = packages.publish(
         local_record(
-            Record(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")),
+            Record(Ref.from_fields("soc", "cpu", "1.0")),
             source=checkout,
         )
     )
@@ -182,7 +178,7 @@ def test_source_is_not_in_binary_and_requires_git_on_first_retrieval(
     assert result.source is None
     assert result.files == {}
     with pytest.raises(CatalogError):
-        packages.get_with_sources(record.ref)
+        packages.get(record.ref, with_sources=True)
 
 
 def _commit(checkout: Path) -> str:
@@ -193,11 +189,9 @@ def _commit(checkout: Path) -> str:
 def test_recipe_declares_requires_and_conandata_tracks_scm(
     catalog: Catalog, checkout: Path
 ) -> None:
-    dependency = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "leaf", "rtl", "default", "1.0"))
-    )
+    dependency = catalog.publish(LocalRecord(Ref.from_fields("soc", "leaf", "1.0")))
     parent = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"), source=checkout),
+        LocalRecord(Ref.from_fields("soc", "cpu", "1.0"), source=checkout),
         dependencies=(dependency.ref,),
     )
     recipe = catalog._package(parent.ref).recipe()
@@ -212,13 +206,13 @@ def test_recipe_declares_requires_and_conandata_tracks_scm(
     assert recipe.has_source
     assert Graph(catalog, parent.ref).dependencies() == (dependency,)
     assert str(dependency.ref) in (recipe.directory / "conanfile.py").read_text()
-    assert catalog.get_with_sources(parent.ref).source is not None
+    assert catalog.get(parent.ref, with_sources=True).source is not None
 
 
 def test_legacy_conandata_requirements_can_still_be_inspected(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    record = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    record = LocalRecord(Ref.from_fields("soc", "cpu", "1.0"))
     LocalRecipe(record).write(tmp_path)
     (tmp_path / "conanfile.py").write_text(
         "from conan import ConanFile\nclass Package(ConanFile):\n"
@@ -240,7 +234,7 @@ def test_legacy_conandata_requirements_can_still_be_inspected(
 def test_absent_or_empty_scm_does_not_request_sources(
     tmp_path: Path, scm: dict[str, object] | None
 ) -> None:
-    record = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    record = LocalRecord(Ref.from_fields("soc", "cpu", "1.0"))
     LocalRecipe(record).write(tmp_path)
     (tmp_path / "conandata.yml").write_text(yaml.safe_dump({"scm": scm}))
     assert not StoredRecipe(tmp_path, reference=str(record.ref)).has_source
@@ -249,19 +243,17 @@ def test_absent_or_empty_scm_does_not_request_sources(
 def test_conan_reports_missing_scm_coordinates_when_sources_are_requested(
     catalog: Catalog, checkout: Path
 ) -> None:
-    record = catalog.publish(
-        LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"), source=checkout)
-    )
+    record = catalog.publish(LocalRecord(Ref.from_fields("soc", "cpu", "1.0"), source=checkout))
     folder = catalog._package(record.ref).recipe().directory
     (folder / "conandata.yml").write_text(yaml.safe_dump({"scm": {"commit": "HEAD"}}))
     assert catalog.get(record.ref) == record
     with pytest.raises(CatalogError, match="Could not retrieve package contents") as error:
-        catalog.get_with_sources(record.ref)
+        catalog.get(record.ref, with_sources=True)
     assert error.value.__cause__ is not None
 
 
 def test_conan_reports_invalid_requires_during_resolution(catalog: Catalog, tmp_path: Path) -> None:
-    record = LocalRecord(Ref.from_fields("soc", "cpu", "rtl", "default", "1.0"))
+    record = LocalRecord(Ref.from_fields("soc", "cpu", "1.0"))
     LocalRecipe(record, ("not-a-reference",)).write(tmp_path)
     assert StoredRecipe(tmp_path, reference=str(record.ref)).record.ref == record.ref
     with pytest.raises(CatalogError, match="require"):
@@ -273,7 +265,7 @@ def test_exported_recipe_omits_publisher_paths_and_has_stable_revision(
 ) -> None:
     relocated = tmp_path / "publisher's rtl checkout"
     shutil.copytree(checkout, relocated)
-    ref = Ref.from_fields("soc", "cpu", "rtl", "default", "1.0")
+    ref = Ref.from_fields("soc", "cpu", "1.0")
     first = tmp_path / "first-recipe"
     second = tmp_path / "second-recipe"
     LocalRecipe(LocalRecord(ref, source=checkout)).write(first)
@@ -293,5 +285,5 @@ def test_exported_recipe_omits_publisher_paths_and_has_stable_revision(
     assert stored.has_source and git_origin.is_dir()
     shutil.rmtree(checkout)
     shutil.rmtree(relocated)
-    fetched = catalog.get_with_sources(ref)
+    fetched = catalog.get(ref, with_sources=True)
     assert fetched.source is not None and (fetched.source / "cpu.sv").is_file()

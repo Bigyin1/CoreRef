@@ -7,12 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-from coreref.api.catalog import Catalog
+from coreref._internal.editor import ManifestFile
 from coreref.api.errors import CatalogError, InvalidPackage
-from coreref.api.graph import Graph
-from coreref.api.records import LocalRecord, Ref
-from coreref.api.workspace import Workspace
-from coreref.tools.manifest import ManifestFile
+from coreref.api.packages import Catalog, LocalRecord, Ref
+from coreref.api.projects import Graph, Workspace
 
 pytestmark = pytest.mark.conan_remote
 
@@ -20,7 +18,7 @@ pytestmark = pytest.mark.conan_remote
 def local_package(directory: Path, name: str = "cpu") -> ManifestFile:
     directory.mkdir(parents=True)
     (directory / f"{name}.sv").write_text(f"module {name}; endmodule\n")
-    return ManifestFile.create(Ref(f"soc.{name}.rtl.default/1.0"), directory / "manifest.yml")
+    return ManifestFile.create(Ref(f"soc.{name}/1.0"), directory / "manifest.yml")
 
 
 def test_add_directory_needs_no_git_cache_or_remote(
@@ -37,7 +35,7 @@ def test_add_directory_needs_no_git_cache_or_remote(
         assert workspace.members == {document.record.ref: directory}
         monkeypatch.chdir(workspace.path.parent)
         graph = Graph(catalog, document.record.ref)
-        editable = graph.get_with_sources()[0]
+        editable = graph.get(with_sources=True)[0]
         assert editable.is_editable and editable.source == directory
         assert not (directory / ".git").exists()
         assert not (directory / "record.json").exists()
@@ -63,10 +61,13 @@ def test_native_recipe_reads_manifest_edits_without_sync(
     cpu.save()
     with patch("requests.sessions.Session.send", side_effect=AssertionError("Network")):
         graph = Graph(catalog, cpu.record.ref)
-        assert graph.requirements == (util.record.ref,)
+        assert tuple(record.ref for record in graph.dependencies()) == (util.record.ref,)
         assert graph.record.payload == {"changed": True}
-        assert tuple(r.ref for r in graph.get_with_sources()) == (util.record.ref, cpu.record.ref)
-    assert old.requirements == () and old.record.payload is None
+        assert tuple(r.ref for r in graph.get(with_sources=True)) == (
+            util.record.ref,
+            cpu.record.ref,
+        )
+    assert tuple(record.ref for record in old.dependencies()) == () and old.record.payload is None
     assert (cpu.path.parent / "conanfile.py").stat().st_mtime_ns == stamp
 
 
@@ -82,7 +83,7 @@ def test_local_source_and_missing_artifact_paths_come_from_recipe(
     document.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
     graph = Graph(catalog, document.record.ref)
-    editable = graph.get_with_sources()[0]
+    editable = graph.get(with_sources=True)[0]
     artifact = document.path.parent / "build/timing/result.lib"
     assert editable.source == document.path.parent and editable.files == {"cpu.lib": artifact}
     assert not artifact.exists()
@@ -97,13 +98,13 @@ def test_native_add_preserves_an_existing_user_recipe(catalog: Catalog, tmp_path
     recipe = directory / "conanfile.py"
     text = (
         "from conan import ConanFile\nclass Package(ConanFile):\n"
-        '    name = "soc.cpu.rtl.default"\n    version = "1.0"\n'
+        '    name = "soc.cpu"\n    version = "1.0"\n'
     )
     recipe.write_text(text)
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     workspace.add(directory)
     assert recipe.read_text() == text
-    assert workspace.members == {Ref("soc.cpu.rtl.default/1.0"): directory}
+    assert workspace.members == {Ref("soc.cpu/1.0"): directory}
 
 
 def test_editable_cannot_silently_return_cache_sources(
@@ -111,7 +112,7 @@ def test_editable_cannot_silently_return_cache_sources(
 ) -> None:
     document = local_package(tmp_path / "cpu")
     record = document.record
-    record.source = catalog.cache_directory / "accidental-cache-source"
+    record.source = catalog._client.cache_directory / "accidental-cache-source"
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     workspace.add(document.path.parent, record=record)
     monkeypatch.chdir(workspace.path.parent)
@@ -122,10 +123,10 @@ def test_editable_cannot_silently_return_cache_sources(
 def test_public_cache_location_respects_configured_storage(
     catalog: Catalog, tmp_path: Path
 ) -> None:
-    assert catalog.cache_directory == catalog._client.home / "p"
+    assert catalog._client.cache_directory == catalog._client.home / "p"
     storage = tmp_path / "custom storage"
     (catalog._client.home / "global.conf").write_text(f"core.cache:storage_path={storage}\n")
-    assert catalog.cache_directory == storage
+    assert catalog._client.cache_directory == storage
 
 
 def test_workspace_and_its_packages_can_move(
@@ -140,7 +141,7 @@ def test_workspace_and_its_packages_can_move(
     workspace = Workspace(catalog, moved / "project/conanws.yml")
     monkeypatch.chdir(workspace.path.parent)
     assert workspace.members == {document.record.ref: moved / "cpu"}
-    assert catalog.get_with_sources(document.record.ref).source == moved / "cpu"
+    assert catalog.get(document.record.ref, with_sources=True).source == moved / "cpu"
 
 
 def test_local_consumer_gets_editable_dependencies_automatically(
@@ -150,9 +151,9 @@ def test_local_consumer_gets_editable_dependencies_automatically(
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
     document.add_to_workspace(workspace)
     monkeypatch.chdir(workspace.path.parent)
-    root = LocalRecord(Ref("soc.top.rtl.default/1.0"))
+    root = LocalRecord(Ref("soc.top/1.0"))
     graph = Graph(catalog, root, dependencies=(document.record.ref,))
-    assert graph.get_with_sources()[0].source == document.path.parent
+    assert graph.get(with_sources=True)[0].source == document.path.parent
 
 
 def test_core_add_uses_flow_data_without_reading_manifest_files(
@@ -164,9 +165,9 @@ def test_core_add_uses_flow_data_without_reading_manifest_files(
     (directory / "manifest.yml").write_text("this is deliberately not valid: [")
     util = tmp_path / "util"
     util.mkdir()
-    dependency = LocalRecord(Ref("soc.util.rtl.default/1.0"), source=util)
+    dependency = LocalRecord(Ref("soc.util/1.0"), source=util)
     record = LocalRecord(
-        Ref("soc.cpu.rtl.default/1.0"),
+        Ref("soc.cpu/1.0"),
         payload={"format": "owned by the flow"},
         source=source,
         files={"result": directory / "build/result"},
@@ -177,8 +178,8 @@ def test_core_add_uses_flow_data_without_reading_manifest_files(
         workspace.add(directory, record=record, dependencies=(dependency.ref,))
         monkeypatch.chdir(workspace.path.parent)
         graph = Graph(catalog, record.ref)
-        assert graph.requirements == (dependency.ref,)
-        installed = graph.get_with_sources((record.ref,))[0]
+        assert tuple(record.ref for record in graph.dependencies()) == (dependency.ref,)
+        installed = graph.get((record.ref,), with_sources=True)[0]
     assert installed.source == source and installed.is_editable
     assert installed.payload == record.payload
     assert installed.files == record.files
@@ -205,7 +206,7 @@ def test_dependencies_without_record_do_not_initialize_workspace(
     catalog: Catalog, tmp_path: Path
 ) -> None:
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
-    dependency = Ref("soc.util.rtl.default/1.0")
+    dependency = Ref("soc.util/1.0")
     with pytest.raises(InvalidPackage, match="require a local record"):
         workspace.add(tmp_path, dependencies=(dependency,))
     assert not workspace.path.exists()
@@ -218,7 +219,7 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     source = directory / "rtl"
     source.mkdir(parents=True)
     document = ManifestFile.create(
-        Ref("soc.cpu.rtl.default/1.0"),
+        Ref("soc.cpu/1.0"),
         directory / "custom inputs.yaml",
     )
     workspace = Workspace(catalog, tmp_path / "project/conanws.yml")
@@ -229,7 +230,7 @@ def test_yaml_adapter_uses_the_selected_manifest_name(
     document.record.payload = {"edited": True}
     document.save()
     monkeypatch.chdir(workspace.path.parent)
-    installed = catalog.get_with_sources(document.record.ref)
+    installed = catalog.get(document.record.ref, with_sources=True)
     assert installed.source == directory and installed.payload == {"edited": True}
     assert not (directory / "manifest.yml").exists()
 
@@ -245,7 +246,7 @@ def test_short_name_with_underscore_is_native_editable(
     document.add_to_workspace(workspace)
     assert workspace.members == {ref: directory}
     monkeypatch.chdir(workspace.path.parent)
-    graph = Graph(catalog, LocalRecord(Ref("soc.top.rtl.default/1.0")), dependencies=(ref,))
-    installed = graph.get_with_sources()[0]
+    graph = Graph(catalog, LocalRecord(Ref("soc.top/1.0")), dependencies=(ref,))
+    installed = graph.get(with_sources=True)[0]
     assert installed.ref == ref and installed.source == directory
     assert installed.is_editable

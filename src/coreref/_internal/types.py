@@ -27,6 +27,10 @@ class NativeConfiguration(Protocol):
     def dumps(self) -> str: ...
 
 
+class NativeConf(Protocol):
+    def define(self, name: str, value: bool) -> None: ...
+
+
 class NativeDependencies(Protocol):
     @property
     def host(self) -> NativeDependencies: ...
@@ -54,6 +58,9 @@ class NativeFolders(Protocol):
 
 
 class NativePackage(Protocol):
+    @property
+    def conf(self) -> NativeConf: ...
+
     @property
     def conan_data(self) -> Mapping[str, object] | None: ...
 
@@ -83,6 +90,12 @@ class NativePackage(Protocol):
 
 
 class NativeNode(Protocol):
+    @property
+    def package_id(self) -> str | None: ...
+
+    @property
+    def prev(self) -> str | None: ...
+
     @property
     def recipe(self) -> str: ...
 
