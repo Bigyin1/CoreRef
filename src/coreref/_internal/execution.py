@@ -62,7 +62,6 @@ def _stage_files(
 class StageExecutor:
     nix: NixStore
     directory: Path
-    package_name: str
     build_missing: bool
     get_outputs: Callable[[Record, tuple[str, ...]], dict[str, Path]]
 
@@ -122,7 +121,6 @@ class StageExecutor:
                 )
                 continue
             # A host step needs its predecessors as local files.
-            selected = None
             self._flush(batch)
             batch.clear()
             pending.clear()
@@ -182,7 +180,7 @@ class StageExecutor:
             raise ValueError(f"Stage {spec.name} needs a Python transform")
         used = {path.stage for path in inputs.values() if isinstance(path, StageOutput)}
         return Invocation(
-            name=f"{self.package_name}-{spec.name}",
+            name=spec.name,
             transform=transform_reference(stage.transform),
             execution=stage.execution,
             configuration=stage.configuration,

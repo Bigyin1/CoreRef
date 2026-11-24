@@ -116,7 +116,6 @@ class Project:
         return StageExecutor(
             self.catalog._nix,
             self.build_dir,
-            self.ref.package_name,
             build_missing=build_missing,
             get_outputs=self.get_outputs,
         )

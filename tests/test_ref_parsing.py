@@ -15,6 +15,7 @@ from coreref.api.packages.records import Ref
         "soc.cpu_core/2.0",
         "shared.stdlib/1.0",
         "pdk.techlib-n5/2.0",
+        f"soc.{'component' * 30}/1.0+{'a' * 110}",
     ],
 )
 def test_parse_round_trip(value: str) -> None:

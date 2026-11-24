@@ -1,5 +1,6 @@
 """Dependency snapshots are independent of the active workspace."""
 
+import json
 from pathlib import Path
 from shutil import copytree
 
@@ -74,3 +75,32 @@ def test_source_cycles_are_reported_before_writing_lock(tmp_path: Path) -> None:
     with pytest.raises(InvalidPackage, match="Dependency cycle"):
         project.lock()
     assert not project.lockfile.exists()
+
+
+def test_restore_source_with_its_original_store_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dependency = tmp_path / "child"
+    dependency.mkdir()
+    ref = Ref("demo.legacy/1.0")
+    text = f"ref: {ref}\n# {tmp_path}\n"
+    (dependency / "manifest.yml").write_text(text, encoding="utf-8")
+    monkeypatch.setenv("NIX_CONFIG", "substituters =")
+    catalog = Catalog(sources={ref: dependency})
+    legacy = Path(
+        catalog._nix.command(
+            "store", "add", "--dry-run", "--name", "coreref-source-demo.legacy", str(dependency)
+        )
+    )
+    assert legacy.is_absolute()
+    assert not legacy.exists()
+
+    project = Project(tmp_path, Manifest(ref="demo.consumer/1.0", dependencies=[str(ref)]), catalog)
+    lockfile = project.lock()
+    current = json.loads(lockfile.read_bytes())
+    assert current["packages"][str(ref)]["source"] != str(legacy)
+    current["packages"][str(ref)]["source"] = str(legacy)
+    lockfile.write_text(json.dumps(current), encoding="utf-8")
+
+    assert project.graph.get_sources((ref,)) == {ref: legacy}
+    assert (legacy / "manifest.yml").read_text(encoding="utf-8") == text

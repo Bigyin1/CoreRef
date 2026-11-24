@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from shlex import quote
 from socket import create_server
@@ -10,7 +11,7 @@ import pytest
 
 from coreref.api.build import Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
-from coreref.api.packages import Catalog
+from coreref.api.packages import Catalog, Ref
 from coreref.api.projects import Manifest, Project
 
 from . import stages
@@ -18,8 +19,8 @@ from . import stages
 pytestmark = pytest.mark.nix
 
 
-def _demo(directory: Path, catalog: Catalog) -> Project:
-    project = Project(directory, Manifest(ref="demo.nix/1.0"), catalog)
+def _demo(directory: Path, catalog: Catalog, manifest: Manifest | None = None) -> Project:
+    project = Project(directory, manifest or Manifest(ref="demo.nix/1.0"), catalog)
     source = directory / "input.txt"
     project.route = Route(
         [
@@ -79,7 +80,7 @@ def test_host_launcher_runs_the_tool_from_path_with_the_pinned_version(
 
     manifest = tmp_path / "manifest.yml"
     manifest.write_text(manifest.read_text().replace("24.1", "24.2"), encoding="utf-8")
-    with pytest.raises(CatalogError, match=r"Stage demo\.host-host failed"):
+    with pytest.raises(CatalogError, match="Stage host failed"):
         project.build("host")
     assert "fixture-synth must be '24.2'" in capfd.readouterr().err
 
@@ -130,15 +131,15 @@ def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:
     (checkout / ".gitignore").write_text(".build/\n.env\n", encoding="utf-8")
     (checkout / ".env").write_text("untracked private config", encoding="utf-8")
     manifest = checkout / "manifest.yml"
+    ref = Ref(f"demo.{'component' * 30}/1.0+{'a' * 110}")
     manifest.write_text(
-        f"ref: demo.nix/1.0\ntype: rtl\npayload: {{module: demo, mask: {2**100}}}\n",
+        f"ref: {ref}\ntype: rtl\npayload: {{module: demo, mask: {2**100}}}\n",
         encoding="utf-8",
     )
     (checkout / "input.txt").write_text("published", encoding="utf-8")
 
     cache = (tmp_path / "cache").as_uri()
-    project = _demo(checkout, Catalog(cache=cache))
-    project.manifest = Manifest.load(manifest)
+    project = _demo(checkout, Catalog(cache=cache), Manifest.load(manifest))
     project.lock()
     _commit(checkout)
     index = project.publish("prepare")
@@ -163,6 +164,13 @@ def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:
     assert consumer.releases[project.ref] != index
     assert "upper.txt" in consumer.info(project.ref).outputs
     assert using.graph.info(project.ref) == info
+
+    local_record = replace(info, source=checkout)
+    using.route = Route([StageSpec(name="upper", outputs=("upper.txt",))])
+    using.stages = {
+        "upper": Stage(transform=stages.upper, artifacts={"small.txt": (local_record, "small.txt")})
+    }
+    assert using.build("upper")["upper.txt"].read_text() == "PUBLISHED"
 
 
 def _commit(directory: Path) -> None:
@@ -196,3 +204,59 @@ def test_native_output_request_materializes_only_named_result(tmp_path: Path) ->
     assert tuple(files) == ("other.txt",)
     assert files["other.txt"].read_text() == "separate result"
     assert not (project.build_dir / "small.txt").exists()
+
+
+def test_selective_build_after_host_stage(tmp_path: Path) -> None:
+    source = tmp_path / "input.txt"
+    source.write_text("missing", encoding="utf-8")
+    project = _demo(tmp_path, Catalog())
+    project.route = Route(
+        [
+            StageSpec(name="host", outputs=("small.txt", "stage.log", "results.json")),
+            StageSpec(name="prepare", needs=("host",), outputs=("result.txt", "stage-copy.txt")),
+        ]
+    )
+    project.stages = {
+        "host": Stage(transform=stages.two_outputs, execution="host", files={"input.txt": source}),
+        "prepare": Stage(transform=stages.two_results, inputs=("small.txt",)),
+    }
+    with pytest.raises(CatalogError, match="Stage host failed"):
+        project.build("host")
+    assert not list(project.build_dir.glob(".host-*.json"))
+    assert not list(project.build_dir.glob("host-stage-*"))
+
+    source.write_text("same bytes", encoding="utf-8")
+    host = project.build("host")
+    assert host["stage.log"].read_text() == host["small.txt"].read_text() == "same bytes"
+    assert host["results.json"].read_text() == "{}"
+    assert host["small.txt"].resolve() != host["stage.log"].resolve()
+    log = project.build_dir / "host.log"
+    log.unlink()
+    result = project._build(("prepare",), selected=("result.txt",))
+    assert result["result.txt"].read_text() == "SAME BYTES"
+    assert not (project.build_dir / "stage-copy.txt").exists()
+    assert not log.exists()
+
+
+def test_cold_output_uses_configured_substituter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    producer = tmp_path / "producer"
+    consumer = tmp_path / "consumer"
+    cache = (tmp_path / "binary-cache").as_uri()
+    monkeypatch.setenv("NIX_REMOTE", f"local?root={producer}")
+    nix = Catalog(cache=cache)._nix
+    paths: list[Path] = []
+    for name in ("wanted", "other"):
+        artifact = tmp_path / name
+        artifact.write_text(str(artifact), encoding="utf-8")
+        paths.append(nix.add(artifact, name))
+    nix.upload(paths)
+
+    monkeypatch.setenv("NIX_REMOTE", f"local?root={consumer}")
+    monkeypatch.setenv("NIX_CONFIG", f"substituters = {cache}")
+    wanted, other = paths
+    assert not wanted.exists()
+    Catalog()._nix.restore((wanted,))
+    assert (consumer / wanted.relative_to("/")).read_text() == str(tmp_path / "wanted")
+    assert not (consumer / other.relative_to("/")).exists()

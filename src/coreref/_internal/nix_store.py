@@ -35,6 +35,11 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _nix_json(value: JSON) -> str:
+    """Embed JSON in a Nix expression without interpreting interpolation markers."""
+    return json.dumps(json.dumps(value, allow_nan=False)).replace("${", r"\${")
+
+
 def store_entry(path: Path) -> Path:
     """Get the store object containing a file without resolving symlinks."""
     root = Path(*path.parts[:4])
@@ -214,12 +219,18 @@ class NixStore:
 
     def restore(self, paths: Sequence[Path]) -> None:
         entries = {store_entry(path) for path in paths}
-        roots = sorted(path for path in entries if not path.exists())
+        roots = sorted(str(path) for path in entries if not path.exists())
         if not roots:
             return
-        if self.cache is None:
-            raise NotFound(f"Missing from the Nix store: {', '.join(map(str, roots))}")
-        self.command("copy", "--from", self.cache, "--", *map(str, roots))
+        if self.cache is not None:
+            self.command("copy", "--from", self.cache, "--", *roots)
+            return
+        try:
+            self.command(
+                "build", "--no-link", "--max-jobs", "0", "--option", "builders", "", "--", *roots
+            )
+        except CatalogError as error:
+            raise NotFound(f"Missing from the Nix store: {', '.join(roots)}") from error
 
     def realize(
         self,
@@ -230,14 +241,14 @@ class NixStore:
         selected: tuple[str, ...] | None = None,
     ) -> dict[str, Path]:
         """Realize selected outputs across a group of derivations with one Nix build."""
-        if not stages:
+        targets = self._targets(stages, selected)
+        if not targets:
             return {}
         plan = {
             name: invocation.document(self._modules(invocation.transform))
             for name, invocation in stages.items()
         }
-        targets = self._targets(stages, selected)
-        results = self._build(targets, json.dumps(plan, allow_nan=False), directory, build_missing)
+        results = self._build(targets, plan, directory, build_missing)
         return {
             name: results[invocation.name][output_name(index)] / name
             for invocation in stages.values()
@@ -266,7 +277,7 @@ class NixStore:
     def _build(
         self,
         targets: tuple[str, ...],
-        plan: str,
+        plan: Mapping[str, JSON],
         directory: Path,
         build_missing: bool,
     ) -> dict[str, dict[str, Path]]:
@@ -276,10 +287,8 @@ class NixStore:
         if self.cache is not None:
             options += ("--extra-substituters", self.cache)
         first = targets[0].partition("^")[0]
-        # Read one expression for all targets and keep interpolation markers as data.
-        plan_literal = json.dumps(plan, ensure_ascii=False).replace("${", r"\${")
         expression = (
-            f"let plan = builtins.fromJSON {plan_literal}; in "
+            f"let plan = builtins.fromJSON {_nix_json(plan)}; in "
             "{ stageFile, pythonRoot }: import (/. + stageFile) { inherit plan pythonRoot; }"
         )
         data = json.loads(
@@ -328,16 +337,12 @@ class NixStore:
         if not build_missing:
             raise NotFound(f"Host result {invocation.name} was not published")
         with TemporaryDirectory(prefix="host-stage-", dir=directory) as temporary:
-            results = self._run_host(invocation, Path(temporary), plan, log)
-            if results:
-                self.command(
-                    "build",
-                    "--out-link",
-                    str(directory / f".nix-{invocation.name}"),
-                    "--",
-                    *map(str, results.values()),
-                )
-            result_file = Path(temporary) / "results.json"
+            workspace = Path(temporary)
+            self._run_host(invocation, workspace, plan, log)
+            results = self._import_host_outputs(
+                invocation, workspace / "work", directory / f".nix-{invocation.name}"
+            )
+            result_file = workspace / "results.json"
             result_file.write_text(json.dumps({name: str(path) for name, path in results.items()}))
             result_file.replace(state)
         return results
@@ -365,24 +370,47 @@ class NixStore:
         directory: Path,
         plan: dict[str, JSON],
         log: Path,
-    ) -> dict[str, Path]:
-        plan_file = directory / "plan.json"
-        plan_file.write_text(json.dumps(plan, allow_nan=False), encoding="utf-8")
-        output = directory / "outputs"
+    ) -> None:
         command = [*self.launcher, str(self.runtime / "bin/python"), str(_RUNNER)]
         try:
             subprocess.run(  # noqa: S603 - explicit host launcher and pinned Python interpreter.
-                [*command, str(plan_file), str(log), str(output)],
+                [*command, str(log)],
                 cwd=directory,
                 env={**environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                input=json.dumps(plan, allow_nan=False),
+                encoding="utf-8",
                 check=True,
             )
         except subprocess.CalledProcessError as error:
             raise CatalogError(f"Stage {invocation.name} failed. See {log}.") from error
-        return {
-            name: self.add(output / output_name(index) / name, f"{invocation.name}-{index}")
+
+    def _import_host_outputs(
+        self, invocation: Invocation, work: Path, link: Path
+    ) -> dict[str, Path]:
+        if not invocation.outputs:
+            return {}
+        files = {
+            f"{invocation.name}-{index}": str(work / name)
             for index, name in enumerate(invocation.outputs)
         }
+        expression = (
+            "builtins.mapAttrs (name: file: builtins.path { inherit name; path = /. + file; }) "
+            f"(builtins.fromJSON {_nix_json(files)})"
+        )
+        paths = json.loads(
+            self.command(
+                "build",
+                "--impure",
+                "--json",
+                "--out-link",
+                str(link),
+                "--file",
+                "-",
+                *files,
+                stdin=expression,
+            )
+        )
+        return {name: Path(path) for name, path in zip(invocation.outputs, paths, strict=True)}
 
     def _modules(self, transform: str) -> dict[str, Path]:
         names = sorted({"coreref", transform.split(".", 1)[0].partition(":")[0]})

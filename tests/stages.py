@@ -24,3 +24,18 @@ def host(work: Path, log: Path, _configuration: Mapping[str, JSON]) -> None:
     value = check_output([command, "run"], text=True)  # noqa: S603 - resolved tool under test.
     log.write_text("ran on host", encoding="utf-8")
     (work / "host.txt").write_text(value, encoding="utf-8")
+
+
+def two_outputs(work: Path, log: Path, _configuration: Mapping[str, JSON]) -> None:
+    value = (work / "input.txt").read_text(encoding="utf-8")
+    log.write_text("ran", encoding="utf-8")
+    (work / "small.txt").write_text(value, encoding="utf-8")
+    if value != "missing":
+        (work / "stage.log").write_text(value, encoding="utf-8")
+        (work / "results.json").write_text("{}", encoding="utf-8")
+
+
+def two_results(work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> None:
+    value = (work / "small.txt").read_text(encoding="utf-8")
+    (work / "result.txt").write_text(value.upper(), encoding="utf-8")
+    (work / "stage-copy.txt").write_text(value, encoding="utf-8")

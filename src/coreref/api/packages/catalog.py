@@ -21,6 +21,8 @@ from .records import JSON, Record, Ref
 if TYPE_CHECKING:
     from ..projects.manifest import Manifest
 
+_SOURCE_NAME = "coreref-source"
+
 
 class _Source(BaseModel):
     """The source and optional release index associated with one locked dependency."""
@@ -118,10 +120,11 @@ class Catalog:
             raise NotFound(f"No available source matches {requirement}")
         return max(matching, key=lambda ref: (matching[ref], str(ref)))
 
-    def _import_source(self, ref: Ref) -> tuple[Path, dict[str, JSON] | None]:
+    def _import_source(
+        self, ref: Ref, *, name: str = _SOURCE_NAME
+    ) -> tuple[Path, dict[str, JSON] | None]:
         location = self._locations.get(ref)
         if isinstance(location, Path):
-            name = f"coreref-source-{ref.package_name}"
             return self._nix.source(location, name, tracked=True), None
         if isinstance(location, str):
             return self._nix.prefetch(location)
@@ -165,10 +168,11 @@ class Catalog:
         try:
             self._nix.restore((locked,))
         except CatalogError:
+            # The recorded name is part of the store path even when the contents match.
             restored = (
                 self._nix.fetch(cast(Mapping[str, JSON], source.origin))
                 if source.origin is not None
-                else self._import_source(ref)[0]
+                else self._import_source(ref, name=locked.name.split("-", 1)[1])[0]
             )
             if restored != locked:
                 message = f"Source for {ref} changed. Restore {locked} or run lock."
@@ -197,7 +201,7 @@ class Catalog:
         self, checkout: Path, manifest: Manifest, files: Mapping[str, Path], *, commit: str
     ) -> Path:
         ref = Ref(manifest.ref)
-        source = self._nix.source(checkout, f"coreref-source-{ref.package_name}", tracked=True)
+        source = self._nix.source(checkout, _SOURCE_NAME, tracked=True)
         outputs = {
             name: self._store_file(path.resolve(strict=True)) for name, path in files.items()
         }
@@ -210,7 +214,7 @@ class Catalog:
             commit=commit,
         )
         document = {
-            "ref": manifest.ref,
+            "ref": str(ref),
             "source": metadata.model_dump(mode="json", exclude_defaults=True),
         }
         index_path = self._nix.add_text(

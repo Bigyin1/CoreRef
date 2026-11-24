@@ -7,16 +7,12 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from ..api.errors import InvalidPackage
 
 _NAME = re.compile(r"[a-z0-9_][a-z0-9_-]*")
-_VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{0,100}")
-_MAX_NAME_LENGTH = 101
+_VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]*")
 
 
 def parse_package_name(name: str) -> tuple[str, str]:
     namespace, _, component = name.partition(".")
-    if (
-        not (_NAME.fullmatch(namespace) and _NAME.fullmatch(component))
-        or len(name) > _MAX_NAME_LENGTH
-    ):
+    if not (_NAME.fullmatch(namespace) and _NAME.fullmatch(component)):
         raise InvalidPackage("Expected lowercase namespace.component")
     return namespace, component
 

@@ -14,7 +14,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..._internal.nix_store import store_entry
 from ..packages.records import JSON, Record
 
 StageTransform = Callable[[Path, Path, Mapping[str, JSON]], None]
@@ -89,8 +88,6 @@ class Stage:
         overlap = self.files.keys() & self.artifacts.keys()
         if overlap:
             raise ValueError(f"Stage has two sources for {', '.join(sorted(overlap))}")
-        for record, _ in self.artifacts.values():
-            store_entry(record.source)
         for name in (*self.files, *self.artifacts, *(self.inputs or ())):
             _output_path(name)
 

@@ -10,7 +10,7 @@ import sys
 from collections.abc import Mapping
 from importlib import import_module, util
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from typing import Any
 
 
 def _load_modules(modules: dict[str, str]) -> None:
@@ -26,51 +26,50 @@ def _load_modules(modules: dict[str, str]) -> None:
         spec.loader.exec_module(module)
 
 
-def _install(work: Path, filenames: Mapping[Path, str | None], stage: str) -> None:
+def _install(work: Path, filenames: Mapping[Path, str | None]) -> None:
     for directory, filename in filenames.items():
         directory.mkdir(parents=True, exist_ok=True)
         if filename is None:
             continue
         path = work / filename
-        if path.is_symlink() or not path.is_file():
-            raise RuntimeError(f"Stage {stage} did not produce {filename}")
         target = directory / filename
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(path, target)
 
 
-def run(plan_path: Path, log: Path, host_output: Path | None = None) -> None:
-    """Stage the inputs, call the flow function, and materialize its outputs."""
-    plan = json.loads(plan_path.read_bytes())
+def run(plan: Mapping[str, Any], work: Path, log: Path) -> None:
+    """Stage writable inputs, run the transform, and check each declared output."""
     _load_modules(plan["modules"])
     module_name, function = plan["transform"].split(":")
     transform = getattr(import_module(module_name), function)
-    with TemporaryDirectory(prefix="coreref-", dir=log.parent) as temporary:
-        work = Path(temporary)
-        for filename, source in plan["inputs"].items():
-            target = work / filename
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(source, target)
-            target.chmod(stat.S_IMODE(target.stat().st_mode) | stat.S_IWUSR)
-        transform(work, log, plan["configuration"])
-        if host_output is not None:
-            # A separate staging directory for each output retains the same contract as Nix.
-            outputs = {host_output / key: name for key, name in plan["outputs"].items()}
-        else:
-            outputs = {Path(os.environ[key]): name for key, name in plan["outputs"].items()}
-        _install(work, outputs, plan["name"])
+    work.mkdir()
+    for filename, source in plan["inputs"].items():
+        target = work / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(source, target)
+        target.chmod(stat.S_IMODE(target.stat().st_mode) | stat.S_IWUSR)
+    transform(work, log, plan["configuration"])
+    for filename in plan["outputs"].values():
+        if filename is None:
+            continue
+        path = work / filename
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"Stage {plan['name']} did not produce {filename}")
 
 
 def main() -> None:
     """Run either as a derivation builder or as a host worker."""
-    if arguments := sys.argv[1:]:
-        plan, log, output = map(Path, arguments)
-        run(plan, log, output)
+    work = Path.cwd() / "work"
+    if len(sys.argv) > 1:
+        run(json.load(sys.stdin), work, Path(sys.argv[1]))
         return
     log = Path.cwd() / "stage.log"
     plan = Path(os.environ["stagePlanPath"])  # noqa: SIM112 - passAsFile appends Path.
     try:
-        run(plan, log)
+        document = json.loads(plan.read_bytes())
+        run(document, work, log)
+        outputs = {Path(os.environ[key]): name for key, name in document["outputs"].items()}
+        _install(work, outputs)
     except Exception:
         if log.is_file():
             print(log.read_text(errors="replace"), file=sys.stderr)
