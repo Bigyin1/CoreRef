@@ -3,19 +3,29 @@
 import pytest
 
 from coreref.api.build.route import Route, StageSpec
+from coreref.api.packages import Catalog
 
 
-def test_route_closure_visits_shared_stage_once() -> None:
+@pytest.mark.nix
+def test_nix_plan_visits_shared_stage_once() -> None:
     route = Route(
         [
-            StageSpec(name="rtl", outputs=("rtl.v",)),
+            StageSpec(name="rtl", outputs=("rtl.v", "report.txt")),
             StageSpec(name="dft", needs=("rtl",), outputs=("dft_output.v",)),
             StageSpec(name="synth", needs=("rtl", "dft"), outputs=("netlist.v",)),
+            StageSpec(name="unrelated", outputs=("other.v",)),
         ]
     )
-    assert tuple(stage.name for stage in route._closure(("synth",))) == ("rtl", "dft", "synth")
+    plan = Catalog()._nix.plan(route, ("synth",))
+    assert tuple(plan) == ("rtl", "dft", "synth")
+    assert plan["synth"] == {
+        "rtl.v": {"stage": "rtl", "output": "out"},
+        "report.txt": {"stage": "rtl", "output": "file1"},
+        "dft_output.v": {"stage": "dft", "output": "out"},
+    }
 
 
+@pytest.mark.nix
 def test_publication_includes_transitive_checks() -> None:
     route = Route(
         [
@@ -25,14 +35,15 @@ def test_publication_includes_transitive_checks() -> None:
             StageSpec(name="lint", outputs=(), purpose="development"),
         ]
     )
-    assert tuple(stage.name for stage in route._closure(("synth",))) == ("synth",)
-    assert tuple(stage.name for stage in route._closure(("synth",), publishing=True)) == (
+    nix = Catalog()._nix
+    assert tuple(nix.plan(route, ("synth",))) == ("synth",)
+    assert tuple(nix.plan(route, ("synth",), publishing=True)) == (
         "synth",
         "compare",
         "report",
     )
     with pytest.raises(ValueError, match="Expected a release stage"):
-        route._closure(("lint",), publishing=True)
+        nix.plan(route, ("lint",), publishing=True)
 
 
 @pytest.mark.parametrize(
@@ -94,21 +105,6 @@ def test_ready_branches_can_stop_independently() -> None:
         ]
     )
     assert route._targets(route._ready(lambda stage: stage.name != "build")) == ("source", "data")
-    assert route._targets(route._ready(lambda _: True, cap="build")) == ("build",)
-
-
-def test_route_validates_handler_interface() -> None:
-    route = Route(
-        [
-            StageSpec(name="prepare", outputs=("data",)),
-            StageSpec(name="report", needs=("prepare",), outputs=("report.txt",)),
-        ]
+    assert route._targets(route._ready(lambda _: True, candidates={"source", "build"})) == (
+        "build",
     )
-    contracts = {"prepare": ("data",), "report": ("report.txt",)}
-    route.validate_handlers(contracts, inputs={"report": ("data",)})
-    with pytest.raises(ValueError, match="Unknown stage handler"):
-        route.validate_handlers({"prepare": ("data",)}, inputs={})
-    with pytest.raises(ValueError, match="must declare outputs"):
-        route.validate_handlers({**contracts, "report": ("other",)}, inputs={})
-    with pytest.raises(ValueError, match=r"needs 'report' for report\.txt"):
-        route.validate_handlers(contracts, inputs={"prepare": ("report.txt",)})

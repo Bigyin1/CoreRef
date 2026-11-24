@@ -6,7 +6,7 @@ provides actions and the files and configuration needed to run them.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path, PurePosixPath
@@ -106,39 +106,6 @@ class Route:
         except CycleError as exc:
             raise ValueError(f"Cycle in flow stages: {exc.args[1]}") from exc
 
-    def validate_handlers(
-        self,
-        outputs: Mapping[str, tuple[str, ...]],
-        *,
-        inputs: Mapping[str, tuple[str, ...]],
-    ) -> None:
-        """Check declared stages against a flow's known handler outputs and inputs.
-
-        Each stage must have a handler with matching outputs. If a handler
-        consumes a file produced by another handler, declare that producer
-        as a direct dependency in ``needs``.
-        """
-        producers = {name: stage for stage, names in outputs.items() for name in names}
-        for stage in self._stages.values():
-            self._validate_handler(stage, outputs, inputs.get(stage.name, ()), producers)
-
-    def _validate_handler(
-        self,
-        stage: StageSpec,
-        outputs: Mapping[str, tuple[str, ...]],
-        inputs: tuple[str, ...],
-        producers: Mapping[str, str],
-    ) -> None:
-        names = outputs.get(stage.name)
-        if names is None:
-            raise ValueError(f"Unknown stage handler {stage.name!r}")
-        if set(stage.outputs) != set(names):
-            raise ValueError(f"Stage {stage.name!r} must declare outputs {', '.join(names)}")
-        for name in inputs:
-            producer = producers.get(name)
-            if producer is not None and producer not in stage.needs:
-                raise ValueError(f"Stage {stage.name!r} needs {producer!r} for {name}")
-
     def _validate_needs(self, stage: StageSpec) -> None:
         if len(stage.needs) != len(set(stage.needs)):
             raise ValueError(f"Duplicate dependencies of stage {stage.name!r}")
@@ -165,37 +132,15 @@ class Route:
         """Check whether the route declares the named stage."""
         return name in self._stages
 
-    def _closure(
-        self, targets: Iterable[str], *, publishing: bool = False
-    ) -> tuple[StageSpec, ...]:
-        pending = list(targets)
-        selected: set[str] = set()
-        while pending:
-            name = pending.pop()
-            if name in selected:
-                continue
-            stage = self[name]
-            if publishing and stage.purpose != "release":
-                raise ValueError(f"Expected a release stage, got {name!r}")
-            selected.add(name)
-            pending.extend(stage.needs)
-            if publishing:
-                pending.extend(stage.checks)
-        return tuple(self[name] for name in self.order if name in selected)
-
-    def _release(self, cap: str | None = None) -> tuple[StageSpec, ...]:
-        if cap is not None:
-            if self[cap].purpose != "release":
-                raise ValueError(f"Expected a release stage, got {cap!r}")
-            return self._closure((cap,))
-        return tuple(self[name] for name in self.order if self[name].purpose == "release")
-
     def _ready(
-        self, accepts: Callable[[StageSpec], bool], *, cap: str | None = None
+        self, accepts: Callable[[StageSpec], bool], *, candidates: Collection[str] | None = None
     ) -> tuple[StageSpec, ...]:
         """Return release stages whose prerequisites and own inputs are available."""
         ready: dict[str, StageSpec] = {}
-        for stage in self._release(cap):
+        for name in self.order:
+            stage = self[name]
+            if stage.purpose != "release" or (candidates is not None and name not in candidates):
+                continue
             if all(name in ready for name in stage.needs) and accepts(stage):
                 ready[stage.name] = stage
         return tuple(ready.values())

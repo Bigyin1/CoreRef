@@ -72,6 +72,7 @@ def test_stage_map_rejects_invalid_python_symbols(tmp_path: Path) -> None:
         StageMap.load(definition)
 
 
+@pytest.mark.nix
 def test_a_file_requires_a_declared_predecessor(tmp_path: Path) -> None:
     project = Project(tmp_path, Manifest(ref="demo.inputs/1.0"), Catalog())
     project.route = Route(

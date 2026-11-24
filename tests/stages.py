@@ -39,3 +39,7 @@ def two_results(work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> N
     value = (work / "small.txt").read_text(encoding="utf-8")
     (work / "result.txt").write_text(value.upper(), encoding="utf-8")
     (work / "stage-copy.txt").write_text(value, encoding="utf-8")
+
+
+def copy_input(work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> None:
+    (work / "input.txt").write_bytes((work / "raw.txt").read_bytes())

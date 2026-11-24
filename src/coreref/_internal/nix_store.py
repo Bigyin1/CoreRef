@@ -7,24 +7,29 @@ import json
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from functools import cached_property
 from importlib.util import find_spec
 from os import environ
 from pathlib import Path
 from shutil import which
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from ..api.errors import CatalogError, InvalidPackage, NotFound
 
 if TYPE_CHECKING:
-    from ..api.build.route import StageTransform
+    from ..api.build.route import Route, StageTransform
     from ..api.packages.records import JSON
 
 _RECIPES = Path(__file__).with_name("nix")
 _RUNNER = Path(__file__).with_name("nix_builder.py")
 _STORE_ENTRY = re.compile(r"/nix/store/[0-9a-z]{32}-[a-zA-Z0-9+._?=-]+")
+
+
+class _PlanNode(TypedDict):
+    name: str
+    inputs: dict[str, dict[str, str]]
 
 
 def _file_digest(path: Path) -> str:
@@ -48,13 +53,6 @@ def store_entry(path: Path) -> Path:
     return root
 
 
-@dataclass(frozen=True)
-class StageOutput:
-    stage: str
-    output: str
-    filename: str
-
-
 def output_name(index: int) -> str:
     return "out" if index == 0 else f"file{index}"
 
@@ -73,7 +71,7 @@ class Invocation:
     transform: str
     execution: str
     configuration: Mapping[str, JSON]
-    inputs: Mapping[str, Path | StageOutput]
+    inputs: Mapping[str, Path | Mapping[str, str]]
     outputs: tuple[str, ...]
     needs: tuple[str, ...] = ()
 
@@ -84,7 +82,7 @@ class Invocation:
         if not outputs:
             outputs["out"] = None
         inputs = {
-            name: str(path.resolve(strict=True)) if isinstance(path, Path) else asdict(path)
+            name: str(path.resolve(strict=True)) if isinstance(path, Path) else dict(path)
             for name, path in self.inputs.items()
         }
         return {
@@ -231,6 +229,44 @@ class NixStore:
             )
         except CatalogError as error:
             raise NotFound(f"Missing from the Nix store: {', '.join(roots)}") from error
+
+    def plan(
+        self, route: Route, targets: tuple[str, ...], *, publishing: bool = False
+    ) -> dict[str, dict[str, dict[str, str]]]:
+        """Ask Nix for the selected nodes in input order and their file producers."""
+        for name in targets:
+            if route[name].purpose != "release" and publishing:
+                raise ValueError(f"Expected a release stage, got {name!r}")
+        request = {
+            "stages": {
+                spec.name: {
+                    "needs": spec.needs,
+                    "checks": spec.checks,
+                    "outputs": {
+                        output_name(index): filename for index, filename in enumerate(spec.outputs)
+                    },
+                }
+                for spec in (route[name] for name in route.order)
+            },
+            "targets": targets,
+            "publishing": publishing,
+        }
+        plan = cast(
+            list[_PlanNode],
+            json.loads(
+                self.command(
+                    "eval",
+                    "--json",
+                    "--file",
+                    str(_RECIPES / "route.nix"),
+                    "--arg-from-stdin",
+                    "request",
+                    "plan",
+                    stdin=json.dumps(request),
+                )
+            ),
+        )
+        return {node["name"]: node["inputs"] for node in plan}
 
     def realize(
         self,

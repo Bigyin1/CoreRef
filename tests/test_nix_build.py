@@ -24,7 +24,7 @@ def _demo(directory: Path, catalog: Catalog, manifest: Manifest | None = None) -
     source = directory / "input.txt"
     project.route = Route(
         [
-            StageSpec(name="prepare", outputs=("small.txt", "other.txt")),
+            StageSpec(name="prepare", outputs=("other.txt", "small.txt")),
             StageSpec(name="upper", needs=("prepare",), outputs=("upper.txt",)),
         ]
     )
@@ -54,7 +54,7 @@ def test_python_stages_are_native_derivations_with_selected_input_outputs(tmp_pa
         else graph[deriver]["inputDrvs"]
     )
     upstream = next(value for key, value in inputs.items() if "-prepare" in key)
-    assert (upstream["outputs"] if isinstance(upstream, dict) else upstream) == ["out"]
+    assert (upstream["outputs"] if isinstance(upstream, dict) else upstream) == ["file1"]
     initial = artifacts["upper.txt"].resolve()
     (tmp_path / "README.md").write_text("not a stage input", encoding="utf-8")
     assert project.build("upper")["upper.txt"].resolve() == initial
@@ -215,18 +215,22 @@ def test_native_output_request_materializes_only_named_result(tmp_path: Path) ->
     assert files["other.txt"].read_text() == "separate result"
 
 
-def test_selective_build_after_host_stage(tmp_path: Path) -> None:
+def test_selective_build_across_host_stage(tmp_path: Path) -> None:
     source = tmp_path / "input.txt"
     source.write_text("missing", encoding="utf-8")
     project = _demo(tmp_path, Catalog())
     project.route = Route(
         [
-            StageSpec(name="host", outputs=("small.txt", "stage.log", "results.json")),
+            StageSpec(name="source", outputs=("input.txt",)),
+            StageSpec(
+                name="host", needs=("source",), outputs=("small.txt", "stage.log", "results.json")
+            ),
             StageSpec(name="prepare", needs=("host",), outputs=("result.txt", "stage-copy.txt")),
         ]
     )
     project.stages = {
-        "host": Stage(transform=stages.two_outputs, execution="host", files={"input.txt": source}),
+        "source": Stage(transform=stages.copy_input, files={"raw.txt": source}),
+        "host": Stage(transform=stages.two_outputs, execution="host", inputs=("input.txt",)),
         "prepare": Stage(transform=stages.two_results, inputs=("small.txt",)),
     }
     with pytest.raises(CatalogError, match="Stage host failed"):

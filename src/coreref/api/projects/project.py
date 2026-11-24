@@ -9,7 +9,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..._internal.execution import StageExecutor, stage_inputs
+from ..._internal.execution import StageExecutor
 from ..build.route import Route
 from ..errors import InvalidPackage, NotFound
 from ..packages.records import Record, Ref
@@ -108,9 +108,10 @@ class Project:
     ) -> dict[str, Path]:
         if not targets:
             raise ValueError("Select at least one build stage")
-        stages = self.route._closure(targets, publishing=publishing)
-        bindings = {spec: self._stage(spec) for spec in stages}
-        return self._executor(build_missing).build(bindings, self.route, selected=selected)
+        graph = self.catalog._nix.plan(self.route, targets, publishing=publishing)
+        specs = (self.route[name] for name in graph)
+        bindings = {spec: self._stage(spec) for spec in specs}
+        return self._executor(build_missing).build(bindings, graph, selected=selected)
 
     def _executor(self, build_missing: bool) -> StageExecutor:
         return StageExecutor(
@@ -183,25 +184,27 @@ class Project:
     ) -> Path:
         """Return the store directory for a flow-defined variant."""
         spec, stage = self._variant_stage(options)
-        route = self.route if spec.needs and stage.inputs is None else None
-        return self._executor(build_missing).configured(spec, stage, route=route)
+        return self._executor(build_missing).configured(spec, stage)
 
     def _stage_ready(self, spec: StageSpec) -> bool:
         stage = self._stage(spec)
-        inputs = stage_inputs(spec, stage, self.route)
         return (
             all(path.is_file() for path in stage.files.values())
             and (stage.ready is None or stage.ready())
             and all(
                 self._has_output(record, name)
                 for alias, (record, name) in stage.artifacts.items()
-                if alias in inputs
+                if stage.inputs is None or alias in stage.inputs
             )
         )
 
     def release_targets(self) -> tuple[str, ...]:
         """Return the terminal stages with available inputs for a release."""
-        ready = self.route._ready(self._stage_ready, cap=self.manifest.release_through)
+        cap = self.manifest.release_through
+        if cap is not None and self.route[cap].purpose != "release":
+            raise ValueError(f"Expected a release stage, got {cap!r}")
+        candidates = None if cap is None else self.catalog._nix.plan(self.route, (cap,))
+        ready = self.route._ready(self._stage_ready, candidates=candidates)
         targets = self.route._targets(ready)
         if not targets:
             raise ValueError("No release stage is ready")

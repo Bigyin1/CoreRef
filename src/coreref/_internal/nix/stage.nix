@@ -4,9 +4,9 @@ let
   python = if pythonRoot == "" then import ./runtime.nix else builtins.storePath pythonRoot;
   storePrefix = "${builtins.storeDir}/";
   input =
-    _: file:
+    name: file:
     if builtins.isAttrs file then
-      "${stages.${file.stage}.${file.output}}/${file.filename}"
+      "${stages.${file.stage}.${file.output}}/${name}"
     else if builtins.substring 0 (builtins.stringLength storePrefix) file == storePrefix then
       builtins.storePath file
     else
@@ -30,7 +30,17 @@ let
         // {
           inputs = builtins.mapAttrs input stage.inputs;
           modules = builtins.mapAttrs (_: builtins.storePath) stage.modules;
-          needs = map (name: "${stages.${name}.out}") stage.needs;
+          # A file input already pins its exact output. Only add control-only edges.
+          needs =
+            let
+              producers = map (file: file.stage) (
+                builtins.filter builtins.isAttrs (builtins.attrValues stage.inputs)
+              );
+              controls = builtins.filter (
+                name: builtins.hasAttr name plan && !(builtins.elem name producers)
+              ) stage.needs;
+            in
+            map (name: "${stages.${name}.out}") controls;
         }
       );
     }
