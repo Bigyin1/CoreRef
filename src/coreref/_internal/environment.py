@@ -25,7 +25,7 @@ class CommandPin(BaseModel):
 ToolPins = dict[str, ImagePin | CommandPin]
 
 
-def checked_command(pins: ToolPins, name: str) -> tuple[str, str]:
+def checked_command(pins: ToolPins, name: str, *, version_args: tuple[str, ...]) -> tuple[str, str]:
     pin = pins.get(name)
     if not isinstance(pin, CommandPin):
         raise ValueError(f"Declare tools.{name}.version in manifest.yml")
@@ -34,7 +34,7 @@ def checked_command(pins: ToolPins, name: str) -> tuple[str, str]:
     if executable is None:
         raise FileNotFoundError(f"Tool {name!r} needs {command!r} {pin.version} on PATH")
     output = subprocess.check_output(  # noqa: S603 - run the pinned tool by its resolved path.
-        [executable, "--version"], stderr=subprocess.STDOUT, text=True
+        [executable, *version_args], stderr=subprocess.STDOUT, text=True
     ).strip()
     expected = rf"(?<![\w.+-]){re.escape(pin.version)}(?![\w.+-])"
     if not re.search(expected, output):

@@ -35,10 +35,32 @@
 | `Stage.execution` | Среда |
 |---|---|
 | `nix` | Nix запускает Python в настроенном sandbox и загружает зависимости из store |
-| `relaxed` | Nix помечает derivation `__noChroot`; воркер с `sandbox = relaxed` может дать доступ к окружению хоста |
+| `relaxed` | Nix помечает derivation `__noChroot`. На воркере с `sandbox = relaxed` стадия получает доступ к файловой системе за пределами sandbox и выполняется с окружением сборщика Nix |
 | `host` | Python из Nix запускается от пользователя. Подходит для Docker Desktop и `module load` |
 
-`Catalog(host_launcher=(...))` задаёт исполняемый префикс для host-стадий.
-Он может загрузить модуль и вызвать переданную команду. Указывайте версию внешнего
-инструмента в `Stage.configuration`, чтобы она участвовала в вычислении ключа.
-Для стадии с намеренно меняющейся средой есть `always_run=True`.
+## Инструменты из Environment Modules
+
+Воркер предоставляет установленный инструмент и доступ к лицензии. В проекте
+достаточно указать версию.
+
+```yaml
+tools:
+  synth:
+    version: "24.1"
+```
+
+Для стадии с `execution="host"` загрузите модуль перед запуском Flow. Можно также
+передать `Catalog(host_launcher=("/opt/eda/load-tool",))` и выполнить загрузку
+в этой обёртке. Она инициализирует Modules для своего shell, вызывает
+`module load synth/24.1` и запускает переданную команду через `exec "$@"`.
+Python из Nix получит настроенные `PATH` и переменные лицензирования. [Environment Modules](https://modules.readthedocs.io/en/stable/module.html#package-initialization)
+
+Добавьте `manifest.yml` во входы стадии и проверьте установленную версию внутри
+функции через `Manifest.load(work / "manifest.yml").command("synth")`. Эта
+проверка по умолчанию вызывает `--version`. Если у инструмента другой флаг, Flow
+может задать его через `version_args=("-version",)`. Изменение версии в манифесте
+меняет ключ сборки. Если стадию нужно выполнять при каждом вызове, задайте
+`always_run=True`.
+
+Флаг Nix `--impure` разрешает доступ к внешним данным при вычислении выражения.
+Окружение инструмента передаёт выбранный режим выполнения стадии. [Руководство Nix](https://nix.dev/manual/nix/2.34/command-ref/new-cli/nix3-build.html)

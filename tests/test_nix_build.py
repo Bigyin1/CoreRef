@@ -3,10 +3,12 @@
 import json
 import subprocess
 from pathlib import Path
+from shlex import quote
 
 import pytest
 
 from coreref.api.build import Outputs, Route, Stage, StageSpec
+from coreref.api.errors import CatalogError
 from coreref.api.packages import Catalog
 from coreref.api.projects import Manifest, Project
 
@@ -58,23 +60,49 @@ def test_python_stages_are_native_derivations_with_selected_input_outputs(tmp_pa
     assert changed.read_text() == "CHANGED"
 
 
-def test_host_launcher_supplies_environment_and_reuses_output(tmp_path: Path) -> None:
+def test_host_launcher_runs_the_tool_from_path_with_the_pinned_version(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    tools = tmp_path / "installed tools"
+    tools.mkdir()
+    executable = tools / "fixture-synth"
+    executable.write_text(
+        """#!/bin/sh
+case "$1" in
+    -version) printf '%s' 'fixture-synth 24.1' ;;
+    run) printf '%s' "$FIXTURE_LICENSE_ENV" ;;
+    *) exit 2 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
     wrapper = tmp_path / "tool-env"
     wrapper.write_text(
-        '#!/bin/sh\nexport COREREF_TEST_MODULE=loaded\nexec "$@"\n', encoding="utf-8"
+        f'#!/bin/sh\nexport PATH={quote(str(tools))}:"$PATH"\n'
+        'export FIXTURE_LICENSE_ENV=loaded\nexec "$@"\n',
+        encoding="utf-8",
     )
     wrapper.chmod(0o755)
-    project = Project(
-        tmp_path, Manifest(ref="demo.host/1.0"), Catalog(host_launcher=(str(wrapper),))
-    )
+    manifest = tmp_path / "manifest.yml"
+    document = 'ref: demo.host/1.0\ntools:\n  fixture-synth:\n    version: "24.1"\n'
+    manifest.write_text(document, encoding="utf-8")
+    project = Project(tmp_path, Manifest.load(manifest), Catalog(host_launcher=(str(wrapper),)))
     project.route = Route([StageSpec(name="host", outputs=("host.txt",))])
-    project.stages = {"host": Stage(transform=stages.host, execution="host")}
+    project.stages = {
+        "host": Stage(transform=stages.host, execution="host", files={manifest.name: manifest})
+    }
     assert project.build("host")["host.txt"].read_text() == "loaded"
     log = project.build_dir / "host.log"
     assert log.read_text() == "ran on host"
     log.unlink()
     assert project.build("host")["host.txt"].read_text() == "loaded"
     assert not log.exists()
+
+    manifest.write_text(document.replace("24.1", "24.2"), encoding="utf-8")
+    with pytest.raises(CatalogError, match=r"Stage demo\.host-host failed"):
+        project.build("host")
+    assert "fixture-synth must be '24.2'" in capfd.readouterr().err
 
 
 def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:

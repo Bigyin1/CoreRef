@@ -90,16 +90,18 @@ class Manifest(BaseModel):
         pin = self.tools.get(name)
         return pin.image if isinstance(pin, ImagePin) else None
 
-    def command(self, name: str) -> tuple[str, str]:
+    def command(
+        self, name: str, *, version_args: tuple[str, ...] = ("--version",)
+    ) -> tuple[str, str]:
         """Find a pinned local command and verify its reported version.
 
         Resolve the configured command, or the tool name by default, on
-        ``PATH`` and run it with ``--version``. Return the executable path
+        ``PATH`` and run it with the flow's ``version_args``. Return the executable path
         and the verified version. A missing executable raises
         ``FileNotFoundError``. A missing pin or mismatched version raises
         ``ValueError``.
         """
-        return checked_command(self.tools, name)
+        return checked_command(self.tools, name, version_args=version_args)
 
     def local_record(self, source: Path) -> LocalRecord:
         """Create a working publication record for the supplied checkout.

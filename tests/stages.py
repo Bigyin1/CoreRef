@@ -1,10 +1,11 @@
 """Importable Python callbacks for the end-to-end Nix tests."""
 
 from collections.abc import Mapping
-from os import environ
 from pathlib import Path
+from subprocess import check_output
 
 from coreref.api.packages import JSON
+from coreref.api.projects import Manifest
 
 
 def prepare(work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> None:
@@ -18,6 +19,8 @@ def upper(work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> None:
 
 
 def host(work: Path, log: Path, _configuration: Mapping[str, JSON]) -> None:
+    manifest = Manifest.load(work / "manifest.yml")
+    command, _ = manifest.command("fixture-synth", version_args=("-version",))
+    value = check_output([command, "run"], text=True)  # noqa: S603 - resolved tool under test.
     log.write_text("ran on host", encoding="utf-8")
-    value = environ["COREREF_TEST_MODULE"]
     (work / "host.txt").write_text(value, encoding="utf-8")
