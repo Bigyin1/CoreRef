@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from coreref.api.packages import Ref
 from coreref.api.projects import Manifest
 
 
@@ -31,7 +30,7 @@ build_tools:
         encoding="utf-8",
     )
     manifest = Manifest.load(path)
-    assert manifest.requirements == (Ref("demo.cpu/1.0"),)
+    assert manifest.requirements == ("demo.cpu/1.0",)
     document = manifest.model_dump(exclude_none=True)
     assert document["eda_tools"] == {
         "genus": {"version": "23.14-s087"},

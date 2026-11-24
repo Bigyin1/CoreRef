@@ -1,47 +1,48 @@
-"""JSON transport and freezing preserve consumer values without domain rules."""
-
-from __future__ import annotations
+"""Verify the JSON metadata stored in locks and release indexes."""
 
 import json
 from collections.abc import Mapping
 from math import inf, nan
+from pathlib import Path
 
 import pytest
-from frozendict import deepfreeze
+from pydantic import JsonValue, ValidationError
 
-from coreref.api.packages.records import JSON, LocalRecord, Record, Ref
+from coreref.api.packages import Ref
+from coreref.api.packages.catalog import _Source
+
+_SOURCE = Path("/nix/store/" + "a" * 32 + "-source")
 
 
 @pytest.mark.parametrize("value", [nan, inf, -inf])
 def test_nonfinite_numbers_cannot_be_written_as_json(value: float) -> None:
-    with pytest.raises(ValueError):
-        Record(Ref("demo.nonfinite/1.0"), {"value": value})
+    with pytest.raises(ValidationError):
+        _Source(source=_SOURCE, payload={"value": value})
 
 
-def test_large_integers_are_consumer_data() -> None:
-    record = Record(Ref("demo.large/1.0"), {"number": 2**100})
-    assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["payload"] == {
-        "number": 2**100
-    }
+def test_json_round_trip_preserves_consumer_values() -> None:
+    data: dict[str, JsonValue] = {"number": 2**100, "started_at": "any user format"}
+    metadata = _Source(source=_SOURCE, payload=data)
+    assert json.loads(metadata.model_dump_json())["payload"] == data
 
 
-def test_deepfreeze_detaches_nested_containers() -> None:
-    nested: dict[str, JSON] = {"ports": [1, 1.0, -0.0, True, None]}
-    original: dict[str, JSON] = {"nested": [nested]}
-    frozen: Mapping[str, JSON] = deepfreeze(original)
-    nested["ports"] = []
-    original.clear()
-    array = frozen["nested"]
-    assert isinstance(array, tuple)
-    item = array[0]
+def test_record_detaches_nested_metadata_and_outputs() -> None:
+    output = _SOURCE / "rtl.v"
+    metadata = _Source(
+        source=_SOURCE,
+        payload={"nested": [{"ports": [1, 1.0, -0.0, True, None]}]},
+        outputs={"rtl.v": output},
+    )
+    record = metadata.record(Ref("demo.frozen/1.0"))
+    assert isinstance(metadata.payload, dict)
+    metadata.payload.clear()
+    metadata.outputs.clear()
+    assert record.outputs == {"rtl.v": output}
+    assert isinstance(record.payload, Mapping)
+    nested = record.payload["nested"]
+    assert isinstance(nested, tuple)
+    (item,) = nested
     assert isinstance(item, Mapping)
     assert item["ports"] == (1, 1.0, -0.0, True, None)
-    encoded = LocalRecord(Ref("demo.frozen/1.0"), frozen).to_json()
-    assert '"payload":{"nested":[{"ports":[1,1.0,-0.0,true,null]}]}' in encoded
     with pytest.raises(TypeError):
         item["ports"] = ()  # type: ignore[index]
-
-
-def test_consumer_timestamps_are_not_interpreted() -> None:
-    record = Record(Ref("demo.timestamps/1.0"), {"started_at": "any user format"})
-    assert json.loads(json.dumps(record.to_dict(), allow_nan=False))["payload"] == record.payload

@@ -45,10 +45,9 @@ derivation. Файлы, которые стадия не читает, в её �
 Nix binary cache. Индекс можно зарегистрировать в каталоге потребителя.
 
 ```python
-from coreref.api.build import Outputs
 from coreref.api.packages import Catalog
 
-release = project.publish()
-consumer = Catalog(cache=cache, releases={release.ref: release.files["release.json"]})
-files = Outputs(consumer).get(consumer.info(release.ref), ("rtl.v",))
+index = project.publish()
+consumer = Catalog(cache=cache, releases={project.ref: index})
+files = consumer.get_outputs(consumer.info(project.ref), ("rtl.v",))
 ```

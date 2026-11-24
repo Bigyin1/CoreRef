@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from ..errors import Conflict, InvalidPackage, NotFound
+from ..errors import InvalidPackage, NotFound
 from ..packages.catalog import Catalog, _Source
-from ..packages.records import Dependency, LocalRecord, Record, Ref, _parse_dependency
+from ..packages.records import Record, Ref
 
 if TYPE_CHECKING:
     from .manifest import Manifest
@@ -24,36 +24,41 @@ class _Lock(BaseModel):
     requirements: dict[str, str]
     packages: dict[str, _Source]
 
-    def resolve(self, dependency: Dependency) -> Ref:
+    def resolve(self, dependency: str) -> Ref:
         try:
-            return Ref(self.requirements[str(dependency)])
+            selected = self.requirements[dependency]
         except KeyError as error:
             raise InvalidPackage(f"{dependency} is absent from manifest.lock. Run lock.") from error
+        if selected not in self.packages:
+            raise InvalidPackage(f"{dependency} selects {selected}, absent from manifest.lock")
+        return Ref(selected)
 
 
 def lock_sources(
-    catalog: Catalog, manifest: Manifest, path: Path, additional: tuple[Dependency, ...]
+    catalog: Catalog, manifest: Manifest, path: Path, additional: tuple[str, ...]
 ) -> Path:
     """Resolve the manifest's source requests and save their exact Nix paths."""
     from .manifest import Manifest
 
     lock = _Lock(root=manifest.ref, requirements={}, packages={})
     pending = [*manifest.requirements, *additional]
-    pending.extend(value.requirement for value in manifest.configured_dependencies.values())
+    pending.extend(value.ref for value in manifest.configured_dependencies.values())
     while pending:
         dependency = pending.pop()
-        if str(dependency) in lock.requirements:
+        if dependency in lock.requirements:
             continue
-        ref, source = catalog._lock_entry(dependency)
-        lock.requirements[str(dependency)] = str(ref)
-        if str(ref) in lock.packages:
+        ref = catalog._select(dependency)
+        key = str(ref)
+        lock.requirements[dependency] = key
+        if key in lock.packages:
             continue
-        lock.packages[str(ref)] = source
-        pending += [_parse_dependency(item) for item in source.dependencies]
+        source = catalog._lock_entry(ref)
+        lock.packages[key] = source
+        pending.extend(source.dependencies)
         if source.outputs:
             continue
-        child = Manifest.load(Path(source.source) / "manifest.yml")
-        pending.extend(value.requirement for value in child.configured_dependencies.values())
+        child = Manifest.load(source.source / "manifest.yml")
+        pending.extend(value.ref for value in child.configured_dependencies.values())
     lock = _Lock(
         root=lock.root,
         requirements=dict(sorted(lock.requirements.items())),
@@ -64,11 +69,9 @@ def lock_sources(
     return path
 
 
-def _edges(
-    lock: _Lock, root: Ref, requirements: tuple[Dependency, ...]
-) -> dict[Ref, tuple[Ref, ...]]:
+def _edges(lock: _Lock, root: Ref, requirements: tuple[str, ...]) -> dict[Ref, tuple[Ref, ...]]:
     edges = {
-        Ref(ref): tuple(lock.resolve(_parse_dependency(item)) for item in source.dependencies)
+        Ref(ref): tuple(lock.resolve(item) for item in source.dependencies)
         for ref, source in lock.packages.items()
     }
     edges[root] = tuple(lock.resolve(item) for item in requirements)
@@ -105,39 +108,31 @@ class Graph:
     def __init__(
         self,
         catalog: Catalog,
-        record: LocalRecord,
+        manifest: Manifest,
+        source: Path,
         *,
-        dependencies: tuple[Dependency, ...] = (),
         lockfile: Path,
     ) -> None:
         """Bind the root's requirements to the supplied lockfile."""
         self.catalog = catalog
-        self.record = record
         self._lock = _Lock.model_validate_json(lockfile.read_bytes())
-        self._entries = {Ref(ref): source for ref, source in self._lock.packages.items()}
-        self._records = {ref: source.record(ref) for ref, source in self._entries.items()}
-        self._edges = _edges(self._lock, record.ref, dependencies)
-
-    @property
-    def records(self) -> tuple[LocalRecord | Record, ...]:
-        """Return the working root and all locked dependency metadata."""
-        return (self.record, *self._records.values())
+        self._root = Ref(manifest.ref)
+        self._records: dict[Ref, Record] = {}
+        for text, entry in self._lock.packages.items():
+            ref = Ref(text)
+            self._records[ref] = entry.record(ref)
+        root = _Source(source=source, kind=manifest.type, payload=manifest.payload)
+        self._records[self._root] = root.record(self._root)
+        self._edges = _edges(self._lock, self._root, manifest.requirements)
 
     def _ref(self, ref: Ref) -> Ref:
         if ref in self._edges:
             return ref
-        if ref.revision is None:
-            matches = [exact for exact in self._entries if exact.without_revision() == ref]
-            if len(matches) == 1:
-                return matches[0]
-            if matches:
-                raise Conflict(f"Specify the exact locked revision of {ref}")
         raise NotFound(f"{ref} is absent from manifest.lock")
 
-    def info(self, ref: Ref) -> LocalRecord | Record:
+    def info(self, ref: Ref) -> Record:
         """Return metadata for a locked node."""
-        exact = self._ref(ref)
-        return self.record if exact == self.record.ref else self._records[exact]
+        return self._records[self._ref(ref)]
 
     def dependencies(
         self,
@@ -151,7 +146,7 @@ class Graph:
         Boundaries in ``stop_at`` remain visible. A boundary's descendants
         are kept whenever another selected path reaches them.
         """
-        root = self.record.ref if ref is None else self._ref(ref)
+        root = self._root if ref is None else self._ref(ref)
         stops = {self._ref(boundary) for boundary in stop_at}
         if root in stops:
             return ()
@@ -163,10 +158,10 @@ class Graph:
         return {ref: self._source(ref) for ref in refs}
 
     def _source(self, ref: Ref) -> Path:
-        exact = self._ref(ref)
-        if exact == self.record.ref and self.record.source is not None:
-            return self.record.source
-        return self.catalog._source_for(exact, self._entries[exact])
+        self._ref(ref)
+        if ref == self._root:
+            return self._records[ref].source
+        return self.catalog._source_for(ref, self._lock.packages[str(ref)])
 
-    def _resolve(self, dependency: Dependency) -> Record:
+    def _resolve(self, dependency: str) -> Record:
         return self._records[self._lock.resolve(dependency)]

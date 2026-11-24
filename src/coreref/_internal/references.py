@@ -8,7 +8,6 @@ from ..api.errors import InvalidPackage
 
 _NAME = re.compile(r"[a-z0-9_][a-z0-9_-]*")
 _VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{0,100}")
-_REVISION = re.compile(r"[a-z0-9]+")
 _MAX_NAME_LENGTH = 101
 
 
@@ -22,11 +21,20 @@ def parse_package_name(name: str) -> tuple[str, str]:
     return namespace, component
 
 
-def validate_fields(version: str, revision: str | None) -> None:
+def validate_version(version: str) -> None:
     if not _VERSION.fullmatch(version):
         raise InvalidPackage(f"Invalid component version: {version!r}")
-    if revision is not None and (not _REVISION.fullmatch(revision) or revision == "latest"):
-        raise InvalidPackage(f"Invalid exact revision: {revision!r}")
+
+
+def requirement_name(requirement: str) -> str:
+    """Validate a dependency declaration and return its component name."""
+    name, _, version = requirement.partition("/")
+    parse_package_name(name)
+    if version.startswith("["):
+        version_range(version)
+    else:
+        validate_version(version)
+    return name
 
 
 def version_range(version: str) -> SpecifierSet:

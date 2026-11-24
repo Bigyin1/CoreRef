@@ -9,20 +9,19 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import cast
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
 
 from ..._internal.environment import CommandPin, EdaToolPins, ImagePin, checked_command
+from ..._internal.references import requirement_name
 from ..errors import InvalidPackage
-from ..packages.records import JSON, Dependency, LocalRecord, PackageInput, Ref, _parse_dependency
 
 _OptionValue = str | int | bool
 
 
 class _ConfiguredDependency(BaseModel):
-    """A named configuration of a package recipe."""
+    """A named dependency with build options."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1)
@@ -106,52 +105,30 @@ class Manifest(BaseModel):
         pin = self.eda_tools.get(name) or self.build_tools.get(name)
         return checked_command(pin, name, version_args=version_args)
 
-    def local_record(self, source: Path) -> LocalRecord:
-        """Create a working publication record for the supplied checkout.
-
-        Use ``source`` as the SCM checkout and resolve relative entries in
-        ``files`` against it. The project's root reference must omit a recipe
-        revision. Dependency requirements are available separately.
-        """
-        ref = Ref(self.ref)
-        if ref.revision is not None:
-            raise InvalidPackage("A local package root must not specify a revision")
-        return LocalRecord(
-            ref,
-            cast(JSON, self.payload),
-            source=source,
-            files={
-                name: (source / Path(path).expanduser()).resolve()
-                for name, path in self.files.items()
-            },
-        )
+    @property
+    def requirements(self) -> tuple[str, ...]:
+        """Return plain dependency declarations in manifest order."""
+        return tuple(item for item in self.dependencies if isinstance(item, str))
 
     @property
-    def requirements(self) -> tuple[Dependency, ...]:
-        """Return the ordinary references and version ranges in manifest order."""
-        return tuple(_parse_dependency(item) for item in self.dependencies if isinstance(item, str))
-
-    @property
-    def configured_dependencies(self) -> dict[str, PackageInput]:
+    def configured_dependencies(self) -> dict[str, _ConfiguredDependency]:
         """Return option-dependent inputs keyed by their manifest names.
 
-        Different names can select distinct option sets for the same recipe.
+        Different names can select distinct option sets for the same component.
         """
         return {
-            item.name: PackageInput(_parse_dependency(item.ref), item.options)
-            for item in self.dependencies
-            if isinstance(item, _ConfiguredDependency)
+            item.name: item for item in self.dependencies if isinstance(item, _ConfiguredDependency)
         }
 
     @model_validator(mode="after")
     def _unique_dependencies(self) -> Manifest:
-        configured_names = [
-            item.name for item in self.dependencies if isinstance(item, _ConfiguredDependency)
-        ]
-        if len(set(configured_names)) != len(configured_names):
+        configured = [item for item in self.dependencies if isinstance(item, _ConfiguredDependency)]
+        if len({item.name for item in configured}) != len(configured):
             raise ValueError("Duplicate configured dependency name")
+        for item in configured:
+            requirement_name(item.ref)
         requirements = self.requirements
-        if len({ref.package_name for ref in requirements}) != len(requirements):
+        if len({requirement_name(item) for item in requirements}) != len(requirements):
             raise ValueError("Duplicate package in plain dependencies")
         return self
 

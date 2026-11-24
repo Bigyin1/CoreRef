@@ -6,32 +6,52 @@ import json
 from collections.abc import Mapping
 from functools import cached_property
 from pathlib import Path
-from typing import cast
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, cast
 
-from packaging.version import Version
+from frozendict import deepfreeze, frozendict
+from packaging.specifiers import SpecifierSet
+from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from ..._internal.nix_store import NixStore, store_entry
+from ..._internal.references import parse_package_name, version_range
 from ..errors import CatalogError, InvalidPackage, NotFound
-from .records import JSON, Dependency, Record, Ref
+from .records import JSON, Record, Ref
+
+if TYPE_CHECKING:
+    from ..projects.manifest import Manifest
 
 
 class _Source(BaseModel):
     """The source and optional release index associated with one locked dependency."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    source: str
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    source: Path
     origin: dict[str, JsonValue] | None = None
     dependencies: tuple[str, ...] = ()
+    kind: str | None = None
     payload: JsonValue = None
-    outputs: dict[str, str] = Field(default_factory=dict)
+    outputs: dict[str, Path] = Field(default_factory=dict)
+    commit: str | None = None
 
-    def record(self, ref: Ref, *, file_names: tuple[str, ...] = ()) -> Record:
-        data = cast(JSON, self.payload)
-        metadata: dict[str, JSON] = dict(data) if isinstance(data, Mapping) else {"data": data}
-        if self.outputs:
-            metadata["output_index"] = self.outputs
-        return Record(ref, metadata, file_names=file_names, has_source=True)
+    def record(self, ref: Ref) -> Record:
+        return Record(
+            ref,
+            self.source,
+            kind=self.kind,
+            outputs=frozendict(self.outputs),
+            payload=deepfreeze(cast(JSON, self.payload)),
+            commit=self.commit,
+        )
+
+
+def _matching_version(text: str, constraint: SpecifierSet) -> Version | None:
+    try:
+        version = Version(text)
+    except InvalidVersion:
+        return None
+    return version if constraint.contains(version) else None
 
 
 class Catalog:
@@ -65,7 +85,7 @@ class Catalog:
         self.directory = directory
         self.sources = dict(sources or {})
         self.releases = dict(releases or {})
-        self.editables = {ref.without_revision(): path for ref, path in (editables or {}).items()}
+        self.editables = dict(editables or {})
         self._nix = NixStore(cache, python, host_launcher)
 
     @cached_property
@@ -82,17 +102,25 @@ class Catalog:
         locations.update(self.sources)
         return locations
 
-    def _select(self, requirement: Dependency) -> Ref:
-        if isinstance(requirement, Ref):
-            return requirement
+    def _select(self, requirement: str) -> Ref:
+        name, _, selection = requirement.partition("/")
+        if not selection.startswith("["):
+            return Ref(requirement)
+        parse_package_name(name)
+        constraint = version_range(selection)
         candidates = self._locations.keys() | self.releases.keys()
-        matching = [ref for ref in candidates if requirement._matches(ref)]
+        matching = {
+            ref: version
+            for ref in candidates
+            if ref.package_name == name
+            and (version := _matching_version(ref.version, constraint)) is not None
+        }
         if not matching:
             raise NotFound(f"No available source matches {requirement}")
-        return max(matching, key=lambda ref: (Version(ref.version), str(ref)))
+        return max(matching, key=lambda ref: (matching[ref], str(ref)))
 
     def _snapshot(self, ref: Ref) -> tuple[Path, dict[str, JSON] | None]:
-        location = self._locations.get(ref.without_revision())
+        location = self._locations.get(ref)
         if isinstance(location, Path):
             name = f"coreref-source-{ref.package_name}"
             return self._nix.source(location, name, tracked=True), None
@@ -100,38 +128,39 @@ class Catalog:
             return self._nix.prefetch(location)
         raise NotFound(f"No source configured for {ref}")
 
-    def _index(self, ref: Ref) -> Path | None:
-        return self.releases.get(ref) or self.releases.get(ref.without_revision())
-
-    def _published(self, ref: Ref) -> tuple[Ref, _Source] | None:
-        index = self._index(ref)
+    def _published(self, ref: Ref) -> _Source | None:
+        index = self.releases.get(ref)
         if index is None:
             return None
         self._nix.restore((index,))
         document = json.loads(index.read_bytes())
         published = Ref(document["ref"])
-        if ref.without_revision() != published.without_revision() or (
-            ref.revision is not None and ref != published
-        ):
+        if ref != published:
             raise InvalidPackage(f"{index} identifies {published}, expected {ref}")
-        return published, _Source.model_validate(document["source"])
+        return _Source.model_validate(document["source"])
 
     def info(self, ref: Ref) -> Record:
         """Read a registered release index without downloading its artifacts."""
         result = self._published(ref)
         if result is None:
             raise NotFound(f"No release index registered for {ref}")
-        published, source = result
-        return source.record(published)
+        return result.record(ref)
 
-    def _is_editable(self, ref: Ref) -> bool:
-        return ref.without_revision() in self.editables
+    def get_outputs(self, record: Record, names: tuple[str, ...]) -> dict[str, Path]:
+        """Retrieve exactly the named files from the selected release."""
+        if missing := set(names) - record.outputs.keys():
+            raise NotFound(f"{record.ref} has no outputs {', '.join(sorted(missing))}")
+        selected = {name: record.outputs[name] for name in names}
+        self._nix.restore(tuple(selected.values()))
+        if absent := [name for name, path in selected.items() if not path.is_file()]:
+            raise NotFound(f"Missing files for {record.ref}: {', '.join(absent)}")
+        return selected
 
     def _source_for(self, ref: Ref, source: _Source) -> Path:
-        editable = self.editables.get(ref.without_revision())
+        editable = self.editables.get(ref)
         if editable is not None:
             return editable.resolve(strict=True)
-        locked = store_entry(Path(source.source))
+        locked = store_entry(source.source)
         if locked.is_dir():
             return locked
         try:
@@ -147,24 +176,55 @@ class Catalog:
                 raise InvalidPackage(message) from None
         return locked
 
-    def _lock_entry(self, requirement: Dependency) -> tuple[Ref, _Source]:
+    def _lock_entry(self, ref: Ref) -> _Source:
         from ..projects.manifest import Manifest
 
-        ref = self._select(requirement)
         published = self._published(ref)
         if published is not None:
             return published
         path, origin = self._snapshot(ref)
         manifest = Manifest.load(path / "manifest.yml")
-        if Ref(manifest.ref) != ref.without_revision():
+        if Ref(manifest.ref) != ref:
             raise InvalidPackage(f"{path} declares {manifest.ref}, expected {ref}")
-        revision = path.name.partition("-")[0]
-        locked = Ref(f"{ref.without_revision()}#{revision}")
-        if ref.revision is not None and ref != locked:
-            raise InvalidPackage(f"Source {ref} does not match {locked}")
-        return locked, _Source(
-            source=str(path),
+        return _Source(
+            source=path,
             origin=cast("dict[str, JsonValue] | None", origin),
-            dependencies=tuple(map(str, manifest.requirements)),
-            payload={"type": manifest.type, "data": manifest.payload},
+            dependencies=manifest.requirements,
+            kind=manifest.type,
+            payload=manifest.payload,
         )
+
+    def _publish(
+        self, checkout: Path, manifest: Manifest, files: Mapping[str, Path], *, commit: str
+    ) -> Path:
+        ref = Ref(manifest.ref)
+        source = self._nix.source(checkout, f"coreref-source-{ref.package_name}", tracked=True)
+        outputs = {
+            name: self._store_file(path.resolve(strict=True)) for name, path in files.items()
+        }
+        metadata = _Source(
+            source=source,
+            dependencies=manifest.requirements,
+            kind=manifest.type,
+            payload=manifest.payload,
+            outputs=outputs,
+            commit=commit,
+        )
+        document = {
+            "ref": manifest.ref,
+            "source": metadata.model_dump(mode="json", exclude_defaults=True),
+        }
+        with TemporaryDirectory() as temporary:
+            index = Path(temporary) / "release.json"
+            index.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
+            index_path = self._nix.add(index, "coreref-release.json")
+            self._nix.upload((source, *outputs.values()))
+            self._nix.upload((index_path,))
+        return index_path
+
+    def _store_file(self, path: Path) -> Path:
+        try:
+            store_entry(path)
+        except InvalidPackage:
+            return self._nix.add(path, "coreref-artifact")
+        return path

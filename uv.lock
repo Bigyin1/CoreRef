@@ -100,7 +100,6 @@ dependencies = [
     { name = "packaging" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -118,7 +117,6 @@ requires-dist = [
     { name = "packaging", specifier = ">=24,<27" },
     { name = "pydantic", specifier = ">=2.12.5,<3" },
     { name = "pyyaml", specifier = ">=6,<7" },
-    { name = "typing-extensions", specifier = ">=4.12,<5" },
 ]
 
 [package.metadata.requires-dev]

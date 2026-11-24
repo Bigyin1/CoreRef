@@ -14,6 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..._internal.nix_store import store_entry
 from ..packages.records import JSON, Record
 
 StageTransform = Callable[[Path, Path, Mapping[str, JSON]], None]
@@ -54,10 +55,9 @@ class Stage:
     are staged names and its values are source paths.
 
     ``action`` is a local callback called with no arguments. It uses the
-    build directory directly. ``configuration`` contributes to both local
-    execution and release inputs, while ``local_configuration`` applies
-    only to local runs. Set ``always_run`` when the action must execute
-    even if the host executor can reuse its outputs.
+    build directory directly. ``configuration`` is passed to the transform
+    and contributes to the build identity. Set ``always_run`` when a host
+    transform must execute even if the executor can reuse its outputs.
     ``ready()`` checks stage-specific prerequisites. A shared
     ``prepare(stages)`` callback can compute inputs for selected stages in one
     operation. ``artifacts`` binds staged input names to named outputs from
@@ -70,7 +70,6 @@ class Stage:
     inputs: tuple[str, ...] | None = None
     files: Mapping[str, Path] = field(default_factory=dict)
     configuration: Mapping[str, JSON] = field(default_factory=dict)
-    local_configuration: Mapping[str, JSON] = field(default_factory=dict)
     always_run: bool = False
     ready: Callable[[], bool] | None = None
     prepare: Callable[[tuple[StageSpec, ...]], None] | None = None
@@ -90,8 +89,8 @@ class Stage:
         overlap = self.files.keys() & self.artifacts.keys()
         if overlap:
             raise ValueError(f"Stage has two sources for {', '.join(sorted(overlap))}")
-        if any(record.ref.revision is None for record, _ in self.artifacts.values()):
-            raise ValueError("Stage artifacts require an exact package revision")
+        for record, _ in self.artifacts.values():
+            store_entry(record.source)
         for name in (*self.files, *self.artifacts, *(self.inputs or ())):
             _output_path(name)
 
@@ -182,15 +181,22 @@ class Route:
         """Check whether the route declares the named stage."""
         return name in self._stages
 
-    def _closure(self, targets: Iterable[str]) -> tuple[StageSpec, ...]:
+    def _closure(
+        self, targets: Iterable[str], *, publishing: bool = False
+    ) -> tuple[StageSpec, ...]:
         pending = list(targets)
         selected: set[str] = set()
         while pending:
             name = pending.pop()
-            if name not in selected:
-                stage = self[name]
-                selected.add(name)
-                pending.extend(stage.needs)
+            if name in selected:
+                continue
+            stage = self[name]
+            if publishing and stage.purpose != "release":
+                raise ValueError(f"Expected a release stage, got {name!r}")
+            selected.add(name)
+            pending.extend(stage.needs)
+            if publishing:
+                pending.extend(stage.checks)
         return tuple(self[name] for name in self.order if name in selected)
 
     def _release(self, cap: str | None = None) -> tuple[StageSpec, ...]:
@@ -215,17 +221,6 @@ class Route:
         """Find the terminal stages of a selected, dependency-closed subgraph."""
         upstream = {name for stage in stages for name in stage.needs}
         return tuple(stage.name for stage in stages if stage.name not in upstream)
-
-    def _release_document(self) -> JSON:
-        return [
-            {
-                "name": stage.name,
-                "needs": tuple(sorted(stage.needs)),
-                "outputs": tuple(sorted(stage.outputs)),
-                **({"checks": tuple(sorted(stage.checks))} if stage.checks else {}),
-            }
-            for stage in sorted(self._release(), key=lambda stage: stage.name)
-        ]
 
 
 def _validate_outputs(stages: list[StageSpec]) -> None:

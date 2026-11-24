@@ -8,6 +8,5 @@ htmlcov/
 dist/
 *.egg-info/
 .env
-.conan-home/
 
 .benchmarks/

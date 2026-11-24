@@ -8,7 +8,7 @@ from socket import create_server
 
 import pytest
 
-from coreref.api.build import Outputs, Route, Stage, StageSpec
+from coreref.api.build import Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
 from coreref.api.packages import Catalog
 from coreref.api.projects import Manifest, Project
@@ -129,22 +129,35 @@ def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:
     checkout.mkdir()
     (checkout / ".gitignore").write_text(".build/\n.env\n", encoding="utf-8")
     (checkout / ".env").write_text("untracked private config", encoding="utf-8")
-    (checkout / "manifest.yml").write_text("ref: demo.nix/1.0\n", encoding="utf-8")
+    manifest = checkout / "manifest.yml"
+    manifest.write_text("ref: demo.nix/1.0\ntype: rtl\npayload: {module: demo}\n", encoding="utf-8")
     (checkout / "input.txt").write_text("published", encoding="utf-8")
 
     cache = (tmp_path / "cache").as_uri()
     project = _demo(checkout, Catalog(cache=cache))
+    project.manifest = Manifest.load(manifest)
     project.lock()
     _commit(checkout)
-    publication = project.publish("prepare")
-    index = publication.files["release.json"]
-    consumer = Catalog(cache=cache, releases={publication.ref: index})
-    info = consumer.info(publication.ref)
-    assert Outputs(consumer).get(info, ("small.txt",))["small.txt"].read_text() == "published"
-    assert set(Outputs.links(info) or {}) == {"lockfile", "small.txt", "other.txt"}
+    index = project.publish("prepare")
+    consumer = Catalog(cache=cache, releases={project.ref: index})
+    info = consumer.info(project.ref)
+    assert consumer.get_outputs(info, ("small.txt",))["small.txt"].read_text() == "published"
+    assert set(info.outputs) == {"lockfile", "small.txt", "other.txt"}
+    assert info.kind == "rtl"
+    assert info.payload == {"module": "demo"}
+    assert info.commit
     assert consumer._nix.command("path-info", "--store", cache, str(index)) == str(index)
-    assert publication.source is not None
-    assert not (publication.source / ".env").exists()
+    assert not (info.source / ".env").exists()
+    assert project.publish("prepare") == index
+
+    using = Project(
+        tmp_path, Manifest(ref="demo.consumer/1.0", dependencies=[str(project.ref)]), consumer
+    )
+    using.lock()
+    consumer.releases[project.ref] = project.publish("upper")
+    assert consumer.releases[project.ref] != index
+    assert "upper.txt" in consumer.info(project.ref).outputs
+    assert using.graph.info(project.ref) == info
 
 
 def _commit(directory: Path) -> None:

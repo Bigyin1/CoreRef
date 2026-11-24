@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -16,7 +17,6 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from ..api.errors import CatalogError, InvalidPackage, NotFound
-from .hashing import file_digest, fingerprint
 
 if TYPE_CHECKING:
     from ..api.build.route import StageTransform
@@ -25,6 +25,14 @@ if TYPE_CHECKING:
 _RECIPES = Path(__file__).with_name("nix")
 _RUNNER = Path(__file__).with_name("nix_builder.py")
 _STORE_ENTRY = re.compile(r"/nix/store/[0-9a-z]{32}-[a-zA-Z0-9+._?=-]+")
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def store_entry(path: Path) -> Path:
@@ -323,21 +331,21 @@ class NixStore:
         return results
 
     def _host_key(self, invocation: Invocation, plan: dict[str, JSON]) -> str:
-        return fingerprint(
-            {
-                **plan,
-                "python": str(self.runtime),
-                "launcher": [
-                    [arg, file_digest(path)] if (path := Path(arg)).is_file() else arg
-                    for arg in self.launcher
-                ],
-                "inputs": {
-                    name: [file_digest(path), path.stat().st_mode & 0o111]
-                    for name, path in invocation.inputs.items()
-                    if isinstance(path, Path)
-                },
-            }
-        )
+        document: dict[str, JSON] = {
+            **plan,
+            "python": str(self.runtime),
+            "launcher": [
+                [arg, _file_digest(path)] if (path := Path(arg)).is_file() else arg
+                for arg in self.launcher
+            ],
+            "inputs": {
+                name: [_file_digest(path), path.stat().st_mode & 0o111]
+                for name, path in invocation.inputs.items()
+                if isinstance(path, Path)
+            },
+        }
+        encoded = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return hashlib.sha256(encoded.encode()).hexdigest()
 
     def _run_host(
         self,

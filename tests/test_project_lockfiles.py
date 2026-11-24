@@ -14,7 +14,7 @@ pytestmark = pytest.mark.nix
 
 def _project_tree(tmp_path: Path) -> Path:
     fixture = Path(__file__).parent / "test_projects"
-    return copytree(fixture, tmp_path / "projects", ignore=lambda _path, _names: ["physical"])
+    return copytree(fixture, tmp_path / "projects")
 
 
 def _project(directory: Path, catalog: Catalog) -> Project:
@@ -31,11 +31,17 @@ def test_lock_keeps_source_and_editor_override_is_live(tmp_path: Path) -> None:
     source.write_text("// local edit", encoding="utf-8")
     cold = _project(project.source, Catalog(projects))
     assert cold.graph.get_sources((stdlib,))[stdlib] == original
+    assert cold.graph.info(stdlib).source == original
 
     editable = _project(project.source, Catalog(projects, editables={stdlib: source.parent.parent}))
     (selected,) = editable.graph.get_sources((stdlib,)).values()
     assert (selected / "rtl/stdlib.sv").read_text() == "// local edit"
+    assert editable.graph.info(stdlib).source == original
     assert editable.lockfile.read_bytes() == lock
+
+    project.lock()
+    assert project.graph.info(stdlib).source != original
+    assert project.graph.info(stdlib).ref == stdlib
 
 
 def test_shared_dependency_survives_pruning_and_range_is_locked(tmp_path: Path) -> None:
@@ -54,7 +60,7 @@ def test_shared_dependency_survives_pruning_and_range_is_locked(tmp_path: Path) 
     project = _project(root.parent, Catalog(projects))
     project.lock()
     visible = project.graph.dependencies(transitive=True, stop_at={Ref("demo.cpu/1.0")})
-    assert {record.ref.without_revision() for record in visible} == {
+    assert {record.ref for record in visible} == {
         Ref("demo.cpu/1.0"),
         Ref("demo.stdlib/1.1"),
     }

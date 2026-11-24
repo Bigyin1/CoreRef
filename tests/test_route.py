@@ -16,6 +16,25 @@ def test_route_closure_visits_shared_stage_once() -> None:
     assert tuple(stage.name for stage in route._closure(("synth",))) == ("rtl", "dft", "synth")
 
 
+def test_publication_includes_transitive_checks() -> None:
+    route = Route(
+        [
+            StageSpec(name="synth", outputs=("netlist.v",), checks=("compare",)),
+            StageSpec(name="compare", outputs=(), needs=("synth",), checks=("report",)),
+            StageSpec(name="report", outputs=("report.txt",), needs=("compare",)),
+            StageSpec(name="lint", outputs=(), purpose="development"),
+        ]
+    )
+    assert tuple(stage.name for stage in route._closure(("synth",))) == ("synth",)
+    assert tuple(stage.name for stage in route._closure(("synth",), publishing=True)) == (
+        "synth",
+        "compare",
+        "report",
+    )
+    with pytest.raises(ValueError, match="Expected a release stage"):
+        route._closure(("lint",), publishing=True)
+
+
 @pytest.mark.parametrize(
     ("stages", "message"),
     (
@@ -87,10 +106,6 @@ def test_route_validates_handler_interface() -> None:
     )
     contracts = {"prepare": ("data",), "report": ("report.txt",)}
     route.validate_handlers(contracts, inputs={"report": ("data",)})
-    assert route._release_document() == [
-        {"name": "prepare", "needs": (), "outputs": ("data",)},
-        {"name": "report", "needs": ("prepare",), "outputs": ("report.txt",)},
-    ]
     with pytest.raises(ValueError, match="Unknown stage handler"):
         route.validate_handlers({"prepare": ("data",)}, inputs={})
     with pytest.raises(ValueError, match="must declare outputs"):
