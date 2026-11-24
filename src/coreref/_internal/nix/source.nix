@@ -1,15 +1,30 @@
 # Import tracked sources or a Python package with a stable name.
-{ directory, name, selection ? "" }:
+{
+  directory,
+  name,
+  selection ? "",
+}:
 let
   tracked = if selection == "" then null else builtins.fromJSON (builtins.readFile selection);
-in {
+in
+{
   source = builtins.path {
     path = /. + directory;
     inherit name;
-    filter = path: _: (tracked == null || builtins.hasAttr path tracked)
+    filter =
+      path: _:
+      (tracked == null || builtins.hasAttr path tracked)
       && !(builtins.elem (builtins.baseNameOf path) [
-        ".git" ".build" ".venv" ".env" ".direnv" ".DS_Store"
-        "__pycache__" ".pytest_cache" ".mypy_cache" ".ruff_cache"
+        ".git"
+        ".build"
+        ".venv"
+        ".env"
+        ".direnv"
+        ".DS_Store"
+        "__pycache__"
+        ".pytest_cache"
+        ".mypy_cache"
+        ".ruff_cache"
       ]);
   };
 }
