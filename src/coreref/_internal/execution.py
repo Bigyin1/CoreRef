@@ -17,23 +17,16 @@ if TYPE_CHECKING:
 
 
 def stage_inputs(spec: StageSpec, stage: Stage, route: Route | None = None) -> tuple[str, ...]:
-    if stage.inputs is not None:
-        return stage.inputs
-    if stage.transform is None:
-        return ()
     predecessors = (
         {output for name in spec.needs for output in route[name].outputs} if route else set()
     )
-    return tuple(sorted(predecessors | stage.files.keys() | stage.artifacts.keys()))
-
-
-def _prepare(bindings: Mapping[StageSpec, Stage]) -> None:
-    selected: dict[Callable[[tuple[StageSpec, ...]], None], list[StageSpec]] = {}
-    for spec, stage in bindings.items():
-        if stage.prepare is not None:
-            selected.setdefault(stage.prepare, []).append(spec)
-    for prepare, stages in selected.items():
-        prepare(tuple(stages))
+    available = predecessors | stage.files.keys() | stage.artifacts.keys()
+    if stage.inputs is None:
+        return tuple(sorted(available))
+    if missing := set(stage.inputs) - available:
+        names = ", ".join(sorted(missing))
+        raise InvalidPackage(f"Stage {spec.name} has undeclared inputs: {names}")
+    return stage.inputs
 
 
 def _stage_files(
@@ -72,16 +65,10 @@ class StageExecutor:
         *,
         selected: tuple[str, ...] | None,
     ) -> dict[str, Path]:
-        _prepare(bindings)
         files = _stage_files(bindings, route, self.get_outputs)
         self.directory.mkdir(parents=True, exist_ok=True)
-        self._run(bindings, files, selected=selected)
-        names = (
-            selected
-            if selected is not None
-            else tuple(name for spec in bindings for name in spec.outputs)
-        )
-        return {name: self.directory / name for name in names}
+        outputs = self._run(bindings, files, selected=selected)
+        return outputs if selected is None else {name: outputs[name] for name in selected}
 
     def configured(
         self,
@@ -90,7 +77,7 @@ class StageExecutor:
         *,
         route: Route | None = None,
     ) -> Path:
-        if stage.execution == "host" or stage.transform is None or len(spec.outputs) != 1:
+        if stage.execution == "host" or len(spec.outputs) != 1:
             raise InvalidPackage("A configured dependency requires one native Nix output")
         self.directory.mkdir(parents=True, exist_ok=True)
         files = _stage_files({spec: stage}, route, self.get_outputs)[spec]
@@ -106,78 +93,56 @@ class StageExecutor:
         files: Mapping[StageSpec, Mapping[str, Path | None]],
         *,
         selected: tuple[str, ...] | None,
-    ) -> None:
+    ) -> dict[str, Path]:
         batch: dict[str, Invocation] = {}
-        pending: dict[str, StageOutput] = {}
+        outputs: dict[str, Path | StageOutput] = {}
         for spec, stage in bindings.items():
-            if stage.transform is not None and stage.execution != "host":
-                inputs = self._inputs(files[spec], pending)
+            if stage.execution != "host":
+                inputs = self._inputs(files[spec], outputs)
                 batch[spec.name] = self._invocation(spec, stage, inputs, batch=batch)
-                pending.update(
+                outputs.update(
                     {
                         name: StageOutput(spec.name, output_name(index), name)
                         for index, name in enumerate(spec.outputs)
                     }
                 )
                 continue
-            # A host step needs its predecessors as local files.
-            self._flush(batch)
+            outputs.update(
+                self.nix.realize(batch, self.directory, build_missing=self.build_missing)
+            )
             batch.clear()
-            pending.clear()
-            self._run_host(spec, stage, files[spec])
-        self._flush(batch, selected=selected)
-
-    def _flush(
-        self, batch: Mapping[str, Invocation], *, selected: tuple[str, ...] | None = None
-    ) -> None:
-        self._link(
+            invocation = self._invocation(spec, stage, self._inputs(files[spec], outputs))
+            outputs.update(self._run_host(invocation, stage))
+        outputs.update(
             self.nix.realize(
                 batch, self.directory, build_missing=self.build_missing, selected=selected
             )
         )
+        return {name: path for name, path in outputs.items() if isinstance(path, Path)}
 
-    def _run_host(self, spec: StageSpec, stage: Stage, files: Mapping[str, Path | None]) -> None:
-        if stage.action is not None:
-            stage.action()
-            if missing := [name for name in spec.outputs if not (self.directory / name).is_file()]:
-                raise RuntimeError(f"Stage {spec.name} did not produce {', '.join(missing)}")
-            return
-        self._link(
-            self.nix.host(
-                self._invocation(spec, stage, self._inputs(files, {})),
-                self.directory,
-                log=self.directory / f"{spec.name}.log",
-                build_missing=self.build_missing,
-                always_run=stage.always_run,
-            )
+    def _run_host(self, invocation: Invocation, stage: Stage) -> dict[str, Path]:
+        return self.nix.host(
+            invocation,
+            self.directory,
+            log=self.directory / f"{invocation.name}.log",
+            build_missing=self.build_missing,
+            always_run=stage.always_run,
         )
 
-    def _link(self, paths: Mapping[str, Path]) -> None:
-        for name, result in paths.items():
-            path = self.directory / name
-            if path.is_symlink() and path.readlink() == result:
-                continue
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.unlink(missing_ok=True)
-            path.symlink_to(result)
-
+    @staticmethod
     def _inputs(
-        self, files: Mapping[str, Path | None], pending: Mapping[str, StageOutput]
+        files: Mapping[str, Path | None], outputs: Mapping[str, Path | StageOutput]
     ) -> dict[str, Path | StageOutput]:
-        return {
-            name: path or pending.get(name) or self.directory / name for name, path in files.items()
-        }
+        return {name: path if path is not None else outputs[name] for name, path in files.items()}
 
+    @staticmethod
     def _invocation(
-        self,
         spec: StageSpec,
         stage: Stage,
         inputs: Mapping[str, Path | StageOutput],
         *,
         batch: Collection[str] = (),
     ) -> Invocation:
-        if stage.transform is None:
-            raise ValueError(f"Stage {spec.name} needs a Python transform")
         used = {path.stage for path in inputs.values() if isinstance(path, StageOutput)}
         return Invocation(
             name=spec.name,

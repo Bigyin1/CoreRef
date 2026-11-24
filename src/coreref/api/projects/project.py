@@ -94,7 +94,7 @@ class Project:
         return stage() if callable(stage) else stage
 
     def build(self, target: str | tuple[str, ...]) -> dict[str, Path]:
-        """Build targets and their prerequisites and return their local files."""
+        """Build the requested stages and return their files in the Nix store."""
         targets = (target,) if isinstance(target, str) else target
         return self._build(targets)
 
@@ -153,10 +153,9 @@ class Project:
         if missing := set(names) - stages.keys():
             raise NotFound(f"{record.ref} has no outputs {', '.join(sorted(missing))}")
         targets = tuple(dict.fromkeys(stages[name] for name in names))
-        paths = self._dependency(record)._build(
+        return self._dependency(record)._build(
             targets, selected=names, build_missing=self.build_missing
         )
-        return {name: paths[name].resolve(strict=True) for name in names}
 
     def _variant_stage(
         self,

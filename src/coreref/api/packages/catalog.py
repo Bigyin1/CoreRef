@@ -179,23 +179,25 @@ class Catalog:
                 raise InvalidPackage(message) from None
         return locked
 
-    def _lock_entry(self, ref: Ref) -> _Source:
+    def _lock_entry(self, ref: Ref) -> tuple[_Source, tuple[str, ...]]:
         from ..projects.manifest import Manifest
 
         published = self._published(ref)
-        if published is not None:
-            return published
-        path, origin = self._import_source(ref)
+        if published is not None and published.outputs:
+            return published, ()
+        path, origin = self._import_source(ref) if published is None else (published.source, None)
         manifest = Manifest.load(path / "manifest.yml")
         if Ref(manifest.ref) != ref:
             raise InvalidPackage(f"{path} declares {manifest.ref}, expected {ref}")
-        return _Source(
+        configured = tuple(item.ref for item in manifest.configured_dependencies.values())
+        source = published or _Source(
             source=path,
             origin=cast("dict[str, JsonValue] | None", origin),
             dependencies=manifest.requirements,
             kind=manifest.type,
             payload=manifest.payload,
         )
+        return source, configured
 
     def _publish(
         self, checkout: Path, manifest: Manifest, files: Mapping[str, Path], *, commit: str

@@ -7,7 +7,6 @@ in
 pkgs.python313.withPackages (
   ps: with ps; [
     frozendict
-    jinja2
     packaging
     pydantic
     pyyaml

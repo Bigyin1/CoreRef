@@ -5,5 +5,6 @@ flow's implementation and ``Route`` to validate the stage graph.
 """
 
 from .route import Route, Stage, StageSpec, StageTransform
+from .stage_map import StageMap
 
-__all__ = ["Route", "Stage", "StageSpec", "StageTransform"]
+__all__ = ["Route", "Stage", "StageMap", "StageSpec", "StageTransform"]

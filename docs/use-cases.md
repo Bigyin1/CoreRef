@@ -12,8 +12,9 @@ flowchart LR
     layout --> gds["GDS"]
 ```
 
-Простейший маршрут можно задать напрямую или сгенерировать объявления и привязки
-из YAML через `python -m coreref.api.build.codegen stage-map.yml generated_route.py`.
+Flow может прочитать `stage-map.yml` через `StageMap.load()` и выбрать
+модули и варианты маршрута. Карта задаёт имена Python-функций, входы и выходы.
+Небольшой маршрут можно объявить напрямую в Python.
 
 ```python
 from functools import cached_property
@@ -36,9 +37,9 @@ class RtlProject(Project):
         return {"rtl": Stage(transform=bundle, files={"source.sv": self.source / "rtl/top.sv"})}
 ```
 
-Поместите функцию в импортируемый модуль. Вызов `project.build("rtl")` создаёт
-ссылку на результат в `.build/rtl.v`. Изменение входного RTL создаёт новую
-derivation. Файлы, которые стадия не читает, в её ключ не входят.
+Поместите функцию в импортируемый модуль. `project.build("rtl")["rtl.v"]`
+возвращает путь к файлу в Nix store. Изменение объявленного входного RTL
+создаёт новую derivation.
 
 Релиз собирается из чистого Git checkout с существующим `manifest.lock`.
 `project.publish()` последовательно копирует результаты и индекс в настроенный

@@ -9,7 +9,6 @@ description = "Hardware component representations and build stages backed by Nix
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
- "jinja2>=3.1.6,<4",
  "packaging>=24,<27",
  "pyyaml>=6,<7",
  "pydantic>=2.12.5,<3",

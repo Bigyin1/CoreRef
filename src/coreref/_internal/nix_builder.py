@@ -70,10 +70,10 @@ def main() -> None:
         run(document, work, log)
         outputs = {Path(os.environ[key]): name for key, name in document["outputs"].items()}
         _install(work, outputs)
-    except Exception:
+    finally:
         if log.is_file():
-            print(log.read_text(errors="replace"), file=sys.stderr)
-        raise
+            with log.open(encoding="utf-8", errors="replace") as stream:
+                shutil.copyfileobj(stream, sys.stderr)
 
 
 if __name__ == "__main__":

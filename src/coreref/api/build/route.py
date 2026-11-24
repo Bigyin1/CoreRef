@@ -23,7 +23,7 @@ class StageSpec(BaseModel):
     """Describe a named stage before binding it to a handler.
 
     ``needs`` names direct predecessor stages. ``outputs`` lists relative
-    paths within the build directory. ``purpose`` determines whether the
+    paths produced by the stage. ``purpose`` determines whether the
     stage can participate in publication. During publication ``checks``
     adds validation stages.
     """
@@ -50,41 +50,28 @@ class Stage:
 
     If a transform omits ``inputs``, CoreRef uses its ``files`` and all
     outputs of direct predecessors. Explicit ``inputs`` select filenames
-    from those sources or from the build directory. The keys in ``files``
+    from those sources or from predecessor outputs. The keys in ``files``
     are staged names and its values are source paths.
 
-    ``action`` is a local callback called with no arguments. It uses the
-    build directory directly. ``configuration`` is passed to the transform
+    ``configuration`` is passed to the transform
     and contributes to the build identity. Set ``always_run`` when a host
     transform must execute even if the executor can reuse its outputs.
-    ``ready()`` checks stage-specific prerequisites. A shared
-    ``prepare(stages)`` callback can compute inputs for selected stages in one
-    operation. ``artifacts`` binds staged input names to named outputs from
-    released packages. CoreRef retrieves only the named artifacts.
+    ``ready()`` checks stage-specific prerequisites. ``artifacts`` binds staged
+    input names to named outputs from released packages.
     """
 
-    action: Callable[[], object] | None = None
-    transform: StageTransform | None = None
+    transform: StageTransform
     execution: Literal["nix", "relaxed", "host"] = "nix"
     inputs: tuple[str, ...] | None = None
     files: Mapping[str, Path] = field(default_factory=dict)
     configuration: Mapping[str, JSON] = field(default_factory=dict)
     always_run: bool = False
     ready: Callable[[], bool] | None = None
-    prepare: Callable[[tuple[StageSpec, ...]], None] | None = None
     artifacts: Mapping[str, tuple[Record, str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if (self.action is None) == (self.transform is None):
-            raise ValueError("A stage must declare exactly one action or transform")
         if self.execution not in {"nix", "relaxed", "host"}:
             raise ValueError(f"Unknown stage execution mode {self.execution!r}")
-        if self.transform is not None:
-            self._validate_transform_inputs()
-        elif self.artifacts or self.execution != "nix":
-            raise ValueError("Stage artifact inputs and execution modes require a transform")
-
-    def _validate_transform_inputs(self) -> None:
         overlap = self.files.keys() & self.artifacts.keys()
         if overlap:
             raise ValueError(f"Stage has two sources for {', '.join(sorted(overlap))}")

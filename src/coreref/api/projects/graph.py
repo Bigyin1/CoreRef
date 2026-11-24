@@ -38,8 +38,6 @@ def lock_sources(
     catalog: Catalog, manifest: Manifest, path: Path, additional: tuple[str, ...]
 ) -> Path:
     """Resolve the manifest's source requests and save their exact Nix paths."""
-    from .manifest import Manifest
-
     lock = _Lock(root=manifest.ref, requirements={}, packages={})
     pending = [*manifest.requirements, *additional]
     pending.extend(value.ref for value in manifest.configured_dependencies.values())
@@ -52,13 +50,10 @@ def lock_sources(
         lock.requirements[dependency] = key
         if key in lock.packages:
             continue
-        source = catalog._lock_entry(ref)
+        source, configured = catalog._lock_entry(ref)
         lock.packages[key] = source
         pending.extend(source.dependencies)
-        if source.outputs:
-            continue
-        child = Manifest.load(source.source / "manifest.yml")
-        pending.extend(value.ref for value in child.configured_dependencies.values())
+        pending.extend(configured)
     lock = _Lock(
         root=lock.root,
         requirements=dict(sorted(lock.requirements.items())),

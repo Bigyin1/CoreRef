@@ -2,10 +2,13 @@
 { plan, pythonRoot }:
 let
   python = if pythonRoot == "" then import ./runtime.nix else builtins.storePath pythonRoot;
+  storePrefix = "${builtins.storeDir}/";
   input =
     _: file:
     if builtins.isAttrs file then
       "${stages.${file.stage}.${file.output}}/${file.filename}"
+    else if builtins.substring 0 (builtins.stringLength storePrefix) file == storePrefix then
+      builtins.storePath file
     else
       builtins.path {
         path = /. + file;

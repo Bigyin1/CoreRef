@@ -11,7 +11,7 @@ import pytest
 
 from coreref.api.build import Route, Stage, StageSpec
 from coreref.api.errors import CatalogError
-from coreref.api.packages import Catalog, Ref
+from coreref.api.packages import Catalog
 from coreref.api.projects import Manifest, Project
 
 from . import stages
@@ -41,6 +41,8 @@ def test_python_stages_are_native_derivations_with_selected_input_outputs(tmp_pa
     project = _demo(tmp_path, catalog)
     artifacts = project.build("upper")
     assert artifacts["upper.txt"].read_text() == "HELLO"
+    assert artifacts["upper.txt"].is_relative_to("/nix/store")
+    assert not (project.build_dir / "upper.txt").is_symlink()
     assert artifacts["small.txt"].resolve().parent != artifacts["other.txt"].resolve().parent
     deriver = catalog._nix.command(
         "path-info", "--derivation", str(artifacts["upper.txt"].resolve().parent)
@@ -131,9 +133,9 @@ def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:
     (checkout / ".gitignore").write_text(".build/\n.env\n", encoding="utf-8")
     (checkout / ".env").write_text("untracked private config", encoding="utf-8")
     manifest = checkout / "manifest.yml"
-    ref = Ref(f"demo.{'component' * 30}/1.0+{'a' * 110}")
     manifest.write_text(
-        f"ref: {ref}\ntype: rtl\npayload: {{module: demo, mask: {2**100}}}\n",
+        f"ref: demo.{'component' * 30}/1.0+{'a' * 110}\n"
+        f"type: rtl\npayload: {{module: demo, mask: {2**100}}}\n",
         encoding="utf-8",
     )
     (checkout / "input.txt").write_text("published", encoding="utf-8")
@@ -165,12 +167,20 @@ def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:
     assert "upper.txt" in consumer.info(project.ref).outputs
     assert using.graph.info(project.ref) == info
 
-    local_record = replace(info, source=checkout)
     using.route = Route([StageSpec(name="upper", outputs=("upper.txt",))])
     using.stages = {
-        "upper": Stage(transform=stages.upper, artifacts={"small.txt": (local_record, "small.txt")})
+        "upper": Stage(
+            transform=stages.upper,
+            artifacts={"small.txt": (replace(info, source=checkout), "small.txt")},
+        )
     }
-    assert using.build("upper")["upper.txt"].read_text() == "PUBLISHED"
+    result = using.build("upper")["upper.txt"]
+    assert result.read_text() == "PUBLISHED"
+    deriver = consumer._nix.command("path-info", "--derivation", str(result.parent))
+    assert (
+        str(info.outputs["small.txt"].parent)
+        in consumer._nix.command("path-info", "--recursive", deriver).splitlines()
+    )
 
 
 def _commit(directory: Path) -> None:
@@ -203,7 +213,6 @@ def test_native_output_request_materializes_only_named_result(tmp_path: Path) ->
     files = project._build(("prepare",), selected=("other.txt",))
     assert tuple(files) == ("other.txt",)
     assert files["other.txt"].read_text() == "separate result"
-    assert not (project.build_dir / "small.txt").exists()
 
 
 def test_selective_build_after_host_stage(tmp_path: Path) -> None:
@@ -234,7 +243,7 @@ def test_selective_build_after_host_stage(tmp_path: Path) -> None:
     log.unlink()
     result = project._build(("prepare",), selected=("result.txt",))
     assert result["result.txt"].read_text() == "SAME BYTES"
-    assert not (project.build_dir / "stage-copy.txt").exists()
+    assert "stage-copy.txt" not in result
     assert not log.exists()
 
 
