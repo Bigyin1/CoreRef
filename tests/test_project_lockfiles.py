@@ -1,130 +1,70 @@
-"""Project graphs own opaque Conan lockfiles outside published packages."""
+"""Dependency snapshots are independent of the active workspace."""
 
-from __future__ import annotations
-
-from dataclasses import replace
 from pathlib import Path
+from shutil import copytree
 
 import pytest
 
-from coreref.api.errors import CatalogError, InvalidPackage
-from coreref.api.packages.catalog import Catalog
-from coreref.api.packages.records import LocalRecord, Record, Ref
-from coreref.api.projects.graph import Graph
-from tests.helpers import local_record
+from coreref.api.errors import InvalidPackage
+from coreref.api.packages import Catalog, Ref
+from coreref.api.projects import Manifest, Project
+
+pytestmark = pytest.mark.nix
 
 
-def test_project_lock_pins_publication_and_installation(
-    tmp_path: Path, *, catalog: Catalog
-) -> None:
-    catalog = Catalog(catalog._client.home)
-    dependency = catalog.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
-    artifact = tmp_path / "cpu.lib"
-    artifact.write_text("library(cpu) {}")
-    project = Graph(
-        catalog,
-        LocalRecord(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0")),
-        dependencies=(dependency.ref,),
+def _project_tree(tmp_path: Path) -> Path:
+    fixture = Path(__file__).parent / "test_projects"
+    return copytree(fixture, tmp_path / "projects", ignore=lambda _path, _names: ["physical"])
+
+
+def _project(directory: Path, catalog: Catalog) -> Project:
+    return Project(directory, Manifest.load(directory / "manifest.yml"), catalog)
+
+
+def test_lock_keeps_source_and_editor_override_is_live(tmp_path: Path) -> None:
+    projects = _project_tree(tmp_path)
+    project = _project(projects / "soc", Catalog(projects))
+    lock = project.lock().read_bytes()
+    stdlib = Ref("demo.stdlib/1.0")
+    original = project.graph.get_sources((stdlib,))[stdlib]
+    source = projects / "stdlib" / "rtl/stdlib.sv"
+    source.write_text("// local edit", encoding="utf-8")
+    cold = _project(project.source, Catalog(projects))
+    assert cold.graph.get_sources((stdlib,))[stdlib] == original
+
+    editable = _project(project.source, Catalog(projects, editables={stdlib: source.parent.parent}))
+    (selected,) = editable.graph.get_sources((stdlib,)).values()
+    assert (selected / "rtl/stdlib.sv").read_text() == "// local edit"
+    assert editable.lockfile.read_bytes() == lock
+
+
+def test_shared_dependency_survives_pruning_and_range_is_locked(tmp_path: Path) -> None:
+    projects = _project_tree(tmp_path)
+    root = projects / "soc" / "manifest.yml"
+    root.write_text(
+        "ref: demo.soc/1.0\ndependencies: [demo.cpu/1.0, 'demo.stdlib/[>=1 <2]']\n",
+        encoding="utf-8",
     )
-    lockfile = project.create_lockfile(tmp_path / "project/conan.lock")
-    original_lock = lockfile.read_bytes()
-    local = project.record
-    assert isinstance(local, LocalRecord)
-    record = catalog.publish(
-        replace(local, files={"cpu.lib": artifact}),
-        dependencies=tuple(record.ref for record in project.dependencies()),
-        lockfile=lockfile,
+    newer = copytree(projects / "stdlib", projects / "newer")
+    (newer / "manifest.yml").write_text("ref: demo.stdlib/1.1\n", encoding="utf-8")
+    (projects / "cpu" / "manifest.yml").write_text(
+        "ref: demo.cpu/1.0\ndependencies: ['demo.stdlib/[>=1 <2]']\n",
+        encoding="utf-8",
     )
-    assert tuple(record.files) == ("cpu.lib",)
-    recipe = catalog._package(project.record.ref).recipe().directory
-    assert not (recipe / "conan.lock").exists()
-    assert tuple(sorted(project.edges)) == ((project.record.ref, dependency.ref),)
-    installed = catalog.get(record.ref)
-    assert installed.files["cpu.lib"].read_text() == artifact.read_text()
-    assert "conan.lock" not in installed.files
-    assert lockfile.read_bytes() == original_lock
-    assert project.create_lockfile() == lockfile
-    Graph(catalog, record.ref).create_lockfile(tmp_path / "stored.lock")
-    assert Graph(catalog, record.ref, lockfile=tmp_path / "stored.lock").records
+    project = _project(root.parent, Catalog(projects))
+    project.lock()
+    visible = project.graph.dependencies(transitive=True, stop_at={Ref("demo.cpu/1.0")})
+    assert {record.ref.without_revision() for record in visible} == {
+        Ref("demo.cpu/1.0"),
+        Ref("demo.stdlib/1.1"),
+    }
 
 
-@pytest.mark.parametrize(
-    "damage,exception",
-    [("incomplete", InvalidPackage), ("malformed", CatalogError)],
-)
-def test_conan_validates_the_supplied_project_lockfile(
-    tmp_path: Path, damage: str, exception: type[Exception], *, catalog: Catalog
-) -> None:
-    catalog = Catalog(catalog._client.home)
-    rtl = catalog.publish(local_record(Record(Ref.from_fields("soc", "cpu", "1.0"))))
-    macro = catalog.publish(
-        local_record(Record(Ref.from_fields("soc", "cpu--be--lib-lef", "4.0"))),
-        dependencies=(rtl.ref,),
-    )
-    project = Graph(catalog, local_record(macro), dependencies=(rtl.ref,))
-    lockfile = project.create_lockfile(tmp_path / "project/conan.lock")
-    if damage == "incomplete":
-        catalog._client.run(
-            "lock",
-            "remove",
-            "--requires=soc.cpu/*",
-            "--lockfile",
-            str(lockfile),
-            "--lockfile-out",
-            str(lockfile),
-        )
-    else:
-        lockfile.write_text("not a Conan lockfile\n")
-    local = project.record
-    assert isinstance(local, LocalRecord)
-    with pytest.raises(exception):
-        Graph(
-            catalog,
-            local,
-            dependencies=tuple(record.ref for record in project.dependencies()),
-            lockfile=lockfile,
-        )
-    assert catalog.get(macro.ref) == macro
-
-
-def test_empty_project_lockfile(tmp_path: Path, *, catalog: Catalog) -> None:
-    catalog = Catalog(catalog._client.home)
-    root = Record(Ref.from_fields("soc", "root", "1.0"))
-    project = Graph(catalog, local_record(root))
-    lockfile = project.create_lockfile(tmp_path / "empty/conan.lock")
-    empty_lock = lockfile.read_bytes()
-    root = catalog.publish(local_record(root), lockfile=lockfile)
-    assert project.records == (local_record(root),)
-    consumer = Record(Ref.from_fields("soc", "consumer", "1.0"))
-    Graph(catalog, local_record(consumer), dependencies=(root.ref,)).create_lockfile(lockfile)
-    project.create_lockfile()
-    assert lockfile.read_bytes() == empty_lock
-
-
-@pytest.mark.parametrize("published", [False, True])
-def test_missing_lockfile_is_optional_but_its_output_path_is_retained(
-    catalog: Catalog, tmp_path: Path, published: bool
-) -> None:
-    dependency = LocalRecord(Ref("soc.cpu/1.0"))
-    first = catalog.publish(dependency)
-    root = dependency.ref if published else LocalRecord(Ref("soc.top/1.0"))
-    requirements = () if published else (dependency.ref,)
-    path = tmp_path / "new-project/project.lock"
-    graph = Graph(catalog, root, dependencies=requirements, lockfile=path)
-    assert graph.lockfile == path and not path.exists()
-    assert graph.info(dependency.ref).ref == first.ref
-    assert graph.create_lockfile() == path
-    dependency.payload = {"generation": 2}
-    second = catalog.publish(dependency)
-    assert second.ref != first.ref
-    assert (
-        Graph(catalog, root, dependencies=requirements, lockfile=path).info(dependency.ref).ref
-        == first.ref
-    )
-
-
-def test_an_existing_directory_cannot_be_ignored_as_a_missing_lockfile(
-    catalog: Catalog, tmp_path: Path
-) -> None:
-    with pytest.raises(CatalogError):
-        Graph(catalog, LocalRecord(Ref("soc.top/1.0")), lockfile=tmp_path)
+def test_source_cycles_are_reported_before_writing_lock(tmp_path: Path) -> None:
+    projects = _project_tree(tmp_path)
+    child = projects / "stdlib" / "manifest.yml"
+    child.write_text("ref: demo.stdlib/1.0\ndependencies: [demo.soc/1.0]\n", encoding="utf-8")
+    project = _project(projects / "soc", Catalog(projects))
+    with pytest.raises(InvalidPackage, match="Dependency cycle"):
+        project.lock()
+    assert not project.lockfile.exists()

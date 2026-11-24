@@ -1,6 +1,0 @@
-{# Resolve or install selected requirements without creating a package. #}
-from conan import ConanFile
-
-
-class CatalogConsumer(ConanFile):
-    requires = {{ requirements | pyrepr }}

@@ -1,12 +1,9 @@
-"""One canonical text format for public references and native transport adaptation."""
+"""One canonical text format for public references and exact source revisions."""
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
-from coreref._internal.references import from_conan_reference
 from coreref.api.errors import InvalidPackage
 from coreref.api.packages.records import Ref
 
@@ -20,12 +17,10 @@ from coreref.api.packages.records import Ref
         "pdk.techlib-n5/2.0#abc123",
     ],
 )
-def test_parse_round_trip_without_conan_calls(value: str) -> None:
-    with patch("coreref._internal.client.ConanAPI", side_effect=AssertionError("Conan")):
-        ref = Ref(value)
-        assert str(ref) == value
-        assert Ref(str(ref.without_revision())) == ref.without_revision()
-        assert from_conan_reference(value + "%123.0") == ref
+def test_parse_round_trip(value: str) -> None:
+    ref = Ref(value)
+    assert str(ref) == value
+    assert Ref(str(ref.without_revision())) == ref.without_revision()
 
 
 @pytest.mark.parametrize(

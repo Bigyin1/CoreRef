@@ -1,10 +1,14 @@
 """Stable digests for artifact bytes and structured build inputs."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from ..api.packages.records import JSON
+if TYPE_CHECKING:
+    from ..api.packages.records import JSON
 
 
 def file_digest(path: Path) -> str:

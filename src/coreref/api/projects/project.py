@@ -1,31 +1,31 @@
-"""Operate on one checkout, from locking dependencies to releasing results.
-
-A flow implements the route and stage actions. ``Project`` handles
-dependency selection, local scheduling and publication of named outputs.
-"""
+"""Bind the flow's Python stages to a checkout and a Nix store."""
 
 from __future__ import annotations
 
+import hashlib
+import json
+import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from functools import cached_property, partial
-from json import dumps, loads
+from functools import cached_property
 from pathlib import Path
-from platform import python_version
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from ..._internal.artifacts import Producer
-from ..._internal.cache import StageCache, TransformInvocation
 from ..._internal.hashing import file_digest
-from ..._internal.pipeline import BuildStage, Pipeline
-from ..._internal.producer import check_outputs, transform_identity, transform_reference, workspace
-from ..._internal.producers import ProducerRecipes, RecipeStage
-from ..._internal.runtime import ProducerRuntime
-from ..._internal.snapshot import Snapshot, clean_commit, committed_slice
+from ..._internal.nix_store import (
+    Invocation,
+    StageOutput,
+    output_name,
+    store_entry,
+    transform_reference,
+)
 from ..build.outputs import Outputs
-from ..build.route import CacheMode, Route
-from ..packages.records import JSON, ConfiguredPackage, InstalledRecord, PackageInput, Record, Ref
-from .graph import Graph
+from ..build.route import Route
+from ..errors import InvalidPackage, NotFound
+from ..packages.catalog import _Source
+from ..packages.records import ConfiguredPackage, InstalledRecord, PackageInput, Record, Ref
+from .graph import Graph, lock_sources
 
 if TYPE_CHECKING:
     from ..build.route import Stage, StageSpec
@@ -34,13 +34,11 @@ if TYPE_CHECKING:
 
 
 class Project:
-    """Bind a manifest, checkout and catalog for a build or CLI command.
+    """Build the stages declared by a flow using pinned package sources.
 
-    Use ``graph`` to inspect locked dependencies, ``lock()`` to refresh
-    ``manifest.lock``, and ``build()`` or ``publish()`` to run stages.
-    ``record`` describes the package being prepared, ``build_dir`` holds
-    local stage outputs, and ``outputs`` resolves artifacts from published
-    revisions. A flow supplies ``route`` and the bindings in ``stages``.
+    Use ``lock()`` to refresh and commit manifest.lock, ``graph`` to inspect
+    its dependencies, and ``build()`` or ``publish()`` to select results.
+    A flow supplies ``route`` and ``stages``.
     """
 
     def __init__(
@@ -49,42 +47,28 @@ class Project:
         manifest: Manifest,
         catalog: Catalog,
         *,
-        build_missing: bool = False,
-        cache_mode: CacheMode = CacheMode.OFF,
+        build_missing: bool = True,
     ) -> None:
-        """Bind the project directory to the given manifest and catalog.
-
-        ``build_missing`` permits rebuilding missing published output groups.
-        ``cache_mode`` controls shared-cache access for stages that opt in.
-        The first access to ``graph`` resolves the dependencies.
-        """
+        """Bind the checkout and its catalog without resolving dependencies yet."""
         self.source = directory.resolve()
         self.manifest = manifest
         self.catalog = catalog
         self.record = manifest.local_record(self.source)
         self.lockfile = self.source / "manifest.lock"
         self.build_dir = self.source / ".build"
-        self.outputs = Outputs(catalog, build_missing=build_missing)
-        self._stage_cache = StageCache(catalog, cache_mode)
-
-    @property
-    def cache_mode(self) -> CacheMode:
-        """Return the configured policy for shared stage results."""
-        return self._stage_cache.mode
+        self.outputs = Outputs(catalog, build=self._dependency_outputs)
+        self.build_missing = build_missing
+        self._build_local = True
+        self._projects: dict[Ref, Project] = {}
 
     def _require_lockfile(self) -> Path:
-        """Get the project lockfile used for reproducible builds."""
         if not self.lockfile.is_file():
             raise FileNotFoundError(f"Run the lock command and commit {self.lockfile}")
         return self.lockfile
 
     @cached_property
     def graph(self) -> Graph:
-        """Resolve and cache the ordinary dependencies using ``manifest.lock``.
-
-        The lockfile must exist. Resolve a new project instance to use a
-        lockfile changed after the graph was first accessed.
-        """
+        """Read the dependency snapshot. Fetch selected sources through the graph."""
         return Graph(
             self.catalog,
             self.record,
@@ -93,63 +77,35 @@ class Project:
         )
 
     def lock(self, *additional_inputs: PackageInput) -> Path:
-        """Resolve declared dependencies afresh and save ``manifest.lock``.
-
-        Include both ordinary dependencies and named configurations from the
-        manifest. Pass ``additional_inputs`` to lock additional configured
-        requirements discovered by the flow. Return the saved lockfile path.
-        """
-        configured = (*self.manifest.configured_dependencies.values(), *additional_inputs)
-        return self.catalog._variants.create_lockfile(
-            self.record,
-            requirements=self.manifest.requirements,
-            inputs=configured,
-            path=self.lockfile,
+        """Write the exact dependency source trees and release selections."""
+        path = lock_sources(
+            self.catalog,
+            self.manifest,
+            self.lockfile,
+            tuple(value.requirement for value in additional_inputs),
         )
-
-    def install_variants(self, *, build_missing: bool = False) -> dict[str, ConfiguredPackage]:
-        """Install the configurations declared in the manifest.
-
-        Return a mapping keyed by their declared names. Each configuration is
-        resolved independently against the same project lockfile. Set
-        ``build_missing=True`` to allow a missing binary to be built.
-        """
-        return self.catalog._variants.get_many(
-            self.manifest.configured_dependencies,
-            lockfile=self.lockfile,
-            build_missing=build_missing,
-        )
-
-    def _slice_variants(self) -> Mapping[str, ConfiguredPackage]:
-        return self.install_variants()
+        self.__dict__.pop("graph", None)
+        return path
 
     @cached_property
     def route(self) -> Route:
-        """Return the flow's declarative stage graph.
-
-        The flow supplies this graph directly or through its generated route module.
-        """
+        """Return the flow's stage declarations."""
         raise NotImplementedError("The flow must provide a route")
 
     @cached_property
     def stages(self) -> Mapping[str, Stage | Callable[[], Stage]]:
-        """Bind stage names to transforms or lazy stage factories."""
+        """Bind stage names to Python functions or lazy stage factories."""
         return {}
 
     def _stage(self, spec: StageSpec) -> Stage:
-        """Return the runtime action and inputs for a declared stage."""
         try:
             stage = self.stages[spec.name]
-        except KeyError as exc:
-            raise ValueError(f"No handler for stage {spec.name!r}") from exc
+        except KeyError as error:
+            raise ValueError(f"No handler for stage {spec.name!r}") from error
         return stage() if callable(stage) else stage
 
     def _prepare(self, stages: tuple[StageSpec, ...]) -> None:
-        """Prepare inputs that can be fetched together for selected stages.
-
-        The stage specifications include prerequisites and are ordered
-        dependencies first.
-        """
+        """Prepare inputs shared by the selected stages, in dependency order."""
 
     @staticmethod
     def _prepare_stages(bindings: Mapping[StageSpec, Stage]) -> None:
@@ -161,13 +117,16 @@ class Project:
             prepare(tuple(stages))
 
     def build(self, target: str | tuple[str, ...]) -> dict[str, Path]:
-        """Run one or more route targets and their prerequisites.
-
-        The local executor can reuse outputs when their tracked inputs are
-        unchanged. Return the declared outputs in the selected subgraph,
-        including prerequisites, as paths under ``build_dir``.
-        """
+        """Build targets and their prerequisites and return their local files."""
         targets = (target,) if isinstance(target, str) else target
+        return self._build(targets)
+
+    def _build(
+        self,
+        targets: tuple[str, ...],
+        *,
+        selected: tuple[str, ...] | None = None,
+    ) -> dict[str, Path]:
         if not targets:
             raise ValueError("Select at least one build stage")
         stages = self.route._closure(targets)
@@ -175,9 +134,13 @@ class Project:
         bindings = {spec: self._stage(spec) for spec in stages}
         self._prepare_stages(bindings)
         bindings = self._fetch_stage_artifacts(bindings)
-        tasks = tuple(self._task(spec, stage) for spec, stage in bindings.items())
-        Pipeline(self.build_dir, tasks).run(*targets)
-        return {name: self.build_dir / name for stage in stages for name in stage.outputs}
+        self._run(bindings, selected=selected)
+        names = (
+            selected
+            if selected is not None
+            else tuple(name for stage in stages for name in stage.outputs)
+        )
+        return {name: self.build_dir / name for name in names}
 
     def _fetch_stage_artifacts(self, bindings: dict[StageSpec, Stage]) -> dict[StageSpec, Stage]:
         selections = {spec: self._stage_artifacts(spec, stage) for spec, stage in bindings.items()}
@@ -195,6 +158,7 @@ class Project:
             spec: replace(
                 stage,
                 artifacts={},
+                inputs=self._stage_inputs(spec, stage),
                 files={
                     **stage.files,
                     **{
@@ -210,249 +174,292 @@ class Project:
         inputs = self._stage_inputs(spec, stage)
         return {name: binding for name, binding in stage.artifacts.items() if name in inputs}
 
-    def _task(self, spec: StageSpec, stage: Stage) -> BuildStage:
-        configuration = {**stage.configuration, **stage.local_configuration}
-        inputs = self._stage_inputs(spec, stage)
-        action = stage.action
-        if stage.transform is not None:
-            environment = self._transform_environment(stage.transform)
-            configuration = {
-                "configuration": dict(stage.configuration),
-                "local": dict(stage.local_configuration),
-                "transform": environment,
-                "source_files": {
-                    name: file_digest(path) if path.is_file() else None
-                    for name, path in stage.files.items()
-                    if name in inputs
-                },
-                "cache_mode": self.cache_mode.value if stage.cache else None,
-            }
-            action = partial(self._execute_transform, spec, stage, stage.transform, environment)
-        if action is None:
-            raise ValueError(f"Missing implementation of stage {spec.name!r}")
-        return BuildStage(
-            name=spec.name,
-            needs=spec.needs,
-            outputs=spec.outputs,
-            action=action,
-            inputs=tuple(name for name in inputs if name not in stage.files)
-            if stage.transform is not None
-            else inputs,
-            configuration=configuration,
-            always_run=stage.always_run,
-        )
-
     def _stage_inputs(self, spec: StageSpec, stage: Stage) -> tuple[str, ...]:
         if stage.inputs is not None:
             return stage.inputs
         if stage.transform is None:
             return ()
-        from_predecessors = {output for name in spec.needs for output in self.route[name].outputs}
-        return tuple(sorted(from_predecessors | stage.files.keys() | stage.artifacts.keys()))
+        predecessors = {output for name in spec.needs for output in self.route[name].outputs}
+        return tuple(sorted(predecessors | stage.files.keys() | stage.artifacts.keys()))
 
-    def _transform_environment(
-        self, transform: Callable[[Path, Path, Mapping[str, JSON]], None]
-    ) -> dict[str, JSON]:
-        lock = self.source / "uv.lock"
-        return {
-            **transform_identity(transform),
-            "python": python_version(),
-            "uv.lock": file_digest(lock) if lock.is_file() else None,
-        }
+    def _run(
+        self,
+        bindings: Mapping[StageSpec, Stage],
+        *,
+        selected: tuple[str, ...] | None,
+    ) -> None:
+        self.build_dir.mkdir(parents=True, exist_ok=True)
+        batch: dict[str, Invocation] = {}
+        pending: dict[str, StageOutput] = {}
+        for spec, stage in bindings.items():
+            if stage.transform is not None and stage.execution != "host":
+                batch[spec.name] = self._invocation(spec, stage, pending, batch)
+                pending.update(
+                    {
+                        name: StageOutput(spec.name, output_name(index), name)
+                        for index, name in enumerate(spec.outputs)
+                    }
+                )
+                continue
+            selected = None
+            self._flush(batch)
+            batch.clear()
+            pending.clear()
+            self._run_host(spec, stage)
+        self._flush(batch, selected=selected)
 
-    def _execute_transform(
+    def _flush(
+        self,
+        batch: dict[str, Invocation],
+        *,
+        selected: tuple[str, ...] | None = None,
+    ) -> None:
+        paths = self.catalog._nix.realize(
+            batch,
+            self.build_dir,
+            build_missing=self._build_local,
+            selected=selected,
+        )
+        self._link(paths)
+
+    def _run_host(self, spec: StageSpec, stage: Stage) -> None:
+        if stage.action is not None:
+            stage.action()
+            if missing := [name for name in spec.outputs if not (self.build_dir / name).is_file()]:
+                raise RuntimeError(f"Stage {spec.name} did not produce {', '.join(missing)}")
+            return
+        result = self.catalog._nix.host(
+            self._invocation(spec, stage, {}, {}),
+            self.build_dir,
+            log=self.build_dir / f"{spec.name}.log",
+            build_missing=self._build_local,
+            always_run=stage.always_run,
+        )
+        self._link(result)
+
+    def _link(self, paths: Mapping[str, Path]) -> None:
+        for name, result in paths.items():
+            path = self.build_dir / name
+            if path.is_symlink() and path.readlink() == result:
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.unlink(missing_ok=True)
+            path.symlink_to(result)
+
+    def _invocation(
         self,
         spec: StageSpec,
         stage: Stage,
-        transform: Callable[[Path, Path, Mapping[str, JSON]], None],
-        environment: dict[str, JSON],
-    ) -> None:
-        inputs = {
-            name: stage.files.get(name, self.build_dir / name)
-            for name in self._stage_inputs(spec, stage)
-        }
-        with workspace(self.build_dir, spec.name, inputs, spec.outputs) as (work, log):
-
-            def run() -> None:
-                transform(work, log, loads(dumps(dict(stage.configuration), allow_nan=False)))
-                check_outputs(work, spec.outputs, log)
-
-            if stage.cache and self.cache_mode is not CacheMode.OFF:
-                invocation = TransformInvocation(
-                    spec.name, environment, dict(stage.configuration), spec.outputs
-                )
-                key = self._stage_cache.run(
-                    invocation, work, inputs=tuple(inputs), outputs=spec.outputs, action=run
-                )
-                if key is not None:
-                    log.write_text(f"Restored shared cache entry {key}\n", encoding="utf-8")
+        pending: Mapping[str, StageOutput],
+        batch: Mapping[str, Invocation],
+    ) -> Invocation:
+        if stage.transform is None:
+            raise ValueError(f"Stage {spec.name} needs a Python transform")
+        inputs: dict[str, Path | StageOutput] = {}
+        for name in self._stage_inputs(spec, stage):
+            if name in stage.files:
+                inputs[name] = stage.files[name]
             else:
-                run()
+                inputs[name] = pending.get(name) or self.build_dir / name
+        used = {path.stage for path in inputs.values() if isinstance(path, StageOutput)}
+        return Invocation(
+            name=f"{self.record.ref.package_name}-{spec.name}",
+            transform=transform_reference(stage.transform),
+            execution=stage.execution,
+            configuration={**stage.configuration, **stage.local_configuration},
+            inputs=inputs,
+            outputs=spec.outputs,
+            needs=tuple(name for name in spec.needs if name in batch and name not in used),
+        )
 
-    def _stage_ready(self, spec: StageSpec, *, for_recipe: bool) -> bool:
-        """Decide whether a release stage has the inputs it needs.
+    def _dependency(self, record: Record) -> Project:
+        from .manifest import Manifest
 
-        The ``for_recipe`` flag asks whether the stage can be exported for
-        rebuilding in another environment. The default checks source files
-        for transforms and their prerequisites in either mode.
-        """
+        if record.ref not in self._projects:
+            source = self.graph.get_sources((record.ref,))[record.ref]
+            project = type(self)(source, Manifest.load(source / "manifest.yml"), self.catalog)
+            project.lockfile = self.lockfile
+            project.build_dir = self.build_dir / "dependencies" / str(record.ref).replace("/", "-")
+            project.build_missing = self.build_missing
+            project._build_local = self.build_missing
+            self._projects[record.ref] = project
+        return self._projects[record.ref]
+
+    def _output_stages(self, record: Record) -> dict[str, str]:
+        route = self._dependency(record).route
+        return {output: name for name in route.order for output in route[name].outputs}
+
+    def _has_output(self, record: Record, name: str) -> bool:
+        links = self.outputs.links(record)
+        if links is None or self.catalog._is_editable(record.ref):
+            return name in self._output_stages(record)
+        return name in links
+
+    def _dependency_outputs(self, record: Record, names: tuple[str, ...]) -> dict[str, Path]:
+        stages = self._output_stages(record)
+        if missing := set(names) - stages.keys():
+            raise NotFound(f"{record.ref} has no outputs {', '.join(sorted(missing))}")
+        targets = tuple(dict.fromkeys(stages[name] for name in names))
+        paths = self._dependency(record)._build(targets, selected=names)
+        return {name: paths[name].resolve(strict=True) for name in names}
+
+    def _variant_stage(
+        self,
+        options: Mapping[str, str | int | bool],
+    ) -> tuple[StageSpec, Stage]:
+        """Bind a configured dependency to a Python stage. Flows define option semantics."""
+        raise InvalidPackage(f"{self.record.ref} does not support options {dict(options)!r}")
+
+    def install_variants(self, *, build_missing: bool = True) -> dict[str, ConfiguredPackage]:
+        """Realize the requested options independently, even for the same component."""
+        packages = {}
+        for name, request in self.manifest.configured_dependencies.items():
+            record = self.graph._resolve(request.requirement)
+            package = self._dependency(record).build_configured(
+                request.options,
+                build_missing=build_missing,
+            )
+            packages[name] = ConfiguredPackage(record.ref, package.directory)
+        return packages
+
+    def build_configured(
+        self,
+        options: Mapping[str, str | int | bool],
+        *,
+        build_missing: bool = True,
+    ) -> ConfiguredPackage:
+        """Realize a flow-defined variant with its own Nix identity."""
+        spec, stage = self._variant_stage(options)
+        if stage.execution == "host" or len(spec.outputs) != 1:
+            raise InvalidPackage("A configured dependency requires one native Nix output")
+        self.build_dir.mkdir(parents=True, exist_ok=True)
+        invocation = self._invocation(spec, stage, {}, {})
+        results = self.catalog._nix.realize(
+            {spec.name: invocation},
+            self.build_dir,
+            build_missing=build_missing,
+        )
+        return ConfiguredPackage(self.record.ref, results[spec.outputs[0]].parent)
+
+    def _stage_ready(self, spec: StageSpec) -> bool:
         stage = self._stage(spec)
         return (
             all(path.is_file() for path in stage.files.values())
             and (stage.ready is None or stage.ready())
             and all(
-                name in self.outputs.available(record, producer_only=for_recipe)
+                self._has_output(record, name)
                 for record, name in self._stage_artifacts(spec, stage).values()
             )
         )
 
-    def _ready_release(self, *, for_recipe: bool = False) -> tuple[StageSpec, ...]:
-        accepts = partial(self._stage_ready, for_recipe=for_recipe)
-        return self.route._ready(accepts, cap=self.manifest.release_through)
-
-    def _release_targets(self) -> tuple[str, ...]:
-        targets = self.route._targets(self._ready_release())
+    def release_targets(self) -> tuple[str, ...]:
+        """Return the terminal stages with available inputs for a release."""
+        ready = self.route._ready(self._stage_ready, cap=self.manifest.release_through)
+        targets = self.route._targets(ready)
         if not targets:
             raise ValueError("No release stage is ready")
         return targets
 
-    def _release_requirements(self) -> Mapping[str, tuple[str, ...]]:
-        """Map release stages to additional checks that must run before publication."""
-        return {spec.name: spec.checks for spec in self.route._release() if spec.checks}
-
     def _release_checks(self, targets: tuple[str, ...]) -> tuple[str, ...]:
-        requirements = self._release_requirements()
-        while requirements:
+        while True:
             selected = {stage.name for stage in self.route._closure(targets)}
             missing = dict.fromkeys(
                 check
-                for name, checks in requirements.items()
+                for name in self.route.order
                 if name in selected
-                for check in checks
+                for check in self.route[name].checks
                 if check not in selected
             )
             if not missing:
-                break
+                return targets
             targets = (*targets, *missing)
-        return targets
 
     def _announce_release(self, targets: tuple[str, ...]) -> None:
         """Report automatically selected targets before the build starts."""
 
-    def _producer_members(self) -> Mapping[str, tuple[str, ...]]:
-        """Group transforms into recipes. By default each gets its own recipe."""
-        groups: dict[str, list[str]] = {}
-        for spec in self.route._release():
-            if spec.outputs and self._stage(spec).transform is not None:
-                groups.setdefault(spec.recipe or spec.name, []).append(spec.name)
-        return {name: tuple(stages) for name, stages in groups.items()}
+    def publish(self, target: str | tuple[str, ...] | None = None) -> InstalledRecord:
+        """Upload selected results and return the immutable release index.
 
-    def _prepare_producers(self, stages: tuple[StageSpec, ...]) -> None:
-        """Build prerequisites that must be captured as prepared inputs."""
-        selected = {stage.name for stage in stages}
-        prepared = tuple(
-            dict.fromkeys(name for stage in stages for name in stage.needs if name not in selected)
-        )
-        if prepared:
-            self.build(prepared)
-        self._prepare_stages({spec: self._stage(spec) for spec in stages})
-
-    def _publish_ready_recipes(
-        self,
-        stages: tuple[StageSpec, ...],
-    ) -> dict[str, Producer]:
-        members = self._producer_members()
-        names = {name for group in members.values() for name in group}
-        selected = tuple(spec for spec in stages if spec.name in names)
-        if not selected:
-            return {}
-        self._prepare_producers(selected)
-        runtime = ProducerRuntime(self.source)
-        recipes = ProducerRecipes(self.catalog, self.build_dir, runtime=runtime)
-        return recipes.publish(
-            self.record.ref,
-            tuple(self._recipe(spec) for spec in selected),
-            members=members,
-        )
-
-    def _recipe(self, spec: StageSpec) -> RecipeStage:
-        stage = self._stage(spec)
-        if stage.transform is None:
-            raise ValueError(f"Stage {spec.name!r} has no rebuildable transform")
-        return RecipeStage(
-            spec,
-            self._stage_inputs(spec, stage),
-            transform_reference(stage.transform),
-            configuration=dict(stage.configuration),
-            files=stage.files,
-            artifacts=self.outputs._producer_inputs(self._stage_artifacts(spec, stage)),
-        )
-
-    def _output_files(self, outputs: Mapping[str, Path]) -> dict[str, Path]:
-        """Combine declared files, build outputs and the lockfile for a project slice."""
-        return {**self.record.files, **outputs, "lockfile": self._require_lockfile()}
-
-    def _slice_metadata(self, _variants: Mapping[str, str], /) -> Mapping[str, JSON]:
-        """Provide additional flow metadata for the published project revision.
-
-        The argument maps each named configuration to the exact binary
-        reference selected for the slice.
+        Publication uses a clean committed checkout and the existing lockfile.
+        The index is copied after the artifacts and can be registered with
+        another catalog to retrieve the individual files.
         """
-        return {}
-
-    def _snapshot(self) -> Snapshot:
-        return Snapshot(self, self.route, stage_inputs=self._stage, variants=self._slice_variants)
-
-    def _pack(self, target: str | None) -> InstalledRecord:
-        targets = (target,) if target is not None else self._release_targets()
-        for name in targets:
-            self.route._release(name)
-        snapshot = self._snapshot()
-        files = self._output_files(self.build(targets))
-        inputs = snapshot.inputs(clean_commit(self.source), files)
-        return self.outputs._pack(
-            inputs, files, {**snapshot.metadata(inputs), **self._slice_metadata(inputs.variants)}
-        )
-
-    def publish(
-        self,
-        target: str | tuple[str, ...] | None = None,
-        *,
-        with_producers: bool = False,
-    ) -> InstalledRecord:
-        """Build release targets and publish their named outputs.
-
-        Pass a release target or tuple of targets. Omit them to let the flow
-        choose the ready terminal stages, subject to ``release_through``.
-        Publication requires a clean Git checkout and an existing lockfile.
-        CoreRef checks that the snapshot inputs stay unchanged during the
-        build. A new slice can also publish ready recipe groups with
-        ``with_producers=True``. A repeat with identical outputs returns the
-        existing publication, including its original recipe groups. Changing
-        the output names or contents of an existing slice raises ``ValueError``.
-        """
-        if isinstance(target, str):
-            target = (target,)
-        targets = self._release_checks(target if target is not None else self._release_targets())
+        if self.catalog._nix.cache is None:
+            raise ValueError("Configure a writable Nix binary cache before publishing")
+        if self.catalog.editables:
+            raise ValueError("Publication requires dependency sources pinned by the lockfile")
+        commit = _clean_commit(self.source)
+        lockfile = self._require_lockfile()
+        locked = file_digest(lockfile)
+        targets = (target,) if isinstance(target, str) else target or self.release_targets()
+        targets = self._release_checks(targets)
         for name in targets:
             self.route._release(name)
         if target is None:
             self._announce_release(targets)
-        snapshot = self._snapshot()
-        with committed_slice(self.source, snapshot.inputs) as inputs:
-            files = self._output_files(self.build(targets))
-            published = self.outputs._published_slice(inputs, files)
-            recipes = (
-                self._publish_ready_recipes(self._ready_release(for_recipe=True))
-                if published is None and with_producers
-                else {}
-            )
-        if published is not None:
-            return published
-        return self.outputs._publish_new_slice(
-            self.graph,
-            inputs,
-            files,
-            {**snapshot.metadata(inputs), **self._slice_metadata(inputs.variants)},
-            producers=recipes,
+        files = {**self.record.files, **self.build(targets), "lockfile": lockfile}
+        if _clean_commit(self.source) != commit or file_digest(lockfile) != locked:
+            raise ValueError("Project inputs changed while building the release")
+        return self._publish(commit, files)
+
+    def _publish(self, commit: str, files: dict[str, Path]) -> InstalledRecord:
+        nix = self.catalog._nix
+        source = nix.source(
+            self.source,
+            f"coreref-source-{self.record.ref.package_name}",
+            tracked=True,
         )
+        outputs = {
+            name: self._publish_path(path.resolve(strict=True)) for name, path in files.items()
+        }
+        with TemporaryDirectory() as temporary:
+            index = Path(temporary) / "release.json"
+            ref, metadata = self._release_metadata(commit, source, outputs)
+            document = {"ref": str(ref), "source": metadata.model_dump(mode="json")}
+            index.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
+            index_path = nix.add(index, "coreref-release.json")
+            nix.upload((source, *outputs.values()))
+            nix.upload((index_path,))
+        record = metadata.record(ref, file_names=("release.json",))
+        return InstalledRecord(record, files={"release.json": index_path}, source=source)
+
+    def _publish_path(self, path: Path) -> Path:
+        try:
+            store_entry(path)
+        except InvalidPackage:
+            return self.catalog._nix.add(path, "coreref-artifact")
+        return path
+
+    def _release_metadata(
+        self,
+        commit: str,
+        source: Path,
+        outputs: Mapping[str, Path],
+    ) -> tuple[Ref, _Source]:
+        index = _Source(
+            source=str(source),
+            dependencies=tuple(map(str, self.manifest.requirements)),
+            outputs={name: str(path) for name, path in outputs.items()},
+            payload={"type": self.manifest.type, "commit": commit, "data": self.manifest.payload},
+        )
+        document = index.model_dump(mode="json")
+        revision = hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
+        ref = Ref(f"{self.record.ref}#{revision}")
+        return ref, index
+
+
+def _clean_commit(source: Path) -> str:
+    arguments = ["git", "-C", str(source)]
+    try:
+        dirty = subprocess.check_output(  # noqa: S603 - fixed Git query with separate arguments.
+            [*arguments, "status", "--porcelain", "--untracked-files=all", "--", "."],
+            text=True,
+        ).strip()
+        if dirty:
+            raise ValueError("Publishing requires a clean Git checkout")
+        return subprocess.check_output(  # noqa: S603 - fixed Git query with separate arguments.
+            [*arguments, "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+    except subprocess.CalledProcessError as error:
+        raise ValueError("Publishing requires a committed Git checkout") from error

@@ -1,1 +1,1 @@
-"""CoreRef: hardware component representations and dependencies backed by Conan."""
+"""CoreRef builds hardware component outputs with Python stages and Nix."""

@@ -3,7 +3,7 @@
 ``LocalRecord`` is a mutable input for a package under development.
 ``Record`` describes a resolved package, and ``InstalledRecord`` adds
 filesystem paths. ``ConfiguredPackage`` tracks the binary identity
-selected for a particular set of Conan options.
+selected for a particular set of options.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class Ref:
     """Identify a version of a component or library.
 
     Use ``namespace.component/version[#revision]``. The optional suffix
-    identifies a Conan recipe revision and participates in equality and
+    identifies a locked source or release and participates in equality and
     hashing. A reference contains only coordinates. It can be shared
     between catalogs. Ordering is lexicographic over the coordinate
     fields and suitable for stable display.
@@ -41,7 +41,7 @@ class Ref:
 
     def __init__(self, reference: str) -> None:
         """Parse canonical coordinates or raise ``InvalidPackage``."""
-        from ..._internal.references import parse_package_name, to_conan_reference
+        from ..._internal.references import parse_package_name, validate_fields
         from ..errors import InvalidPackage
 
         try:
@@ -49,7 +49,8 @@ class Ref:
             name, self._version = logical.split("/")
             self._namespace, self._component = parse_package_name(name)
             self._revision = revision or None
-            if to_conan_reference(self) != reference:
+            validate_fields(self._version, self._revision)
+            if str(self) != reference:
                 raise ValueError("Noncanonical coordinates")
         except (ValueError, InvalidPackage) as error:
             raise InvalidPackage(
@@ -97,7 +98,7 @@ class Ref:
 
     @property
     def revision(self) -> str | None:
-        """Return the exact Conan recipe revision, if specified."""
+        """Return the exact source or release revision, if specified."""
         return self._revision
 
     @property
@@ -154,28 +155,28 @@ class Ref:
     def without_revision(self) -> Ref:
         """Return a reference with the same name and version and no revision.
 
-        Use it when you deliberately want a logical reference that Conan can
+        Use it when you deliberately want a logical reference that the catalog can
         resolve again.
         """
         return Ref(str(self).partition("#")[0])
 
 
 class Requirement:
-    """Declare a Conan version range for a dependency.
+    """Declare a version range for a source dependency.
 
     For example, ``Requirement("shared.stdlib/[>=1.0 <2.0]")`` leaves
-    version selection to Conan. A resolved dependency is identified by a
+    version selection to the catalog while locking. A resolved dependency is identified by a
     ``Ref``. Use a concrete ``Ref`` for the root of a project or for
     individual package retrieval.
     """
 
     def __init__(self, reference: str) -> None:
-        """Validate a package name and a bracketed Conan range expression."""
-        from ..._internal.references import parse_package_name, validate_version_range
+        """Validate a package name and a bracketed range expression."""
+        from ..._internal.references import parse_package_name, version_range
 
         name, _, version = reference.partition("/")
         parse_package_name(name)
-        validate_version_range(version)
+        self._specifier = version_range(version)
         self._package_name = name
         self._version = version
 
@@ -183,6 +184,14 @@ class Requirement:
     def package_name(self) -> str:
         """Return the package name covered by the range."""
         return self._package_name
+
+    def _matches(self, ref: Ref) -> bool:
+        from packaging.version import InvalidVersion
+
+        try:
+            return ref.package_name == self.package_name and self._specifier.contains(ref.version)
+        except InvalidVersion:
+            return False
 
     def __str__(self) -> str:
         """Format the original version-range requirement."""
@@ -201,7 +210,7 @@ Dependency: TypeAlias = Ref | Requirement
 
 
 def _parse_dependency(text: str) -> Dependency:
-    """Read either an exact version or a Conan version range."""
+    """Read either an exact version or a version range."""
     return Requirement(text) if text.partition("/")[2].startswith("[") else Ref(text)
 
 
@@ -318,7 +327,7 @@ class Record:
 class InstalledRecord(Record):
     """A metadata record with paths to packaged files and optional Git sources.
 
-    Paths refer to the local Conan cache or to an editable working
+    Paths refer to the local Nix store or to an editable working
     directory. They describe the local installation at the time of retrieval.
     """
 
@@ -360,7 +369,7 @@ class InstalledRecord(Record):
 
     @property
     def is_editable(self) -> bool:
-        """Indicate whether Conan selected a workspace checkout."""
+        """Indicate whether the graph selected an editable checkout."""
         return self._is_editable
 
     @property
@@ -396,35 +405,18 @@ class PackageInput:
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
 
-    def _arguments(self) -> tuple[str, ...]:
-        options = (
-            argument
-            for name, value in sorted(self.options.items())
-            for argument in ("--options:host", f"{self.requirement.package_name}/*:{name}={value}")
-        )
-        return ("--requires", str(self.requirement), *options)
-
 
 @dataclass(frozen=True)
 class ConfiguredPackage:
-    """Describe a selected option-dependent binary and its installation.
-
-    ``ref`` identifies the selected recipe revision. ``package_id``
-    identifies the Conan binary configuration and ``package_revision``
-    identifies the resulting binary revision. ``directory`` points to its
-    installed files. ``metadata`` contains Conan recipe data.
-    """
+    """The exact result of building a package with a particular option set."""
 
     ref: Ref
-    package_id: str
-    package_revision: str
     directory: Path
-    metadata: Mapping[str, object]
 
     @property
     def binary_reference(self) -> str:
-        """Return the exact ``name/version#rrev:package_id#prev`` address."""
-        return f"{self.ref}:{self.package_id}#{self.package_revision}"
+        """Return the independently addressable Nix result directory."""
+        return str(self.directory)
 
 
 __all__ = [

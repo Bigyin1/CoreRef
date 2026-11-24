@@ -1,4 +1,4 @@
-.PHONY: install check unit integration build performance
+.PHONY: install check unit integration build
 
 install:
 	uv sync --frozen
@@ -9,14 +9,10 @@ check:
 	uv run --frozen mypy
 
 unit:
-	uv run --frozen pytest -m 'not conan_remote and not performance'
+	uv run --frozen pytest -m 'not nix'
 
 integration:
-	uv run --frozen pytest -m 'conan_remote and not performance'
+	uv run --frozen pytest -m nix
 
 build:
 	uv build
-
-performance:
-	mkdir -p .benchmarks
-	uv run --frozen pytest tests/performance -m performance --benchmark-json=.benchmarks/results.json

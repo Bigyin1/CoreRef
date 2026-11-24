@@ -1,29 +1,13 @@
 # CoreRef
 
-Экспериментальный Python SDK для каталога аппаратных компонентов на Conan.
-Пакет хранит метаданные, зависимости и файлы; RTL-исходники получает из Git через SCM Conan.
-SDK генерирует рецепты сам: приложение работает с `Ref`, `LocalRecord` и `Graph`.
+Python SDK для аппаратных маршрутов. Flow задаёт функции стадий, их входы и связи.
+CoreRef строит derivations из выбранного маршрута. Nix запускает Python-функции и
+переиспользует готовые результаты из Nix store или binary cache.
 
-Требуются Python 3.10+ и настроенный Conan 2.34: профили, remote и доступ к Git.
-Используется стандартный Conan cache. Для установки из этого репозитория:
+Проект объявляет зависимости в `manifest.yml` и фиксирует их в `manifest.lock`.
+Результаты стадии доступны по отдельности. Flow выбирает RTL для симуляции, Liberty
+и LEF для физического lint или GDS для финальной сборки.
 
-```sh
-uv sync --frozen
-```
-
-```python
-from coreref.api.packages import Catalog, Ref
-from coreref.api.projects import Graph
-
-catalog = Catalog()
-cpu = Ref("soc.cpu/1.0")
-graph = Graph(catalog, cpu)
-sources = graph.get_sources((graph.record.ref,))
-```
-
-Стандартный формат проекта CoreRef — `manifest.yml`. С дополнением `coreref[cli]`
-доступны группы Typer `deps` и `workspace` для включения в CLI своего flow. Собственные форматы также поддерживаются.
-
-- [Публичный API и связи классов](docs/interfaces.md).
-- [Примеры работы с RTL, LIB/LEF и результатами маршрута](docs/use-cases.md).
-- [Разработка и проверки](docs/development.md).
+- [Публичный API](docs/interfaces.md)
+- [Пример маршрута](docs/use-cases.md)
+- [Разработка и запуск в CI](docs/development.md)

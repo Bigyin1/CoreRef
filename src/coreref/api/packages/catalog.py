@@ -1,210 +1,170 @@
-"""Search, fetch and publish packages through a configured Conan registry.
-
-Start with ``search_refs`` when you only need coordinates. Use ``info``
-for recipe metadata and ``get`` for installed files. To fetch several
-packages with the same resolution, use a project ``Graph``.
-"""
+"""Locate project sources and fetch released artifacts through Nix."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
+from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import cast
 
-from ..._internal.references import from_conan_reference
-from ..errors import InvalidPackage
-from .query import SearchQuery
-from .records import (
-    ConfiguredPackage,
-    Dependency,
-    InstalledRecord,
-    LocalRecord,
-    PackageInput,
-    Record,
-    Ref,
-)
+from packaging.version import Version
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-if TYPE_CHECKING:
-    from ..._internal.package import LocalPackage, StoredPackage
-    from ..projects.graph import Graph
+from ..._internal.nix_store import NixStore, store_entry
+from ..errors import CatalogError, InvalidPackage, NotFound
+from .records import JSON, Dependency, Record, Ref
+
+
+class _Source(BaseModel):
+    """The source and optional release index associated with one locked dependency."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    source: str
+    origin: dict[str, JsonValue] | None = None
+    dependencies: tuple[str, ...] = ()
+    payload: JsonValue = None
+    outputs: dict[str, str] = Field(default_factory=dict)
+
+    def record(self, ref: Ref, *, file_names: tuple[str, ...] = ()) -> Record:
+        data = cast(JSON, self.payload)
+        metadata: dict[str, JSON] = dict(data) if isinstance(data, Mapping) else {"data": data}
+        if self.outputs:
+            metadata["output_index"] = self.outputs
+        return Record(ref, metadata, file_names=file_names, has_source=True)
 
 
 class Catalog:
-    """Connect package operations to a Conan home and registry.
+    """Bind project coordinates to sources and an optional Nix binary cache.
 
-    A catalog can work with the local cache when no remote is configured.
-    Publishing requires a remote. Importing this class leaves Conan unloaded
-    until a catalog is constructed.
+    Plain project directories can be discovered below ``directory``.
+    ``sources`` overrides individual versions with paths or Nix flake
+    references. ``releases`` can point at immutable release indexes returned
+    by publish. Locking records exact store paths, so later builds use the
+    same source trees and artifacts.
     """
 
-    def __init__(
-        self, home: str | Path | None = None, *, remote: str | None = None, timeout: float = 60
+    def __init__(  # noqa: PLR0913 - independent source and Nix configuration.
+        self,
+        directory: Path | None = None,
+        *,
+        sources: Mapping[Ref, Path | str] | None = None,
+        cache: str | None = None,
+        python: Path | None = None,
+        host_launcher: tuple[str, ...] = (),
+        releases: Mapping[Ref, Path] | None = None,
+        editables: Mapping[Ref, Path] | None = None,
     ) -> None:
-        """Open an existing Conan configuration.
+        """Configure source lookup and stage execution.
 
-        ``home`` points to the Conan home. If omitted, use Conan's default.
-        ``remote`` selects a registry by name. When the home lists multiple
-        remotes, provide a name explicitly. ``timeout`` is the command timeout
-        in seconds.
+        ``python`` optionally selects a Nix-provided Python environment with
+        the flow's extra libraries. ``host_launcher`` is an optional argv
+        prefix for host stages, for example a script that loads a tool
+        module and then executes its arguments.
         """
-        from ..._internal.client import ConanClient
-        from ..._internal.variants import Variants
+        self.directory = directory
+        self.sources = dict(sources or {})
+        self.releases = dict(releases or {})
+        self.editables = {ref.without_revision(): path for ref, path in (editables or {}).items()}
+        self._nix = NixStore(cache, python, host_launcher)
 
-        self._client = ConanClient(Path(home) if home is not None else None, remote, timeout)
-        self._variants = Variants(self)
+    @cached_property
+    def _locations(self) -> dict[Ref, Path | str]:
+        from ..projects.manifest import Manifest
 
-    def search_refs(self, query: SearchQuery, *, all_revisions: bool = False) -> tuple[Ref, ...]:
-        """Return matching recipe references with concrete revisions.
+        locations: dict[Ref, Path | str] = {}
+        if self.directory is not None:
+            for manifest in sorted(self.directory.glob("*/manifest.yml")):
+                ref = Ref(Manifest.load(manifest).ref)
+                if ref in locations:
+                    raise InvalidPackage(f"Multiple project directories declare {ref}")
+                locations[ref] = manifest.parent
+        locations.update(self.sources)
+        return locations
 
-        The default is Conan's latest revision for each matching name and
-        version. Set ``all_revisions=True`` to include history. A revision in
-        the query selects that exact revision in either mode. The returned
-        tuple is sorted by coordinates. Search lists references without
-        downloading recipe metadata or package binaries.
-        """
-        pattern = query._conan_pattern(all_revisions=all_revisions)
-        refs = []
-        for reference, revisions in self._client.index(pattern).items():
-            for revision in revisions.revisions:
-                try:
-                    ref = from_conan_reference(f"{reference}#{revision}")
-                except InvalidPackage:
-                    # A search can include Conan names outside the CoreRef grammar.
-                    continue
-                if query.matches_ref(ref):
-                    refs.append(ref)
-        return tuple(sorted(refs))
+    def _select(self, requirement: Dependency) -> Ref:
+        if isinstance(requirement, Ref):
+            return requirement
+        candidates = self._locations.keys() | self.releases.keys()
+        matching = [ref for ref in candidates if requirement._matches(ref)]
+        if not matching:
+            raise NotFound(f"No available source matches {requirement}")
+        return max(matching, key=lambda ref: (Version(ref.version), str(ref)))
+
+    def _snapshot(self, ref: Ref) -> tuple[Path, dict[str, JSON] | None]:
+        location = self._locations.get(ref.without_revision())
+        if isinstance(location, Path):
+            name = f"coreref-source-{ref.package_name}"
+            return self._nix.source(location, name, tracked=True), None
+        if isinstance(location, str):
+            return self._nix.prefetch(location)
+        raise NotFound(f"No source configured for {ref}")
+
+    def _index(self, ref: Ref) -> Path | None:
+        return self.releases.get(ref) or self.releases.get(ref.without_revision())
+
+    def _published(self, ref: Ref) -> tuple[Ref, _Source] | None:
+        index = self._index(ref)
+        if index is None:
+            return None
+        self._nix.restore((index,))
+        document = json.loads(index.read_bytes())
+        published = Ref(document["ref"])
+        if ref.without_revision() != published.without_revision() or (
+            ref.revision is not None and ref != published
+        ):
+            raise InvalidPackage(f"{index} identifies {published}, expected {ref}")
+        return published, _Source.model_validate(document["source"])
 
     def info(self, ref: Ref) -> Record:
-        """Read a package's recipe metadata as a ``Record``.
+        """Read a registered release index without downloading its artifacts."""
+        result = self._published(ref)
+        if result is None:
+            raise NotFound(f"No release index registered for {ref}")
+        published, source = result
+        return source.record(published)
 
-        Conan may fetch the recipe from the configured remote. File names and
-        source availability come from metadata. To get paths, call ``get``.
-        """
-        return self._package(ref).recipe().record
+    def _is_editable(self, ref: Ref) -> bool:
+        return ref.without_revision() in self.editables
 
-    def get(self, ref: Ref, *, with_sources: bool = False) -> InstalledRecord:
-        """Install packaged files and return their local paths.
+    def _source_for(self, ref: Ref, source: _Source) -> Path:
+        editable = self.editables.get(ref.without_revision())
+        if editable is not None:
+            return editable.resolve(strict=True)
+        locked = store_entry(Path(source.source))
+        if locked.is_dir():
+            return locked
+        try:
+            self._nix.restore((locked,))
+        except CatalogError:
+            restored = (
+                self._nix.fetch(cast(Mapping[str, JSON], source.origin))
+                if source.origin is not None
+                else self._snapshot(ref)[0]
+            )
+            if restored != locked:
+                message = f"Source for {ref} changed. Restore {locked} or run lock."
+                raise InvalidPackage(message) from None
+        return locked
 
-        Conan resolves a reference without a revision. Set
-        ``with_sources=True`` to also obtain Git sources if the recipe declares
-        them. When Conan selects an editable package, returned paths can point
-        into its working checkout.
-        """
-        return self._package(ref).get(with_sources=with_sources)
+    def _lock_entry(self, requirement: Dependency) -> tuple[Ref, _Source]:
+        from ..projects.manifest import Manifest
 
-    def get_variant(
-        self, package: PackageInput, *, lockfile: Path | None = None, build_missing: bool = False
-    ) -> ConfiguredPackage:
-        """Install the binary for a requirement and its options.
-
-        Pass a lockfile to use its recipe selection. With ``lockfile=None``,
-        Conan resolves the requirement without that lock. Set
-        ``build_missing=True`` to permit building the requested configuration
-        when its binary is unavailable. The result includes the exact recipe
-        and binary identities and the local installation directory.
-        """
-        return self._variants._get(package, lockfile=lockfile, build_missing=build_missing)
-
-    def publish_variant_recipe(
-        self,
-        ref: Ref,
-        *,
-        options: Mapping[str, tuple[str | int | bool, ...]],
-        inputs: Mapping[str, Path],
-        runner: Path,
-    ) -> Ref:
-        """Publish a recipe for an option-dependent binary.
-
-        ``ref`` must omit the recipe revision. The first value of each option
-        domain is its default. ``inputs`` maps names in the recipe's source
-        directory to local files. ``runner`` is a Python file defining
-        ``generate(options, source, output)``. Conan passes selected option
-        values as strings and paths for the inputs and output directory.
-        Return the exact reference of the published recipe.
-        """
-        return self._variants.publish_generated_recipe(
-            ref, options=options, inputs=inputs, runner=runner
+        ref = self._select(requirement)
+        published = self._published(ref)
+        if published is not None:
+            return published
+        path, origin = self._snapshot(ref)
+        manifest = Manifest.load(path / "manifest.yml")
+        if Ref(manifest.ref) != ref.without_revision():
+            raise InvalidPackage(f"{path} declares {manifest.ref}, expected {ref}")
+        revision = path.name.partition("-")[0]
+        locked = Ref(f"{ref.without_revision()}#{revision}")
+        if ref.revision is not None and ref != locked:
+            raise InvalidPackage(f"Source {ref} does not match {locked}")
+        return locked, _Source(
+            source=str(path),
+            origin=cast("dict[str, JsonValue] | None", origin),
+            dependencies=tuple(map(str, manifest.requirements)),
+            payload={"type": manifest.type, "data": manifest.payload},
         )
-
-    def publish_variant(self, package: ConfiguredPackage) -> None:
-        """Upload the exact installed binary to the configured registry.
-
-        Use the result of ``get_variant`` from a catalog with access to the
-        same Conan cache.
-        """
-        self._variants.publish(package)
-
-    def publish(
-        self,
-        record: LocalRecord | Graph,
-        *,
-        dependencies: tuple[Dependency, ...] = (),
-        lockfile: Path | None = None,
-    ) -> InstalledRecord:
-        """Package local inputs and publish them to the configured registry.
-
-        Pass a ``LocalRecord`` with optional ``dependencies`` and ``lockfile``,
-        or pass a local ``Graph`` resolved by this catalog. A graph supplies
-        its own dependency selection, so leave those arguments unset in that
-        case. The returned record identifies the published recipe revision
-        and provides paths to the installed files.
-        """
-        self._client.require_remote()
-        installed = self._pack(record, dependencies=dependencies, lockfile=lockfile)
-        self._client.upload(str(installed.ref))
-        return installed
-
-    def _pack(
-        self,
-        record: LocalRecord | Graph,
-        *,
-        dependencies: tuple[Dependency, ...] = (),
-        lockfile: Path | None = None,
-    ) -> InstalledRecord:
-        """Export a package to the local cache and return its exact reference."""
-        from ..projects.graph import Graph
-
-        if isinstance(record, Graph):
-            if dependencies or lockfile is not None:
-                raise InvalidPackage(
-                    "A resolved graph already defines its dependencies and lockfile"
-                )
-            if record.catalog is not self:
-                raise InvalidPackage("Pack the graph through its own catalog")
-            return record._pack()
-        return self._local_package(record, dependencies, lockfile).pack()
-
-    def _upload(self, ref: Ref) -> None:
-        """Upload an exact recipe and its locally packed binaries."""
-        self._client.require_remote()
-        if ref.revision is None:
-            raise InvalidPackage("Upload requires an exact recipe revision")
-        self._client.cache_path(str(ref))
-        self._client.upload(str(ref))
-
-    def _publish_graph(self, graph: Graph, record: LocalRecord) -> InstalledRecord:
-        self._client.require_remote()
-        if graph.catalog is not self:
-            raise InvalidPackage("Publish the graph through its own catalog")
-        installed = graph._pack(record)
-        self._client.upload(str(installed.ref))
-        return installed
-
-    def _package(self, ref: Ref) -> StoredPackage:
-        from ..._internal.package import StoredPackage
-
-        return StoredPackage(self, ref)
-
-    def _local_package(
-        self,
-        record: LocalRecord,
-        dependencies: tuple[Dependency, ...],
-        lockfile: Path | None,
-    ) -> LocalPackage:
-        from ..._internal.package import LocalPackage
-
-        return LocalPackage(self, record, dependencies=dependencies, lockfile=lockfile)
-
-
-__all__ = ["Catalog"]

@@ -1,0 +1,402 @@
+"""Realize stage results and exchange exact paths with a Nix binary cache."""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass
+from functools import cached_property
+from importlib.util import find_spec
+from os import environ
+from pathlib import Path
+from shutil import which
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
+
+from ..api.errors import CatalogError, InvalidPackage, NotFound
+from .hashing import file_digest, fingerprint
+
+if TYPE_CHECKING:
+    from ..api.build.route import StageTransform
+    from ..api.packages.records import JSON
+
+_RECIPES = Path(__file__).with_name("nix")
+_RUNNER = Path(__file__).with_name("nix_builder.py")
+_STORE_ENTRY = re.compile(r"/nix/store/[0-9a-z]{32}-[a-zA-Z0-9+._?=-]+")
+
+
+def store_entry(path: Path) -> Path:
+    """Get the store object containing a file without resolving symlinks."""
+    root = Path(*path.parts[:4])
+    if not _STORE_ENTRY.fullmatch(str(root)) or ".." in path.parts:
+        raise InvalidPackage(f"Expected an exact Nix store path, got {path}")
+    return root
+
+
+@dataclass(frozen=True)
+class StageOutput:
+    stage: str
+    output: str
+    filename: str
+
+
+def output_name(index: int) -> str:
+    return "out" if index == 0 else f"file{index}"
+
+
+def transform_reference(transform: StageTransform) -> str:
+    name = getattr(transform, "__qualname__", "")
+    module = getattr(transform, "__module__", "")
+    if not module or module == "__main__" or not name.isidentifier():
+        raise ValueError("A Nix transform must be a module-level Python function")
+    return f"{module}:{name}"
+
+
+@dataclass(frozen=True)
+class Invocation:
+    name: str
+    transform: str
+    execution: str
+    configuration: Mapping[str, JSON]
+    inputs: Mapping[str, Path | StageOutput]
+    outputs: tuple[str, ...]
+    needs: tuple[str, ...] = ()
+
+    def document(self, modules: Mapping[str, Path]) -> dict[str, JSON]:
+        outputs: dict[str, JSON] = {
+            output_name(index): name for index, name in enumerate(self.outputs)
+        }
+        if not outputs:
+            outputs["out"] = None
+        inputs = {
+            name: str(path.resolve(strict=True)) if isinstance(path, Path) else asdict(path)
+            for name, path in self.inputs.items()
+        }
+        return {
+            "name": self.name,
+            "transform": self.transform,
+            "configuration": dict(self.configuration),
+            "execution": self.execution,
+            "outputs": outputs,
+            "inputs": inputs,
+            "needs": self.needs,
+            "modules": {name: str(path) for name, path in modules.items()},
+        }
+
+
+class NixStore:
+    """Invoke the installed Nix client without changing its daemon configuration."""
+
+    def __init__(self, cache: str | None, python: Path | None, launcher: tuple[str, ...]) -> None:
+        self.cache = cache
+        self.python = python
+        self.launcher = launcher
+        self._package_paths: dict[str, Path] = {}
+
+    def command(self, *arguments: str) -> str:
+        binary = which("nix")
+        if binary is None:
+            raise CatalogError("Install Nix and make nix available on PATH")
+        result = subprocess.run(  # noqa: S603 - argument vector for the configured Nix executable.
+            [binary, "--extra-experimental-features", "nix-command flakes", *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            raise CatalogError(result.stderr.strip() or "Nix command failed")
+        return result.stdout.strip()
+
+    @cached_property
+    def runtime(self) -> Path:
+        if self.python is not None:
+            path = store_entry(self.python)
+            if not (path / "bin/python").is_file():
+                raise InvalidPackage(f"No Python interpreter in {path}")
+            return path
+        return Path(
+            self.command(
+                "build",
+                "--file",
+                str(_RECIPES / "runtime.nix"),
+                "--no-link",
+                "--print-out-paths",
+            )
+        )
+
+    def source(self, directory: Path, name: str, *, tracked: bool = False) -> Path:
+        """Snapshot a project or Python package with a stable store name."""
+        directory = directory.resolve(strict=True)
+        files = _tracked_files(directory) if tracked else None
+        with TemporaryDirectory() as temporary:
+            selection = ""
+            if files is not None:
+                selected = Path(temporary) / "sources.json"
+                selected.write_text(json.dumps(files, ensure_ascii=False), encoding="utf-8")
+                selection = str(selected)
+            return Path(
+                json.loads(
+                    self.command(
+                        "eval",
+                        "--impure",
+                        "--json",
+                        "--file",
+                        str(_RECIPES / "source.nix"),
+                        "--argstr",
+                        "directory",
+                        str(directory),
+                        "--argstr",
+                        "name",
+                        name,
+                        "--argstr",
+                        "selection",
+                        selection,
+                        "source",
+                    )
+                )
+            )
+
+    def prefetch(self, reference: str) -> tuple[Path, dict[str, JSON]]:
+        """Fetch a source tree and capture the locked Nix fetcher attributes."""
+        data = json.loads(self.command("flake", "prefetch", "--json", "--", reference))
+        return Path(data["storePath"]), {**data["locked"], "narHash": data["hash"]}
+
+    def fetch(self, locked: Mapping[str, JSON]) -> Path:
+        """Restore a pinned tree through its original Nix fetcher."""
+        expression = (
+            "{ locked }: { source = (builtins.fetchTree (builtins.fromJSON locked)).outPath; }"
+        )
+        return Path(
+            json.loads(
+                self.command(
+                    "eval",
+                    "--impure",
+                    "--json",
+                    "--expr",
+                    expression,
+                    "--argstr",
+                    "locked",
+                    json.dumps(dict(locked)),
+                    "source",
+                )
+            )
+        )
+
+    def add(self, path: Path, name: str) -> Path:
+        """Import bytes as a standalone content-addressed store object."""
+        return Path(self.command("store", "add", "--name", name, "--", str(path)))
+
+    def upload(self, paths: Sequence[Path]) -> None:
+        if self.cache is None:
+            raise CatalogError("Configure a writable Nix binary cache before publishing")
+        roots = sorted({str(store_entry(path)) for path in paths})
+        if roots:
+            self.command("copy", "--to", self.cache, "--", *roots)
+
+    def restore(self, paths: Sequence[Path]) -> None:
+        entries = {store_entry(path) for path in paths}
+        roots = sorted(path for path in entries if not path.exists())
+        if not roots:
+            return
+        if self.cache is None:
+            raise NotFound(f"Missing from the Nix store: {', '.join(map(str, roots))}")
+        self.command("copy", "--from", self.cache, "--", *map(str, roots))
+
+    def realize(
+        self,
+        stages: Mapping[str, Invocation],
+        directory: Path,
+        *,
+        build_missing: bool = True,
+        selected: tuple[str, ...] | None = None,
+    ) -> dict[str, Path]:
+        """Realize selected outputs across a group of derivations with one Nix build."""
+        if not stages:
+            return {}
+        plan = {
+            name: invocation.document(self._modules(invocation.transform))
+            for name, invocation in stages.items()
+        }
+        targets = self._targets(stages, selected)
+        with TemporaryDirectory(prefix="nix-plan-", dir=directory) as temporary:
+            plan_file = Path(temporary) / "plan.json"
+            plan_file.write_text(json.dumps(plan, allow_nan=False), encoding="utf-8")
+            results = self._build(targets, plan_file, directory, build_missing)
+        return {
+            name: results[invocation.name][output_name(index)] / name
+            for invocation in stages.values()
+            for index, name in enumerate(invocation.outputs)
+            if selected is None or name in selected
+        }
+
+    @staticmethod
+    def _targets(
+        stages: Mapping[str, Invocation],
+        selected: tuple[str, ...] | None,
+    ) -> tuple[str, ...]:
+        if selected is None:
+            return tuple(f"{name}^*" for name in stages)
+        targets = []
+        for name, invocation in stages.items():
+            outputs = [
+                output_name(index)
+                for index, output in enumerate(invocation.outputs)
+                if output in selected
+            ]
+            if outputs:
+                targets.append(f"{name}^{','.join(outputs)}")
+        return tuple(targets)
+
+    def _build(
+        self,
+        targets: tuple[str, ...],
+        plan: Path,
+        directory: Path,
+        build_missing: bool,
+    ) -> dict[str, dict[str, Path]]:
+        options: tuple[str, ...] = (
+            () if build_missing else ("--max-jobs", "0", "--option", "builders", "")
+        )
+        if self.cache is not None:
+            options += ("--extra-substituters", self.cache)
+        first = targets[0].partition("^")[0]
+        data = json.loads(
+            self.command(
+                "build",
+                "--impure",
+                "--json",
+                "--out-link",
+                str(directory / f".nix-{first}"),
+                "--file",
+                str(_RECIPES / "stage.nix"),
+                *options,
+                "--argstr",
+                "planFile",
+                str(plan),
+                "--argstr",
+                "pythonRoot",
+                str(self.runtime) if self.python is not None else "",
+                *targets,
+            )
+        )
+        return {
+            Path(item["drvPath"]).name.partition("-")[2].removesuffix(".drv"): {
+                name: Path(path) for name, path in item["outputs"].items()
+            }
+            for item in data
+        }
+
+    def host(
+        self,
+        invocation: Invocation,
+        directory: Path,
+        *,
+        log: Path,
+        build_missing: bool,
+        always_run: bool,
+    ) -> dict[str, Path]:
+        """Run a host transform and keep its exact produced files in the store."""
+        plan = invocation.document(self._modules(invocation.transform))
+        key = self._host_key(invocation, plan)
+        state = directory / f".host-{key}.json"
+        if not always_run and state.is_file():
+            cached = {name: Path(path) for name, path in json.loads(state.read_bytes()).items()}
+            if all(path.is_file() for path in cached.values()):
+                return cached
+        if not build_missing:
+            raise NotFound(f"Host result {invocation.name} was not published")
+        with TemporaryDirectory(prefix="host-stage-", dir=directory) as temporary:
+            results = self._run_host(invocation, Path(temporary), plan, log)
+            if results:
+                self.command(
+                    "build",
+                    "--out-link",
+                    str(directory / f".nix-{invocation.name}"),
+                    "--",
+                    *map(str, results.values()),
+                )
+            result_file = Path(temporary) / "results.json"
+            result_file.write_text(json.dumps({name: str(path) for name, path in results.items()}))
+            result_file.replace(state)
+        return results
+
+    def _host_key(self, invocation: Invocation, plan: dict[str, JSON]) -> str:
+        return fingerprint(
+            {
+                **plan,
+                "python": str(self.runtime),
+                "launcher": [
+                    [arg, file_digest(path)] if (path := Path(arg)).is_file() else arg
+                    for arg in self.launcher
+                ],
+                "inputs": {
+                    name: [file_digest(path), path.stat().st_mode & 0o111]
+                    for name, path in invocation.inputs.items()
+                    if isinstance(path, Path)
+                },
+            }
+        )
+
+    def _run_host(
+        self,
+        invocation: Invocation,
+        directory: Path,
+        plan: dict[str, JSON],
+        log: Path,
+    ) -> dict[str, Path]:
+        plan_file = directory / "plan.json"
+        plan_file.write_text(json.dumps(plan, allow_nan=False), encoding="utf-8")
+        output = directory / "outputs"
+        command = [*self.launcher, str(self.runtime / "bin/python"), str(_RUNNER)]
+        try:
+            subprocess.run(  # noqa: S603 - explicit host launcher and pinned Python interpreter.
+                [*command, str(plan_file), str(log), str(output)],
+                cwd=directory,
+                env={**environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                check=True,
+            )
+        except subprocess.CalledProcessError as error:
+            raise CatalogError(f"Stage {invocation.name} failed. See {log}.") from error
+        return {
+            name: self.add(output / output_name(index) / name, f"{invocation.name}-{index}")
+            for index, name in enumerate(invocation.outputs)
+        }
+
+    def _modules(self, transform: str) -> dict[str, Path]:
+        names = sorted({"coreref", transform.split(".", 1)[0].partition(":")[0]})
+        return {name: self._module(name) for name in names}
+
+    def _module(self, name: str) -> Path:
+        if name not in self._package_paths:
+            spec = find_spec(name)
+            if spec is None or spec.origin is None:
+                raise InvalidPackage(f"Cannot locate the Python package {name}")
+            origin = Path(spec.origin)
+            package = spec.submodule_search_locations is not None
+            path = origin.parent if package else origin
+            suffix = "" if package else origin.suffix
+            self._package_paths[name] = self.source(path, f"coreref-python-{name}{suffix}")
+        return self._package_paths[name]
+
+
+def _tracked_files(directory: Path) -> dict[str, bool] | None:
+    """Keep untracked and ignored files out of a checked-out source snapshot."""
+    git = which("git")
+    if git is None:
+        return None
+    result = subprocess.run(  # noqa: S603 - fixed Git query with a separate directory argument.
+        [git, "-C", str(directory), "ls-files", "-z", "--", "."],
+        capture_output=True,
+        check=False,
+    )
+    tracked = result.stdout.decode("utf-8", "surrogateescape").rstrip("\0").split("\0")
+    if result.returncode or "manifest.yml" not in tracked:
+        return None
+    paths = {directory}
+    for file in tracked:
+        path = directory / file
+        paths.add(path)
+        paths.update(parent for parent in path.parents if parent.is_relative_to(directory))
+    return dict.fromkeys(map(str, paths), True)

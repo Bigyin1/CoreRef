@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from enum import Enum
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -20,26 +19,13 @@ from ..packages.records import JSON, Record
 StageTransform = Callable[[Path, Path, Mapping[str, JSON]], None]
 
 
-class CacheMode(str, Enum):
-    """Control shared-cache access for stages that opt into it.
-
-    ``OFF`` bypasses the shared cache. ``READ`` can restore a matching
-    result. ``WRITE`` can also publish a successful result on a miss.
-    """
-
-    OFF = "off"
-    READ = "read"
-    WRITE = "write"
-
-
 class StageSpec(BaseModel):
     """Describe a named stage before binding it to a handler.
 
     ``needs`` names direct predecessor stages. ``outputs`` lists relative
     paths within the build directory. ``purpose`` determines whether the
     stage can participate in publication. During publication ``checks``
-    adds validation stages. ``recipe`` groups stages in a rebuildable
-    package, and ``recipe_outputs`` selects which of their files it exports.
+    adds validation stages.
     """
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -49,8 +35,6 @@ class StageSpec(BaseModel):
     needs: tuple[str, ...] = Field(default=(), strict=False)
     purpose: Literal["release", "development"] = "release"
     checks: tuple[str, ...] = Field(default=(), strict=False)
-    recipe: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$")
-    recipe_outputs: tuple[str, ...] | None = Field(default=None, strict=False)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -60,29 +44,29 @@ class Stage:
     A transform receives an isolated working directory, a log path and
     JSON configuration. CoreRef stages its declared inputs and checks
     its outputs before making them available. Use a module-level function
-    to publish the same transform as a rebuild recipe. Set cache=True
-    when the inputs and configuration fully determine its outputs.
+    for a Nix build. ``execution="relaxed"`` permits a configured Nix
+    worker to relax its sandbox. ``execution="host"`` runs the same
+    function with Nix Python under the caller's environment.
 
     If a transform omits ``inputs``, CoreRef uses its ``files`` and all
     outputs of direct predecessors. Explicit ``inputs`` select filenames
     from those sources or from the build directory. The keys in ``files``
     are staged names and its values are source paths.
 
-    ``action`` is called with no arguments and uses the build directory
-    directly. ``configuration`` contributes to both local
+    ``action`` is a local callback called with no arguments. It uses the
+    build directory directly. ``configuration`` contributes to both local
     execution and release inputs, while ``local_configuration`` applies
     only to local runs. Set ``always_run`` when the action must execute
-    even if the local executor can reuse its outputs.
+    even if the host executor can reuse its outputs.
     ``ready()`` checks stage-specific prerequisites. A shared
     ``prepare(stages)`` callback can compute inputs for selected stages in one
     operation. ``artifacts`` binds staged input names to named outputs from
-    published packages. CoreRef fetches them locally or pins their producers
-    in the rebuild recipe.
+    released packages. CoreRef retrieves only the named artifacts.
     """
 
     action: Callable[[], object] | None = None
     transform: StageTransform | None = None
-    cache: bool = False
+    execution: Literal["nix", "relaxed", "host"] = "nix"
     inputs: tuple[str, ...] | None = None
     files: Mapping[str, Path] = field(default_factory=dict)
     configuration: Mapping[str, JSON] = field(default_factory=dict)
@@ -95,11 +79,12 @@ class Stage:
     def __post_init__(self) -> None:
         if (self.action is None) == (self.transform is None):
             raise ValueError("A stage must declare exactly one action or transform")
-        if self.transform is None:
-            if self.cache or self.artifacts:
-                raise ValueError("Stage cache and artifact inputs require a transform")
-        else:
+        if self.execution not in {"nix", "relaxed", "host"}:
+            raise ValueError(f"Unknown stage execution mode {self.execution!r}")
+        if self.transform is not None:
             self._validate_transform_inputs()
+        elif self.artifacts or self.execution != "nix":
+            raise ValueError("Stage artifact inputs and execution modes require a transform")
 
     def _validate_transform_inputs(self) -> None:
         overlap = self.files.keys() & self.artifacts.keys()
@@ -182,8 +167,6 @@ class Route:
                 )
 
     def _validate_publication(self, stage: StageSpec) -> None:
-        if set(stage.recipe_outputs or ()) - set(stage.outputs):
-            raise ValueError(f"Stage {stage.name!r} exports unknown recipe outputs")
         for name in stage.checks:
             if self[name].purpose != "release":
                 raise ValueError(f"Publication check {name!r} must be a release stage")
@@ -240,12 +223,6 @@ class Route:
                 "needs": tuple(sorted(stage.needs)),
                 "outputs": tuple(sorted(stage.outputs)),
                 **({"checks": tuple(sorted(stage.checks))} if stage.checks else {}),
-                **({"recipe": stage.recipe} if stage.recipe is not None else {}),
-                **(
-                    {"recipe_outputs": tuple(sorted(stage.recipe_outputs))}
-                    if stage.recipe_outputs is not None
-                    else {}
-                ),
             }
             for stage in sorted(self._release(), key=lambda stage: stage.name)
         ]

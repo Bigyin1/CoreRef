@@ -10,6 +10,7 @@ from coreref.api.packages import Catalog
 from coreref.api.projects import Manifest, Project
 
 
+@pytest.mark.nix
 def test_generated_route_composes_transforms_and_binds_file_roles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -33,7 +33,7 @@ class _ConfiguredDependency(BaseModel):
 class Manifest(BaseModel):
     """Validate project declarations shared by CoreRef and a flow.
 
-    Only ``ref`` is required. A dependency can be a reference, a Conan
+    Only ``ref`` is required. A dependency can be a reference, a
     version range, or a named configuration with options. The ``tools``
     map accepts named image digests and command version pins. ``files``
     maps logical artifact names to filesystem paths rooted at the project
@@ -75,7 +75,7 @@ class Manifest(BaseModel):
             installed = version(package)
         except PackageNotFoundError as error:
             raise ValueError(
-                f"{path} requires {requirement}. Install it in the project venv."
+                f"{path} requires {requirement}. Run the project's pinned flow environment."
             ) from error
         if installed != self.flow_version:
             raise ValueError(
@@ -133,7 +133,7 @@ class Manifest(BaseModel):
         Different names can select distinct option sets for the same recipe.
         """
         return {
-            item.name: PackageInput(Ref(item.ref), item.options)
+            item.name: PackageInput(_parse_dependency(item.ref), item.options)
             for item in self.dependencies
             if isinstance(item, _ConfiguredDependency)
         }

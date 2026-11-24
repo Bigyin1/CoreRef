@@ -7,14 +7,23 @@ from collections.abc import Iterable
 from keyword import iskeyword
 from pathlib import Path
 from pprint import pformat
+from typing import Literal
 
 import yaml  # type: ignore[import-untyped]
+from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from ..._internal.recipe import _RECIPE_ENV
 from .route import StageSpec
 
-_TEMPLATE = _RECIPE_ENV.get_template("flow.py.j2")
+_ENVIRONMENT = Environment(
+    loader=PackageLoader("coreref._internal"),
+    autoescape=False,  # noqa: S701 - interpolation uses Python repr.
+    undefined=StrictUndefined,
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+_ENVIRONMENT.filters["pyrepr"] = repr
+_TEMPLATE = _ENVIRONMENT.get_template("flow.py.j2")
 
 
 class _Node(StageSpec):
@@ -23,7 +32,7 @@ class _Node(StageSpec):
     files: dict[str, str] = Field(default_factory=dict)
     inputs: tuple[str, ...] | None = Field(default=None, strict=False)
     configuration: dict[str, JsonValue] = Field(default_factory=dict)
-    cache: bool | None = None
+    execution: Literal["nix", "relaxed", "host"] | None = None
 
     @model_validator(mode="after")
     def _implementation(self) -> _Node:
@@ -79,7 +88,7 @@ def _imports(entries: Iterable[str | None]) -> dict[str, tuple[str, str, str]]:
 
 
 def _parameters(nodes: list[_Node]) -> dict[str, dict[str, object]]:
-    fields = {"files", "inputs", "configuration", "cache"}
+    fields = {"files", "inputs", "configuration", "execution"}
     return {
         node.name: options
         for node in nodes

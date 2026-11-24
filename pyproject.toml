@@ -5,34 +5,24 @@ build-backend = "hatchling.build"
 [project]
 name = "coreref"
 version = "0.1.0"
-description = "Hardware component representations and dependencies on Conan"
+description = "Hardware component representations and build stages backed by Nix"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
- "conan>=2.34,<2.35",
- "doit>=0.37,<0.38",
  "jinja2>=3.1.6,<4",
+ "packaging>=24,<27",
  "pyyaml>=6,<7",
- "pydantic>=2.14,<3",
+ "pydantic>=2.12.5,<3",
  "frozendict>=2.4.7,<3",
  "typing-extensions>=4.12,<5",
- "tomli>=2,<3; python_version < '3.11'",
 ]
-
-[project.optional-dependencies]
-cli = ["typer>=0.24,<1"]
-testing = ["conan-server>=2.34,<2.35", "dulwich>=1.2.18,<2"]
 
 [dependency-groups]
 dev = [
-    "typer>=0.24,<1",
     "pytest>=8.4",
     "pytest-cov>=6",
     "ruff>=0.14",
     "mypy>=1.18",
-    "dulwich>=1.2.18,<2",
-    "conan-server>=2.34,<2.35",
-    "pytest-benchmark>=5.3,<6",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -70,21 +60,10 @@ max-statements = 40
 
 [tool.mypy]
 python_version = "3.10"
-# pytest-benchmark exposes a typed fixture with an untyped pedantic method.
-untyped_calls_exclude = ["pytest_benchmark"]
 strict = true
 files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-    "performance: opt-in public API timing and operation budgets",
-    "conan: uses the real Conan command API in isolated caches",
-    "conan_remote: uses an owned temporary Conan server",
-]
-addopts = "-ra -m 'not performance'"
-
-[tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = [
-    "coreref.api.packages.query.SearchQuery",
-]
+markers = ["nix: integration tests that use a Nix store"]
+addopts = "-ra"

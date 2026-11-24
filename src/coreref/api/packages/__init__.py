@@ -7,7 +7,6 @@ Use ``Ref`` for concrete versions and ``Requirement`` for dependency ranges.
 """
 
 from .catalog import Catalog
-from .query import SearchQuery
 from .records import (
     JSON,
     ConfiguredPackage,
@@ -31,5 +30,4 @@ __all__ = [
     "Record",
     "Ref",
     "Requirement",
-    "SearchQuery",
 ]

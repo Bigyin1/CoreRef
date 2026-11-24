@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from coreref.api.build import Route, Stage, StageSpec, StageTransform
 from coreref.api.packages import JSON
@@ -27,7 +27,7 @@ class _Parameters(TypedDict, total=False):
     files: dict[str, str]
     inputs: tuple[str, ...]
     configuration: dict[str, JSON]
-    cache: bool
+    execution: Literal["nix", "relaxed", "host"]
 
 
 MODULES: dict[str, tuple[str, ...]] = {{ modules }}
@@ -75,7 +75,7 @@ def _stage(
         files={**stage.files, **{name: files[role] for name, role in roles.items()}},
         configuration={**stage.configuration, **settings.get("configuration", {})},
         inputs=settings.get("inputs", stage.inputs),
-        cache=settings.get("cache", stage.cache),
+        execution=settings.get("execution", stage.execution),
     )
 
 
