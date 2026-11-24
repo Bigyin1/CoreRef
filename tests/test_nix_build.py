@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 from shlex import quote
+from socket import create_server
 
 import pytest
 
@@ -63,46 +64,64 @@ def test_python_stages_are_native_derivations_with_selected_input_outputs(tmp_pa
 def test_host_launcher_runs_the_tool_from_path_with_the_pinned_version(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    tools = tmp_path / "installed tools"
-    tools.mkdir()
-    executable = tools / "fixture-synth"
-    executable.write_text(
-        """#!/bin/sh
-case "$1" in
-    -version) printf '%s' 'fixture-synth 24.1' ;;
-    run) printf '%s' "$FIXTURE_LICENSE_ENV" ;;
-    *) exit 2 ;;
-esac
-""",
-        encoding="utf-8",
-    )
-    executable.chmod(0o755)
-    wrapper = tmp_path / "tool-env"
-    wrapper.write_text(
-        f'#!/bin/sh\nexport PATH={quote(str(tools))}:"$PATH"\n'
-        'export FIXTURE_LICENSE_ENV=loaded\nexec "$@"\n',
-        encoding="utf-8",
-    )
-    wrapper.chmod(0o755)
-    manifest = tmp_path / "manifest.yml"
-    document = 'ref: demo.host/1.0\ntools:\n  fixture-synth:\n    version: "24.1"\n'
-    manifest.write_text(document, encoding="utf-8")
-    project = Project(tmp_path, Manifest.load(manifest), Catalog(host_launcher=(str(wrapper),)))
-    project.route = Route([StageSpec(name="host", outputs=("host.txt",))])
-    project.stages = {
-        "host": Stage(transform=stages.host, execution="host", files={manifest.name: manifest})
-    }
-    assert project.build("host")["host.txt"].read_text() == "loaded"
+    with create_server(("127.0.0.1", 0)) as server:
+        project = _host_project(tmp_path, server.getsockname()[1])
+        assert project.build("host")["host.txt"].read_text() == "loaded"
+        server.settimeout(5)
+        connection, _ = server.accept()
+        with connection:
+            assert connection.recv(1) == b"L"
     log = project.build_dir / "host.log"
     assert log.read_text() == "ran on host"
     log.unlink()
     assert project.build("host")["host.txt"].read_text() == "loaded"
     assert not log.exists()
 
-    manifest.write_text(document.replace("24.1", "24.2"), encoding="utf-8")
+    manifest = tmp_path / "manifest.yml"
+    manifest.write_text(manifest.read_text().replace("24.1", "24.2"), encoding="utf-8")
     with pytest.raises(CatalogError, match=r"Stage demo\.host-host failed"):
         project.build("host")
     assert "fixture-synth must be '24.2'" in capfd.readouterr().err
+
+
+def _host_project(directory: Path, port: int) -> Project:
+    tools = directory / "installed tools"
+    tools.mkdir()
+    executable = tools / "fixture-synth"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import os
+import socket
+import sys
+
+if sys.argv[1:] == ["-version"]:
+    print("fixture-synth 24.1")
+elif sys.argv[1:] == ["run"]:
+    with socket.create_connection(("127.0.0.1", int(os.environ["FIXTURE_LICENSE_PORT"])),
+                                  timeout=5) as server:
+        server.sendall(b"L")
+    print("loaded", end="")
+else:
+    sys.exit(2)
+""",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    wrapper = directory / "tool-env"
+    wrapper.write_text(
+        f'#!/bin/sh\nexport PATH={quote(str(tools))}:"$PATH"\n'
+        f'export FIXTURE_LICENSE_PORT={port}\nexec "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    manifest = directory / "manifest.yml"
+    manifest.write_text("ref: demo.host/1.0\ntools: [fixture-synth/24.1]\n", encoding="utf-8")
+    project = Project(directory, Manifest.load(manifest), Catalog(host_launcher=(str(wrapper),)))
+    project.route = Route([StageSpec(name="host", outputs=("host.txt",))])
+    project.stages = {
+        "host": Stage(transform=stages.host, execution="host", files={manifest.name: manifest})
+    }
+    return project
 
 
 def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:

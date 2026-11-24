@@ -35,7 +35,8 @@ class Manifest(BaseModel):
 
     Only ``ref`` is required. A dependency can be a reference, a
     version range, or a named configuration with options. The ``tools``
-    map accepts named image digests and command version pins. ``files``
+    field accepts named digests and command pins or a list of ``name/version``
+    references and named mappings. ``files``
     maps logical artifact names to filesystem paths rooted at the project
     when relative. ``payload`` is optional flow metadata.
     """

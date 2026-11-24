@@ -40,23 +40,30 @@
 
 ## Инструменты из Environment Modules
 
-Воркер предоставляет установленный инструмент и доступ к лицензии. В проекте
-достаточно указать версию.
+В `manifest.yml` можно указать установленные на воркере инструменты в виде
+`имя/версия`. Поле `tools` находится рядом с зависимостями проекта.
 
 ```yaml
+dependencies:
+  - demo.cpu/1.0
 tools:
-  synth:
-    version: "24.1"
+  - genus/24.1
+  - innovus/24.1
 ```
+
+Для OCI-образа или другого имени исполняемого файла используйте развёрнутую
+запись с `image` или `command`. Её можно включить в этот же список. Карта
+`tools` с развёрнутыми записями также поддерживается.
 
 Для стадии с `execution="host"` загрузите модуль перед запуском Flow. Можно также
 передать `Catalog(host_launcher=("/opt/eda/load-tool",))` и выполнить загрузку
 в этой обёртке. Она инициализирует Modules для своего shell, вызывает
-`module load synth/24.1` и запускает переданную команду через `exec "$@"`.
-Python из Nix получит настроенные `PATH` и переменные лицензирования. [Environment Modules](https://modules.readthedocs.io/en/stable/module.html#package-initialization)
+`module load genus/24.1` и запускает переданную команду через `exec "$@"`.
+Python из Nix получит настроенные `PATH` и переменные лицензирования. Стадия
+использует сеть воркера для соединения с сервером лицензий. [Environment Modules](https://modules.readthedocs.io/en/stable/module.html#package-initialization)
 
 Добавьте `manifest.yml` во входы стадии и проверьте установленную версию внутри
-функции через `Manifest.load(work / "manifest.yml").command("synth")`. Эта
+функции через `Manifest.load(work / "manifest.yml").command("genus")`. Эта
 проверка по умолчанию вызывает `--version`. Если у инструмента другой флаг, Flow
 может задать его через `version_args=("-version",)`. Изменение версии в манифесте
 меняет ключ сборки. Если стадию нужно выполнять при каждом вызове, задайте
