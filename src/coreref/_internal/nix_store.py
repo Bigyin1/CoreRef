@@ -103,14 +103,15 @@ class NixStore:
         self.launcher = launcher
         self._package_paths: dict[str, Path] = {}
 
-    def command(self, *arguments: str) -> str:
+    def command(self, *arguments: str, stdin: str | None = None) -> str:
         binary = which("nix")
         if binary is None:
             raise CatalogError("Install Nix and make nix available on PATH")
         result = subprocess.run(  # noqa: S603 - argument vector for the configured Nix executable.
             [binary, "--extra-experimental-features", "nix-command flakes", *arguments],
+            input=stdin,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=False,
         )
         if result.returncode:
@@ -135,36 +136,28 @@ class NixStore:
         )
 
     def source(self, directory: Path, name: str, *, tracked: bool = False) -> Path:
-        """Snapshot a project or Python package with a stable store name."""
+        """Import a project or Python package with a stable store name."""
         directory = directory.resolve(strict=True)
         files = _tracked_files(directory) if tracked else None
-        with TemporaryDirectory() as temporary:
-            selection = ""
-            if files is not None:
-                selected = Path(temporary) / "sources.json"
-                selected.write_text(json.dumps(files, ensure_ascii=False), encoding="utf-8")
-                selection = str(selected)
-            return Path(
-                json.loads(
-                    self.command(
-                        "eval",
-                        "--impure",
-                        "--json",
-                        "--file",
-                        str(_RECIPES / "source.nix"),
-                        "--argstr",
-                        "directory",
-                        str(directory),
-                        "--argstr",
-                        "name",
-                        name,
-                        "--argstr",
-                        "selection",
-                        selection,
-                        "source",
-                    )
-                )
+        return Path(
+            self.command(
+                "eval",
+                "--impure",
+                "--raw",
+                "--file",
+                str(_RECIPES / "source.nix"),
+                "--argstr",
+                "directory",
+                str(directory),
+                "--argstr",
+                "name",
+                name,
+                "--arg-from-stdin",
+                "selection",
+                "source",
+                stdin=json.dumps(files, ensure_ascii=False),
             )
+        )
 
     def prefetch(self, reference: str) -> tuple[Path, dict[str, JSON]]:
         """Fetch a source tree and capture the locked Nix fetcher attributes."""
@@ -177,24 +170,40 @@ class NixStore:
             "{ locked }: { source = (builtins.fetchTree (builtins.fromJSON locked)).outPath; }"
         )
         return Path(
-            json.loads(
-                self.command(
-                    "eval",
-                    "--impure",
-                    "--json",
-                    "--expr",
-                    expression,
-                    "--argstr",
-                    "locked",
-                    json.dumps(dict(locked)),
-                    "source",
-                )
+            self.command(
+                "eval",
+                "--impure",
+                "--raw",
+                "--expr",
+                expression,
+                "--arg-from-stdin",
+                "locked",
+                "source",
+                stdin=json.dumps(dict(locked)),
             )
         )
 
     def add(self, path: Path, name: str) -> Path:
         """Import bytes as a standalone content-addressed store object."""
         return Path(self.command("store", "add", "--name", name, "--", str(path)))
+
+    def add_text(self, name: str, contents: str) -> Path:
+        """Write text as a store object independent of paths mentioned in its contents."""
+        return Path(
+            self.command(
+                "eval",
+                "--raw",
+                "--expr",
+                "{ name, contents }: { file = builtins.toFile name contents; }",
+                "--argstr",
+                "name",
+                name,
+                "--arg-from-stdin",
+                "contents",
+                "file",
+                stdin=contents,
+            )
+        )
 
     def upload(self, paths: Sequence[Path]) -> None:
         if self.cache is None:
@@ -228,10 +237,7 @@ class NixStore:
             for name, invocation in stages.items()
         }
         targets = self._targets(stages, selected)
-        with TemporaryDirectory(prefix="nix-plan-", dir=directory) as temporary:
-            plan_file = Path(temporary) / "plan.json"
-            plan_file.write_text(json.dumps(plan, allow_nan=False), encoding="utf-8")
-            results = self._build(targets, plan_file, directory, build_missing)
+        results = self._build(targets, json.dumps(plan, allow_nan=False), directory, build_missing)
         return {
             name: results[invocation.name][output_name(index)] / name
             for invocation in stages.values()
@@ -260,7 +266,7 @@ class NixStore:
     def _build(
         self,
         targets: tuple[str, ...],
-        plan: Path,
+        plan: str,
         directory: Path,
         build_missing: bool,
     ) -> dict[str, dict[str, Path]]:
@@ -270,23 +276,29 @@ class NixStore:
         if self.cache is not None:
             options += ("--extra-substituters", self.cache)
         first = targets[0].partition("^")[0]
+        # Read one expression for all targets and keep interpolation markers as data.
+        plan_literal = json.dumps(plan, ensure_ascii=False).replace("${", r"\${")
+        expression = (
+            f"let plan = builtins.fromJSON {plan_literal}; in "
+            "{ stageFile, pythonRoot }: import (/. + stageFile) { inherit plan pythonRoot; }"
+        )
         data = json.loads(
             self.command(
                 "build",
-                "--impure",
                 "--json",
                 "--out-link",
                 str(directory / f".nix-{first}"),
                 "--file",
-                str(_RECIPES / "stage.nix"),
+                "-",
                 *options,
                 "--argstr",
-                "planFile",
-                str(plan),
+                "stageFile",
+                str(_RECIPES / "stage.nix"),
                 "--argstr",
                 "pythonRoot",
                 str(self.runtime) if self.python is not None else "",
                 *targets,
+                stdin=expression,
             )
         )
         return {

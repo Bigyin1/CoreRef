@@ -1,7 +1,6 @@
 # Bind the Python plan to native derivation dependencies and named outputs.
-{ planFile, pythonRoot }:
+{ plan, pythonRoot }:
 let
-  plan = builtins.fromJSON (builtins.readFile planFile);
   python = if pythonRoot == "" then import ./runtime.nix else builtins.storePath pythonRoot;
   input =
     _: file:

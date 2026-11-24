@@ -6,7 +6,6 @@ import json
 from collections.abc import Mapping
 from functools import cached_property
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
 
 from frozendict import deepfreeze, frozendict
@@ -119,7 +118,7 @@ class Catalog:
             raise NotFound(f"No available source matches {requirement}")
         return max(matching, key=lambda ref: (matching[ref], str(ref)))
 
-    def _snapshot(self, ref: Ref) -> tuple[Path, dict[str, JSON] | None]:
+    def _import_source(self, ref: Ref) -> tuple[Path, dict[str, JSON] | None]:
         location = self._locations.get(ref)
         if isinstance(location, Path):
             name = f"coreref-source-{ref.package_name}"
@@ -169,7 +168,7 @@ class Catalog:
             restored = (
                 self._nix.fetch(cast(Mapping[str, JSON], source.origin))
                 if source.origin is not None
-                else self._snapshot(ref)[0]
+                else self._import_source(ref)[0]
             )
             if restored != locked:
                 message = f"Source for {ref} changed. Restore {locked} or run lock."
@@ -182,7 +181,7 @@ class Catalog:
         published = self._published(ref)
         if published is not None:
             return published
-        path, origin = self._snapshot(ref)
+        path, origin = self._import_source(ref)
         manifest = Manifest.load(path / "manifest.yml")
         if Ref(manifest.ref) != ref:
             raise InvalidPackage(f"{path} declares {manifest.ref}, expected {ref}")
@@ -214,12 +213,11 @@ class Catalog:
             "ref": manifest.ref,
             "source": metadata.model_dump(mode="json", exclude_defaults=True),
         }
-        with TemporaryDirectory() as temporary:
-            index = Path(temporary) / "release.json"
-            index.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
-            index_path = self._nix.add(index, "coreref-release.json")
-            self._nix.upload((source, *outputs.values()))
-            self._nix.upload((index_path,))
+        index_path = self._nix.add_text(
+            "coreref-release.json", json.dumps(document, sort_keys=True)
+        )
+        self._nix.upload((source, *outputs.values()))
+        self._nix.upload((index_path,))
         return index_path
 
     def _store_file(self, path: Path) -> Path:

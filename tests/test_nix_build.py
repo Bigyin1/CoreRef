@@ -130,7 +130,10 @@ def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:
     (checkout / ".gitignore").write_text(".build/\n.env\n", encoding="utf-8")
     (checkout / ".env").write_text("untracked private config", encoding="utf-8")
     manifest = checkout / "manifest.yml"
-    manifest.write_text("ref: demo.nix/1.0\ntype: rtl\npayload: {module: demo}\n", encoding="utf-8")
+    manifest.write_text(
+        f"ref: demo.nix/1.0\ntype: rtl\npayload: {{module: demo, mask: {2**100}}}\n",
+        encoding="utf-8",
+    )
     (checkout / "input.txt").write_text("published", encoding="utf-8")
 
     cache = (tmp_path / "cache").as_uri()
@@ -144,9 +147,11 @@ def test_release_index_can_retrieve_one_output(tmp_path: Path) -> None:
     assert consumer.get_outputs(info, ("small.txt",))["small.txt"].read_text() == "published"
     assert set(info.outputs) == {"lockfile", "small.txt", "other.txt"}
     assert info.kind == "rtl"
-    assert info.payload == {"module": "demo"}
+    assert info.payload == {"module": "demo", "mask": 2**100}
     assert info.commit
-    assert consumer._nix.command("path-info", "--store", cache, str(index)) == str(index)
+    assert consumer._nix.command("path-info", "--store", cache, "--recursive", str(index)) == str(
+        index
+    )
     assert not (info.source / ".env").exists()
     assert project.publish("prepare") == index
 

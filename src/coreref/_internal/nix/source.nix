@@ -2,10 +2,10 @@
 {
   directory,
   name,
-  selection ? "",
+  selection ? "null",
 }:
 let
-  tracked = if selection == "" then null else builtins.fromJSON (builtins.readFile selection);
+  tracked = builtins.fromJSON selection;
 in
 {
   source = builtins.path {

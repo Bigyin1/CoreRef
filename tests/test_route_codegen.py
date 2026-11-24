@@ -35,7 +35,7 @@ modules:
       transform: demo_transforms:read
       outputs: [clean.txt]
       files: {raw.txt: project-input}
-      configuration: {prefix: "name: "}
+      configuration: {prefix: 'Имя "${RTL_ROOT}": '}
   extra:
     - name: upper
       transform: demo_transforms:upper
@@ -61,7 +61,9 @@ modules:
     source.write_text("   core ref \n", encoding="utf-8")
     project.stages = loaded["bind_stages"](project, project.route, files={"project-input": source})
     assert project.route.order == ("read", "upper")
-    assert project.build("upper")["result.txt"].read_text(encoding="utf-8") == "NAME: CORE REF"
+    assert project.build("upper")["result.txt"].read_text(encoding="utf-8") == (
+        'ИМЯ "${RTL_ROOT}": CORE REF'
+    )
 
 
 def test_generation_rejects_invalid_python_symbols(tmp_path: Path) -> None:
