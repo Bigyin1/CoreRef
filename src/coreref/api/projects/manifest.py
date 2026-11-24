@@ -14,7 +14,7 @@ from typing import cast
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
 
-from ..._internal.environment import ImagePin, ToolPins, checked_command
+from ..._internal.environment import CommandPin, EdaToolPins, ImagePin, checked_command
 from ..errors import InvalidPackage
 from ..packages.records import JSON, Dependency, LocalRecord, PackageInput, Ref, _parse_dependency
 
@@ -34,11 +34,11 @@ class Manifest(BaseModel):
     """Validate project declarations shared by CoreRef and a flow.
 
     Only ``ref`` is required. A dependency can be a reference, a
-    version range, or a named configuration with options. The ``tools``
-    field accepts named digests and command pins or a list of ``name/version``
-    references and named mappings. ``files``
-    maps logical artifact names to filesystem paths rooted at the project
-    when relative. ``payload`` is optional flow metadata.
+    version range, or a named configuration with options. ``eda_tools``
+    accepts image digests, command pins and short ``name/version`` references
+    for EDA tools. ``build_tools`` pins ordinary commands such as the C++
+    compiler and Make. ``files`` maps logical artifacts to filesystem paths.
+    ``payload`` is optional flow metadata.
     """
 
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -48,7 +48,8 @@ class Manifest(BaseModel):
     release_through: str | None = Field(default=None, min_length=1)
     dependencies: list[str | _ConfiguredDependency] = Field(default_factory=list)
     files: dict[str, str] = Field(default_factory=dict)
-    tools: ToolPins = Field(default_factory=dict)
+    eda_tools: EdaToolPins = Field(default_factory=dict)
+    build_tools: dict[str, CommandPin] = Field(default_factory=dict)
     options: dict[str, list[_OptionValue]] = Field(default_factory=dict)
     payload: JsonValue = None
 
@@ -84,17 +85,17 @@ class Manifest(BaseModel):
             )
 
     def image(self, name: str) -> str | None:
-        """Return the digest-pinned OCI image for a tool, if configured.
+        """Return the digest-pinned OCI image for an EDA tool, if configured.
 
         An absent tool or a local command pin yields ``None``.
         """
-        pin = self.tools.get(name)
+        pin = self.eda_tools.get(name)
         return pin.image if isinstance(pin, ImagePin) else None
 
     def command(
         self, name: str, *, version_args: tuple[str, ...] = ("--version",)
     ) -> tuple[str, str]:
-        """Find a pinned local command and verify its reported version.
+        """Find a pinned command in ``eda_tools`` or ``build_tools``.
 
         Resolve the configured command, or the tool name by default, on
         ``PATH`` and run it with the flow's ``version_args``. Return the executable path
@@ -102,7 +103,8 @@ class Manifest(BaseModel):
         ``FileNotFoundError``. A missing pin or mismatched version raises
         ``ValueError``.
         """
-        return checked_command(self.tools, name, version_args=version_args)
+        pin = self.eda_tools.get(name) or self.build_tools.get(name)
+        return checked_command(pin, name, version_args=version_args)
 
     def local_record(self, source: Path) -> LocalRecord:
         """Create a working publication record for the supplied checkout.
@@ -151,4 +153,11 @@ class Manifest(BaseModel):
         requirements = self.requirements
         if len({ref.package_name for ref in requirements}) != len(requirements):
             raise ValueError("Duplicate package in plain dependencies")
+        return self
+
+    @model_validator(mode="after")
+    def _unique_tools(self) -> Manifest:
+        if shared := self.eda_tools.keys() & self.build_tools.keys():
+            names = ", ".join(sorted(shared))
+            raise ValueError(f"Tool names must be unique across eda_tools and build_tools: {names}")
         return self

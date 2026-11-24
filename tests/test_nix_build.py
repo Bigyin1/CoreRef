@@ -115,7 +115,7 @@ else:
     )
     wrapper.chmod(0o755)
     manifest = directory / "manifest.yml"
-    manifest.write_text("ref: demo.host/1.0\ntools: [fixture-synth/24.1]\n", encoding="utf-8")
+    manifest.write_text("ref: demo.host/1.0\neda_tools: [fixture-synth/24.1]\n", encoding="utf-8")
     project = Project(directory, Manifest.load(manifest), Catalog(host_launcher=(str(wrapper),)))
     project.route = Route([StageSpec(name="host", outputs=("host.txt",))])
     project.stages = {

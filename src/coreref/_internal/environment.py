@@ -46,18 +46,19 @@ def _parse_tool_list(value: object) -> object:
     return pins
 
 
-_NamedToolPins = dict[str, ImagePin | CommandPin]
-ToolPins = Annotated[
-    _NamedToolPins,
+_NamedEdaTools = dict[str, ImagePin | CommandPin]
+EdaToolPins = Annotated[
+    _NamedEdaTools,
     BeforeValidator(
         _parse_tool_list,
-        json_schema_input_type=_NamedToolPins | list[str | _NamedToolPins],
+        json_schema_input_type=_NamedEdaTools | list[str | _NamedEdaTools],
     ),
 ]
 
 
-def checked_command(pins: ToolPins, name: str, *, version_args: tuple[str, ...]) -> tuple[str, str]:
-    pin = pins.get(name)
+def checked_command(
+    pin: ImagePin | CommandPin | None, name: str, *, version_args: tuple[str, ...]
+) -> tuple[str, str]:
     if not isinstance(pin, CommandPin):
         raise ValueError(f"Declare a version for tool {name!r} in manifest.yml")
     command = pin.command or name
