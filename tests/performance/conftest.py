@@ -23,6 +23,4 @@ def registry(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Registry]:
 def report_environment(request: pytest.FixtureRequest) -> None:
     if "benchmark" in request.fixturenames:
         benchmark: BenchmarkFixture = request.getfixturevalue("benchmark")
-        benchmark.extra_info.update(
-            {name: version(name) for name in ("conan", "coreref", "networkx")}
-        )
+        benchmark.extra_info.update({name: version(name) for name in ("conan", "coreref")})

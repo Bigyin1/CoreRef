@@ -17,7 +17,6 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
         from coreref import api
 
         assert "pydantic" not in sys.modules
-        assert "networkx" not in sys.modules
         assert "conan" not in sys.modules
 
         from coreref.api import errors
@@ -28,7 +27,6 @@ def test_public_models_import_independently_of_conan(catalog: Catalog) -> None:
 
         from coreref.api.packages import records
 
-        assert "networkx" not in sys.modules
         assert "pydantic" not in sys.modules
 
         offline = records.Ref("public.offline/v1")

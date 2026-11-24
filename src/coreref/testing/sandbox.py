@@ -5,10 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from functools import cached_property
+from graphlib import CycleError, TopologicalSorter
 from itertools import count
 from pathlib import Path
-
-import networkx as nx
 
 from .._internal.editor import ManifestFile
 from ..api.packages.catalog import Catalog
@@ -125,17 +124,17 @@ class Sandbox:
         are rejected before publication. Conan errors can leave earlier packages
         published; this helper does not provide a transaction or rollback.
         """
-        graph: nx.DiGraph[str] = nx.DiGraph()
-        graph.add_nodes_from(records)
-        graph.add_nodes_from(dependencies)
+        sorter = TopologicalSorter(dict.fromkeys(records, ()))
+        unknown = dependencies.keys() - records.keys()
         for name, requirements in dependencies.items():
-            graph.add_edges_from((dep, name) for dep in requirements if isinstance(dep, str))
-        unknown = set(graph) - records.keys()
+            predecessors = tuple(dep for dep in requirements if isinstance(dep, str))
+            unknown.update(set(predecessors) - records.keys())
+            sorter.add(name, *predecessors)
         if unknown:
             raise ValueError(f"Unknown fixture packages: {', '.join(sorted(unknown))}")
         try:
-            order = tuple(nx.topological_sort(graph))
-        except nx.NetworkXUnfeasible as error:
+            order = tuple(sorter.static_order())
+        except CycleError as error:
             raise ValueError("Fixture package dependencies contain a cycle") from error
         published: dict[str, InstalledRecord] = {}
         for name in order:

@@ -2,25 +2,14 @@
 
 from __future__ import annotations
 
-from edify import RegexBuilder
+import re
 
 from ..api.errors import InvalidPackage
 from ..api.packages.records import Ref
 
-_ALPHANUMERIC = RegexBuilder().any_of().range("a", "z").range("0", "9").end()
-_NAME_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).any_of_chars("_-").end()
-_VERSION_START = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).char("_").end()
-_VERSION_CHARACTER = RegexBuilder().any_of().subexpression(_ALPHANUMERIC).any_of_chars("_+.-").end()
-
-NAME_PART = RegexBuilder().one_or_more().subexpression(_NAME_CHARACTER).to_regex()
-VERSION = (
-    RegexBuilder()
-    .subexpression(_VERSION_START)
-    .between(1, 100)
-    .subexpression(_VERSION_CHARACTER)
-    .to_regex()
-)
-REVISION = RegexBuilder().one_or_more().subexpression(_ALPHANUMERIC).to_regex()
+NAME_PART = re.compile(r"[a-z0-9_-]+")
+VERSION = re.compile(r"[a-z0-9_][a-z0-9_+.-]{1,100}")
+REVISION = re.compile(r"[a-z0-9]+")
 _MAX_NAME_LENGTH = 101
 _MAX_REFERENCE_LENGTH = 200
 
