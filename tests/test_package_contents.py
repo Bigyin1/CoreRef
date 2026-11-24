@@ -15,7 +15,7 @@ from coreref.api.packages.catalog import Catalog
 from coreref.api.packages.query import SearchQuery
 from coreref.api.packages.records import InstalledRecord, LocalRecord, Record, Ref
 from coreref.api.projects.graph import Graph
-from coreref.testing import LocalServer
+from coreref.testing import LocalServer, trace_operations
 from tests.test_models import UserPayload
 
 
@@ -84,7 +84,9 @@ def test_exported_metadata_has_digests_and_no_artifact_bytes(
     relocated.write_bytes(b"new contents")
     second = catalog.publish(LocalRecord(ref, files={"result.bin": relocated}))
     assert first.ref != second.ref
-    assert catalog.get(first.ref).files["result.bin"].read_bytes() == artifact.read_bytes()
+    with trace_operations() as trace:
+        assert catalog.get(first.ref).files["result.bin"].read_bytes() == artifact.read_bytes()
+    assert trace.installs == trace.recipe_reads == 1
     assert second.files["result.bin"].read_bytes() == b"new contents"
 
 

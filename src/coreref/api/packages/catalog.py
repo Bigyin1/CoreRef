@@ -81,7 +81,7 @@ class Catalog:
         Conan may fetch the recipe from the configured remote. File names and
         source availability come from metadata. To get paths, call ``get``.
         """
-        return self._package(ref).info()
+        return self._package(ref).recipe().record
 
     def get(self, ref: Ref, *, with_sources: bool = False) -> InstalledRecord:
         """Install packaged files and return their local paths.

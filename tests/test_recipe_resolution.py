@@ -13,7 +13,7 @@ from coreref.api.packages.catalog import Catalog
 from coreref.api.packages.query import SearchQuery
 from coreref.api.packages.records import InstalledRecord, LocalRecord, Ref
 from coreref.api.projects.graph import Graph
-from coreref.testing import LocalServer
+from coreref.testing import LocalServer, trace_operations
 
 
 @pytest.fixture
@@ -56,16 +56,16 @@ def test_fresh_graph_reads_recipes_from_native_paths(
     ref = Ref(str(tree[-1].ref))
     local = LocalRecord(Ref("soc.consumer/1.0"))
     with (
-        patch.object(reader._client, "run", wraps=reader._client.run) as commands,
         patch.object(reader._client, "download_recipe", side_effect=AssertionError("Reload")),
+        trace_operations() as trace,
     ):
         graph = Graph(reader, ref) if published else Graph(reader, local, dependencies=(ref,))
         assert all(record in graph.records for record in tree)
-        assert commands.call_count == 1
-        assert commands.call_args.args[:2] == ("graph", "info")
-        assert "--update" not in commands.call_args.args
         assert graph.get(tuple(record.ref for record in tree)) == tree
-        assert commands.call_count == 1
+    (command,) = trace.commands
+    assert command[:2] == ("graph", "info")
+    assert "--update" not in command
+    assert trace.recipe_reads == len(tree)
 
 
 def test_unpinned_graph_resolves_before_metadata_reads(

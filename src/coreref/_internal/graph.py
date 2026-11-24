@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import cached_property
-from pathlib import Path
 
 from ..api.errors import InvalidPackage
 from ..api.packages.records import LocalRecord, Record, Ref
@@ -58,13 +57,6 @@ class ResolvedConanGraph:
             for node in self.native.nodes
             if node.recipe == "Editable"
         )
-
-    def recipe_directory(self, ref: Ref) -> Path:
-        """Return the recipe folder already loaded for this exact graph node."""
-        directory = self.package(ref).recipe_folder
-        if directory is None:
-            raise InvalidPackage(f"Conan did not provide the recipe directory for {ref}")
-        return Path(directory)
 
     def contains(self, ref: Ref) -> bool:
         if ref.revision is not None:

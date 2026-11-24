@@ -260,26 +260,6 @@ Git-хелперы поддерживают `FixtureFile(content, mode=0o755)` �
 сохраняется. `LocalServer.configure()` по умолчанию разрешает локальные Git URL;
 для явного запрета передайте `local_sources=False` в новом cache.
 
-### Подключение к pytest
-
-В `conftest.py` зависимого проекта достаточно указать:
-
-```python
-pytest_plugins = ["coreref.testing.pytest_plugin"]
-```
-
-Плагин предоставляет function-scoped фикстуры `coreref_environment`, `coreref_server`,
-`coreref_catalog`, `coreref_project` (последний создаёт `tmp_path/manifest.yml`). Они используют
-один сервер и один `env.catalog` на тест; `coreref_catalog is coreref_environment.catalog`.
-Сервер автоматически освобождается после ошибки. Создание манифеста через
-`coreref_project` само по себе не настраивает Conan-клиент.
-Окружение настраивается через обычную фикстуру `coreref_options` в `conftest.py`.
-По умолчанию она возвращает пустой словарь. CoreRef не регистрирует и не обрабатывает
-собственных маркеров; группировку тестов определяет сам flow.
-Плагин подключается явно и не меняет cwd; Conan workspace обнаруживается относительно
-директории, выбранной тестом через `monkeypatch.chdir()`. Установка `coreref[testing]`
-включает pytest; сам `environment()` по-прежнему можно использовать без плагина.
-
 ### Обычные проекты рядом с тестом
 
 Для больших сценариев можно хранить проекты обычными директориями вместо словарей
@@ -335,8 +315,8 @@ Git-метаданные исходных репозиториев не пере
 перезаписывается. Манифесты могут иметь любой формат: helper их не разбирает
 и автоматически не публикует пакеты.
 
-В pytest можно воспользоваться тем же методом на готовой фикстуре:
-`coreref_environment.load_projects(source, repositories=("stdlib", "cpu"))`.
+Для уже созданного окружения используйте
+`env.load_projects(source, repositories=("stdlib", "cpu"))`.
 Workspace создаётся над рабочими проектами через
 `env.workspace(directory=env.projects)`. Команды flow запускаются из
 `env.projects / "soc"`, чтобы Conan обнаруживал этот workspace.
@@ -373,45 +353,7 @@ URL, credentials и опубликованных пакетов. `stop()` и `st
 `env.diagnostics()` возвращает пути рабочих проектов, созданных Conan home,
 текущего server log и список успешно опубликованных через эти клиенты Ref.
 Он не обращается к Conan или сети и не включает password или содержимое конфигурации.
-Pytest-плагин автоматически добавляет секцию `CoreRef environment` при ошибках
-setup, выполнения теста и teardown, если окружение уже было создано. Директории
-остаются под управлением pytest/tmp_path; эти хелперы не включают отдельную очистку
-или архивирование диагностических файлов.
-
-### Настройки pytest-окружения
-
-Переопределите фикстуру в общем `conftest.py`:
-
-```python
-from pathlib import Path
-
-import pytest
-from coreref.testing.pytest_plugin import EnvironmentOptions
-
-
-@pytest.fixture
-def coreref_options() -> EnvironmentOptions:
-    return {
-        "projects": Path("tests/test_projects"),
-        "repositories": ("cpu", "stdlib"),
-        "namespace": "soc",
-        "timeout": 0.2,
-    }
-```
-
-`projects` — путь к дереву исходных проектов; относительные пути считаются от корня
-pytest (`config.rootpath`, конфигурация или `--rootdir`). Это одна база для тестов из
-разных поддиректорий. Абсолютные пути также поддерживаются. Без `projects` рабочее
-дерево не копируется. `repositories` перечисляет проекты, которым нужны Git-upstreams;
-этот параметр требует `projects`.
-
-Все поля необязательны: namespace по умолчанию `test`, timeout — 5 секунд,
-repositories — пустой tuple. `EnvironmentOptions` описывает тип обычного словаря,
-отдельного объекта конфигурации создавать не нужно. Плагин не меняет возвращённый
-словарь, поэтому настройки можно также предоставлять через session-scoped фикстуру.
-Для отдельных сценариев используйте обычную параметризацию `coreref_options` через
-`@pytest.fixture(params=...)` или переопределите её в модуле тестов. Collection-хуки
-для настройки окружения не нужны.
+Для отчёта о сбое вызовите `env.diagnostics()` в тесте или его фикстуре.
 
 ### Счётчики операций
 
