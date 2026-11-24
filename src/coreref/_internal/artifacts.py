@@ -129,12 +129,12 @@ class Producer(BaseModel):
 
     ref: str
     prerequisites: tuple[str, ...] = ()
-    outputs: tuple[str, ...] | None = None
+    outputs: tuple[str, ...] = ()
 
     @field_validator("outputs")
     @classmethod
-    def _check_outputs(cls, values: tuple[str, ...] | None) -> tuple[str, ...] | None:
-        for value in values or ():
+    def _check_outputs(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        for value in values:
             _check_output_name(value)
         return values
 
@@ -147,7 +147,4 @@ class Producer(BaseModel):
         return self
 
     def _document(self) -> JSON:
-        value: dict[str, JSON] = {"ref": self.ref, "prerequisites": self.prerequisites}
-        if self.outputs is not None:
-            value["outputs"] = self.outputs
-        return value
+        return {"ref": self.ref, "prerequisites": self.prerequisites, "outputs": self.outputs}

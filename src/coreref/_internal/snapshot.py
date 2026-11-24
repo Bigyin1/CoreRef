@@ -119,9 +119,7 @@ class Snapshot:
             for stage, inputs in stages.items()
             for name, path in inputs.files.items()
         )
-        if project._producer_handler is not None or any(
-            stage.transform for stage in stages.values()
-        ):
+        if any(stage.transform is not None for stage in stages.values()):
             files.update(
                 (f"producer/{name}", path if path.is_file() else None)
                 for name, path in producer_files(project.source).items()

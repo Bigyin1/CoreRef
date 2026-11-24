@@ -23,7 +23,7 @@ name = "build-tool"
 source = {registry = "https://example.invalid/simple"}
 """
     )
-    return ProducerRuntime(tmp_path, "flow.tools:run_stage")
+    return ProducerRuntime(tmp_path)
 
 
 def test_runtime_accepts_an_exact_python_pin_with_registry_dependencies(

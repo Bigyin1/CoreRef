@@ -27,35 +27,25 @@ _PRODUCER_TEMPLATE = _RECIPE_ENV.get_template("producer.py.j2")
 class RecipeStage:
     spec: StageSpec
     inputs: tuple[str, ...]
-    command: tuple[str, ...] = ()
+    transform: str
     configuration: Mapping[str, JSON] = field(default_factory=dict)
-    transform: str | None = None
     files: Mapping[str, Path] = field(default_factory=dict)
     artifacts: Bindings = field(default_factory=dict)
 
-
-@dataclass(frozen=True)
-class _RecipeDependencies:
-    producers: Mapping[str, Producer]
-    runtime: Ref | None
+    @property
+    def recipe_outputs(self) -> tuple[str, ...]:
+        outputs = self.spec.recipe_outputs
+        return self.spec.outputs if outputs is None else outputs
 
 
 class ProducerRecipes:
-    """Package prepared inputs, stage groups, and a self-contained Python runner."""
+    """Package prepared stage groups and their locked Python environment."""
 
-    def __init__(
-        self,
-        catalog: Catalog,
-        prepared: Path,
-        *,
-        runner: Path | ProducerRuntime,
-        configuration: Mapping[str, JSON],
-    ) -> None:
+    def __init__(self, catalog: Catalog, prepared: Path, *, runtime: ProducerRuntime) -> None:
         self._catalog = catalog
         self._variants = catalog._variants
         self._prepared = prepared
-        self._runner = runner
-        self._configuration = dict(configuration)
+        self._runtime = runtime
 
     def publish(
         self,
@@ -63,35 +53,27 @@ class ProducerRecipes:
         stages: tuple[RecipeStage, ...],
         *,
         members: Mapping[str, tuple[str, ...]],
-        outputs: Mapping[str, tuple[str, ...]],
-        external: Bindings,
     ) -> dict[str, Producer]:
         """Publish complete groups from topologically ordered, prepared stages."""
-        component = fingerprint(project.package_name)
-        published: dict[str, Producer] = {}
         plan = _groups(stages, members)
-        runtime = self._publish_runtime() if plan else None
+        if not plan:
+            return {}
+        component = fingerprint(project.package_name)
+        runtime = self._publish_runtime()
+        published: dict[str, Producer] = {}
         for group, dependencies, commands in plan:
             ref = Ref(f"{PRODUCER_NAMESPACE}.{component}-{group}/{project.version}")
-            bindings = _bindings(commands, published, outputs, external)
+            bindings = _bindings(commands, published)
             required = {published[name].ref: published[name] for name in dependencies}
             required.update((producer.ref, producer) for producer, _ in bindings.values())
-            if runtime is not None:
-                required[str(runtime)] = Producer(ref=str(runtime))
             published[group] = self._publish_group(
-                ref,
-                commands,
-                outputs=outputs[group],
-                bindings=bindings,
-                dependencies=_RecipeDependencies(required, runtime),
+                ref, commands, bindings=bindings, dependencies=required, runtime=runtime
             )
         return published
 
-    def _publish_runtime(self) -> Ref | None:
-        if not isinstance(self._runner, ProducerRuntime):
-            return None
-        self._runner.validate()
-        files = self._runner.files
+    def _publish_runtime(self) -> Ref:
+        self._runtime.validate()
+        files = self._runtime.files
         digest = fingerprint({name: file_digest(path) for name, path in files.items()})
         ref = Ref(f"{PRODUCER_NAMESPACE}.uv-runtime-{digest}/1.0")
         return self._catalog.publish(LocalRecord(ref, files=files)).ref
@@ -101,20 +83,21 @@ class ProducerRecipes:
         ref: Ref,
         stages: tuple[RecipeStage, ...],
         *,
-        outputs: tuple[str, ...],
         bindings: Bindings,
-        dependencies: _RecipeDependencies,
+        dependencies: Mapping[str, Producer],
+        runtime: Ref,
     ) -> Producer:
-        closure = set(dependencies.producers)
-        for producer in dependencies.producers.values():
+        required = {str(runtime), *dependencies}
+        closure = required.copy()
+        for producer in dependencies.values():
             closure.update(producer.prerequisites)
 
+        outputs = tuple(sorted(name for stage in stages for name in stage.recipe_outputs))
         with TemporaryDirectory(prefix="coreref-producer-") as temporary:
             directory = Path(temporary)
-            commands = self._stage_inputs(directory, stages, bindings)
             layout = {
-                "configuration": self._configuration,
-                "stages": commands,
+                "configuration": {},  # Older locked CoreRef runners still read this key.
+                "stages": self._stage_inputs(directory, stages, bindings),
                 "outputs": outputs,
                 "bindings": {
                     target: (Ref(producer.ref).package_name, filename)
@@ -124,24 +107,18 @@ class ProducerRecipes:
             (directory / "pipeline.json").write_text(
                 json.dumps(layout, sort_keys=True), encoding="utf-8"
             )
-            if isinstance(self._runner, Path):
-                copyfile(self._runner, directory / "stage_runner.py")
-            runtime = dependencies.runtime
             recipe = _PRODUCER_TEMPLATE.render(
                 name=ref.package_name,
                 version=ref.version,
-                dependencies=sorted(dependencies.producers),
-                runtime=runtime.package_name if runtime is not None else None,
-                runner_args=self._runner._arguments()
-                if isinstance(self._runner, ProducerRuntime)
-                else None,
+                dependencies=sorted(required),
+                runtime=runtime.package_name,
             )
             (directory / "conanfile.py").write_text(recipe, encoding="utf-8")
             exact = self._variants.publish_recipe(directory)
         return Producer(
             ref=str(exact),
             prerequisites=tuple(sorted(closure)),
-            outputs=outputs if any(stage.transform is not None for stage in stages) else None,
+            outputs=outputs,
         )
 
     def _stage_inputs(
@@ -168,11 +145,10 @@ class ProducerRecipes:
             commands.append(
                 {
                     "name": stage.spec.name,
-                    "command": stage.command,
                     "inputs": stage.inputs,
                     "outputs": tuple(sorted(stage.spec.outputs)),
-                    **({"configuration": stage.configuration} if stage.configuration else {}),
-                    **({"transform": stage.transform} if stage.transform is not None else {}),
+                    "configuration": stage.configuration,
+                    "transform": stage.transform,
                 }
             )
         return commands
@@ -219,8 +195,6 @@ def _group_needs(
 def _bindings(
     stages: tuple[RecipeStage, ...],
     published: Mapping[str, Producer],
-    outputs: Mapping[str, tuple[str, ...]],
-    external: Bindings,
 ) -> dict[str, tuple[Producer, str]]:
     inputs = {name for stage in stages for name in stage.inputs if name not in stage.files}
     produced = {name for stage in stages for name in stage.spec.outputs}
@@ -229,8 +203,8 @@ def _bindings(
         for name, source in stage.artifacts.items():
             if explicit.setdefault(name, source) != source:
                 raise ValueError(f"Conflicting artifact binding {name!r} in producer recipe")
-    bindings = {name: external[name] for name in sorted(inputs & external.keys())} | explicit
-    for group, producer in published.items():
-        for name in sorted((inputs & set(outputs[group])) - produced - explicit.keys()):
+    bindings = explicit.copy()
+    for producer in published.values():
+        for name in sorted((inputs & set(producer.outputs)) - produced - explicit.keys()):
             bindings[name] = (producer, name)
     return bindings

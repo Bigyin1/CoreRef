@@ -43,10 +43,6 @@ class Project:
     revisions. A flow supplies ``route`` and the bindings in ``stages``.
     """
 
-    _output_groups: Mapping[str, tuple[str, ...]] = {}
-
-    _producer_handler: str | None = None
-
     def __init__(
         self,
         directory: Path,
@@ -68,7 +64,7 @@ class Project:
         self.record = manifest.local_record(self.source)
         self.lockfile = self.source / "manifest.lock"
         self.build_dir = self.source / ".build"
-        self.outputs = Outputs(catalog, groups=self._output_groups, build_missing=build_missing)
+        self.outputs = Outputs(catalog, build_missing=build_missing)
         self._stage_cache = StageCache(catalog, cache_mode)
 
     @property
@@ -131,10 +127,9 @@ class Project:
     def route(self) -> Route:
         """Return the flow's declarative stage graph.
 
-        By default the graph is loaded from the project's flow.yml. A flow
-        can override it to compose fragments or apply its own selection.
+        The flow supplies this graph directly or through its generated route module.
         """
-        return Route.load(self.source)
+        raise NotImplementedError("The flow must provide a route")
 
     @cached_property
     def stages(self) -> Mapping[str, Stage | Callable[[], Stage]]:
@@ -352,7 +347,7 @@ class Project:
                 groups.setdefault(spec.recipe or spec.name, []).append(spec.name)
         return {name: tuple(stages) for name, stages in groups.items()}
 
-    def _prepare_producers(self, stages: tuple[StageSpec, ...], /) -> Mapping[str, JSON]:
+    def _prepare_producers(self, stages: tuple[StageSpec, ...]) -> None:
         """Build prerequisites that must be captured as prepared inputs."""
         selected = {stage.name for stage in stages}
         prepared = tuple(
@@ -361,16 +356,6 @@ class Project:
         if prepared:
             self.build(prepared)
         self._prepare_stages({spec: self._stage(spec) for spec in stages})
-        return {}
-
-    def _producer_dependencies(self) -> Mapping[str, tuple[Record, str]]:
-        """Bind staged filenames to named outputs from published dependency records.
-
-        The mapping values are pairs containing the dependency record and its
-        output name. CoreRef uses the record's exact selection to bind the
-        corresponding recipe when one is registered.
-        """
-        return {}
 
     def _publish_ready_recipes(
         self,
@@ -381,48 +366,26 @@ class Project:
         selected = tuple(spec for spec in stages if spec.name in names)
         if not selected:
             return {}
-        recipes = ProducerRecipes(
-            self.catalog,
-            self.build_dir,
-            runner=ProducerRuntime(self.source, self._producer_handler),
-            configuration=self._prepare_producers(selected),
-        )
+        self._prepare_producers(selected)
+        runtime = ProducerRuntime(self.source)
+        recipes = ProducerRecipes(self.catalog, self.build_dir, runtime=runtime)
         return recipes.publish(
             self.record.ref,
             tuple(self._recipe(spec) for spec in selected),
             members=members,
-            outputs=self._recipe_outputs(members),
-            external=self.outputs._producer_inputs(self._producer_dependencies()),
         )
-
-    def _recipe_outputs(self, members: Mapping[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
-        result = dict(self._output_groups)
-        for group, names in members.items():
-            if group in result:
-                continue
-            specs = (self.route[name] for name in names)
-            result[group] = tuple(
-                output
-                for spec in specs
-                for output in (spec.outputs if spec.recipe_outputs is None else spec.recipe_outputs)
-            )
-        return result
 
     def _recipe(self, spec: StageSpec) -> RecipeStage:
         stage = self._stage(spec)
-        if stage.transform is not None:
-            return RecipeStage(
-                spec,
-                self._stage_inputs(spec, stage),
-                configuration=dict(stage.configuration),
-                transform=transform_reference(stage.transform),
-                files=stage.files,
-                artifacts=self.outputs._producer_inputs(self._stage_artifacts(spec, stage)),
-            )
+        if stage.transform is None:
+            raise ValueError(f"Stage {spec.name!r} has no rebuildable transform")
         return RecipeStage(
             spec,
-            tuple(name for name in (stage.inputs or ()) if name not in stage.bundled_inputs),
-            configuration={**stage.configuration, "bundled": stage.bundled_inputs},
+            self._stage_inputs(spec, stage),
+            transform_reference(stage.transform),
+            configuration=dict(stage.configuration),
+            files=stage.files,
+            artifacts=self.outputs._producer_inputs(self._stage_artifacts(spec, stage)),
         )
 
     def _output_files(self, outputs: Mapping[str, Path]) -> dict[str, Path]:

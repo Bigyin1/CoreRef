@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from importlib.metadata import version
 from os import utime
 from pathlib import Path
-from types import MappingProxyType
 
 import pytest
 from typer.testing import CliRunner
@@ -276,33 +275,25 @@ def test_build_targets_share_prerequisites_and_leave_other_branches_idle(tmp_pat
     assert not (project.build_dir / "routed.odb").exists()
 
 
-class ProducerProject(Project):
-    _producer_handler = "example.flow:run"
-    _output_groups = MappingProxyType({"synth": ("netlist.v",), "layout": ("layout.lef",)})
+def _unexecuted_transform(_work: Path, _log: Path, _configuration: Mapping[str, JSON]) -> None:
+    pytest.fail("Publication of RTL must not execute downstream transforms")
 
-    @property
-    def route(self) -> Route:
-        return Route(
-            [
-                StageSpec(name="rtl", outputs=("rtl.v",)),
-                StageSpec(name="synth", needs=("rtl",), outputs=("netlist.v",)),
-                StageSpec(name="layout", needs=("synth",), outputs=("layout.lef",)),
-            ]
-        )
+
+class ProducerProject(Project):
+    route = Route(
+        [
+            StageSpec(name="rtl", outputs=("rtl.v",)),
+            StageSpec(name="synth", needs=("rtl",), outputs=("netlist.v",)),
+            StageSpec(name="layout", needs=("synth",), outputs=("layout.lef",)),
+        ]
+    )
 
     def _stage(self, spec: StageSpec) -> Stage:
-        def emit() -> None:
-            if spec.name != "rtl":
-                pytest.fail(f"Publication of RTL must not run {spec.name}")
-            (self.build_dir / "rtl.v").write_text("module block; endmodule")
-
-        return Stage(action=emit)
-
-    def _stage_ready(self, spec: StageSpec, *, for_recipe: bool) -> bool:
-        return for_recipe or super()._stage_ready(spec, for_recipe=False)
-
-    def _producer_members(self) -> dict[str, tuple[str, ...]]:
-        return {"synth": ("synth",), "layout": ("layout",)}
+        if spec.name != "rtl":
+            return Stage(transform=_unexecuted_transform)
+        return Stage(
+            action=lambda: (self.build_dir / "rtl.v").write_text("module block; endmodule")
+        )
 
 
 def test_publish_rtl_registers_ready_recipe_groups_without_building_them(
@@ -405,9 +396,7 @@ def _commit_sdc_with_original_stat(checkout: Path) -> str:
     return changed
 
 
-def test_snapshot_tracks_producer_runtime_without_attaching_it_to_a_stage(
-    tmp_path: Path, catalog: Catalog
-) -> None:
+def test_snapshot_tracks_runtime_for_rebuildable_stages(tmp_path: Path, catalog: Catalog) -> None:
     manifest = Manifest(ref="demo.block/1.0")
     project = ProducerProject(tmp_path, manifest, catalog)
     project.lock()
@@ -453,15 +442,16 @@ def test_transforms_infer_inputs_and_recipe_outputs_from_the_same_graph(
                 'version = 1\n[[package]]\nname = "producer-fixture"\nsource = {virtual = "."}\n'
             ),
             "source": " hello world \n",
-            "flow.yml": (
-                "stages:\n"
-                "  - {name: clean, outputs: [clean.txt]}\n"
-                "  - {name: upper, needs: [clean], outputs: [upper.txt]}\n"
-            ),
         },
     )
     git_upstream(directory, tmp_path / "upstream.git")
     project = Project(directory, Manifest(ref="demo.transform/1.0"), catalog)
+    project.route = Route(
+        [
+            StageSpec(name="clean", outputs=("clean.txt",)),
+            StageSpec(name="upper", needs=("clean",), outputs=("upper.txt",)),
+        ]
+    )
     project.stages = {
         "clean": Stage(transform=_strip_input, files={"input.txt": directory / "source"}),
         "upper": Stage(transform=_uppercase),

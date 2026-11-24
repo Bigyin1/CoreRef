@@ -1,10 +1,7 @@
+{# Rebuild declared stages using the producer's locked Python environment. #}
 import json
-{% if runtime %}
 import os
 import subprocess
-{% else %}
-import runpy
-{% endif %}
 from pathlib import Path
 from shutil import copyfile, copytree
 
@@ -15,7 +12,7 @@ class StageProducer(ConanFile):
     name = {{ name | tojson }}
     version = {{ version | tojson }}
     revision_mode = "hash"
-    exports_sources = "inputs/*", "pipeline.json"{% if not runtime %}, "stage_runner.py"{% endif %}
+    exports_sources = "inputs/*", "pipeline.json"
 
     def requirements(self):
         for reference in {{ dependencies | tojson }}:
@@ -34,7 +31,6 @@ class StageProducer(ConanFile):
             destination = directory / target
             destination.parent.mkdir(parents=True, exist_ok=True)
             copyfile(Path(dependency.package_folder) / filename, destination)
-{% if runtime %}
         self._run_producer(source / "pipeline.json", directory)
 
     def _run_producer(self, layout, directory):
@@ -47,16 +43,12 @@ class StageProducer(ConanFile):
         subprocess.run(
             [
                 "uv", "run", "--locked", "--no-dev", "--managed-python", "--python", python,
-                "python", "-I", *{{ runner_args | tojson }}, str(layout), str(directory),
+                "python", "-I", "-m", "coreref._internal.producer", str(layout), str(directory),
             ],
             cwd=environment,
             env=env,
             check=True,
         )
-{% else %}
-        runner = runpy.run_path(str(source / "stage_runner.py"))
-        runner["run_pipeline"](layout["configuration"], layout["stages"], directory)
-{% endif %}
 
     def package(self):
         layout = json.loads((Path(self.source_folder) / "pipeline.json").read_bytes())

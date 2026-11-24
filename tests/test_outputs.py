@@ -85,7 +85,10 @@ def _producer(env: Sandbox) -> Producer:
         "        save(self, self.package_folder + '/abstract.lef', 'LEF')\n"
         "        save(self, self.package_folder + '/timing.lib', 'Liberty')\n"
     )
-    return Producer(ref=str(Variants(env.catalog).publish_recipe(directory)))
+    return Producer(
+        ref=str(Variants(env.catalog).publish_recipe(directory)),
+        outputs=("abstract.lef", "timing.lib", "unproduced"),
+    )
 
 
 def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_path: Path) -> None:
@@ -104,15 +107,14 @@ def test_get_uses_only_registered_producers_and_checks_overlapping_outputs(tmp_p
         assert Outputs._producers(retry) == {"layout": producer}
 
         reader = env.new_catalog()
-        groups = {"layout": ("abstract.lef", "timing.lib", "unproduced")}
         with pytest.raises(NotFound, match="Producer binary unavailable"):
-            Outputs(reader, groups=groups).get(index, ("timing.lib",))
+            Outputs(reader).get(index, ("timing.lib",))
         with pytest.raises(ValueError, match="missing outputs"):
             Outputs(reader).get(index, ("unknown",))
-        outputs = Outputs(reader, groups=groups, build_missing=True)
+        outputs = Outputs(reader, build_missing=True)
         with trace_operations() as trace:
-            assert outputs.available(index, producer_only=True) == set(groups["layout"])
-            assert outputs.available(index) == set(groups["layout"])
+            assert outputs.available(index, producer_only=True) == set(producer.outputs)
+            assert outputs.available(index) == set(producer.outputs)
             assert Outputs(reader).available(index) == {"abstract.lef"}
         assert not trace.commands
         assert outputs.get(index, ("timing.lib",))["timing.lib"].read_text() == "Liberty"

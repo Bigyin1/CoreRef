@@ -47,16 +47,9 @@ class Outputs:
     groups when a published recipe provides them.
     """
 
-    def __init__(
-        self,
-        catalog: Catalog,
-        *,
-        groups: Mapping[str, tuple[str, ...]] | None = None,
-        build_missing: bool = False,
-    ) -> None:
+    def __init__(self, catalog: Catalog, *, build_missing: bool = False) -> None:
         """Bind artifact operations to a catalog.
 
-        ``groups`` maps recipe group names to the filenames they produce.
         Set ``build_missing=True`` to let Conan build a missing binary for a
         requested group.
         """
@@ -64,7 +57,6 @@ class Outputs:
         self._store = ArtifactStore(catalog)
         self._variants = catalog._variants
         self._build_missing = build_missing
-        self._groups = dict(groups or {})
 
     def _pack(
         self,
@@ -152,9 +144,8 @@ class Outputs:
     ) -> dict[str, tuple[Producer, str]]:
         bindings = {}
         for target, (record, name) in external.items():
-            available = self._producers(record)
-            for group, producer in available.items():
-                if name in self._group_files(group, producer):
+            for producer in self._producers(record).values():
+                if name in producer.outputs:
                     bindings[target] = producer, name
                     break
         return bindings
@@ -189,8 +180,8 @@ class Outputs:
             available.update(links)
             if not self._build_missing:
                 return available
-        for group, producer in self._producers(record).items():
-            available.update(self._group_files(group, producer))
+        for producer in self._producers(record).values():
+            available.update(producer.outputs)
         return available
 
     def get(self, record: Record, names: tuple[str, ...]) -> dict[str, Path]:
@@ -221,23 +212,21 @@ class Outputs:
         index: OutputIndex,
         missing: set[str],
     ) -> dict[str, Path]:
-        declared = self._producers(record)
-        groups = {name: self._group_files(name, producer) for name, producer in declared.items()}
-        selected = {name: missing.intersection(files) for name, files in groups.items()}
-        unavailable = missing - set().union(*selected.values())
+        selected = [
+            (producer, missing.intersection(producer.outputs))
+            for producer in self._producers(record).values()
+        ]
+        unavailable = missing.difference(*(names for _, names in selected))
         if unavailable:
             raise ValueError(f"{record.ref} is missing outputs: {', '.join(sorted(unavailable))}")
         files: dict[str, Path] = {}
-        for group, names in selected.items():
+        for producer, names in selected:
             if names:
-                files.update(self._get_group(declared[group], index, names, groups[group]))
+                files.update(self._get_group(producer, index, names))
         return files
 
-    def _group_files(self, group: str, producer: Producer) -> tuple[str, ...]:
-        return producer.outputs if producer.outputs is not None else self._groups.get(group, ())
-
     def _get_group(
-        self, producer: Producer, index: OutputIndex, names: set[str], group: tuple[str, ...]
+        self, producer: Producer, index: OutputIndex, names: set[str]
     ) -> dict[str, Path]:
         ref = Ref(producer.ref)
         try:
@@ -255,7 +244,7 @@ class Outputs:
             ) from error
         if package.ref != ref:
             raise ValueError(f"Conan resolved a different producer than {ref}")
-        for name in index.outputs.keys() & set(group):
+        for name in index.outputs.keys() & set(producer.outputs):
             index.outputs[name].verify(package.directory / name)
         files = {name: package.directory / name for name in names}
         if any(not path.is_file() for path in files.values()):
