@@ -37,7 +37,6 @@
       profile = "soc";
       parameters = {
         top = "soc";
-        defines = [ "INCREMENT_ONE" ];
         macroPlacement = {
           hard_macro = [
             21

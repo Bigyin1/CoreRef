@@ -1,4 +1,4 @@
-.PHONY: check unit integration integration-graph integration-docker build
+.PHONY: check unit integration integration-graph integration-ip integration-docker build
 
 check:
 	uv run --frozen ruff check .
@@ -13,6 +13,9 @@ integration:
 
 integration-graph:
 	nix eval --impure --file tests/docker/route-graph.nix check
+
+integration-ip:
+	nix build --impure --no-link --file tests/docker/route-graph.nix counterSimulation statusSimulation counterNetlistCheck
 
 integration-docker:
 	bash tests/docker/run.sh

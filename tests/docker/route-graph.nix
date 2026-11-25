@@ -173,8 +173,8 @@ in
         top = "sram_5x3";
       };
     assert !(builtins.tryEval invalid).success;
-    assert inlineRtl.configuration.defines == [ "INCREMENT_ONE" ];
-    assert (plan ready.dft).configuration.defines == [ "INCREMENT_ONE" ];
+    assert inlineRtl.configuration.defines == [ ];
+    assert (plan ready.dft).configuration.defines == [ ];
     assert (plan ready.simulate).configuration.defines == [ ];
     assert (plan ready.simulate-dft).configuration.defines == [ "COREREF_DFT" ];
     assert
@@ -220,6 +220,24 @@ in
     netlist
     gds
     ;
+  counterSimulation = counter.packages.${builtins.currentSystem}.simulate;
+  statusSimulation = status.packages.${builtins.currentSystem}.simulate;
+  counterNetlistCheck =
+    let
+      pkgs = nixpkgs.legacyPackages.${builtins.currentSystem};
+      component = counter.lib.componentFor builtins.currentSystem;
+      netlist = counter.packages.${builtins.currentSystem}.netlist;
+    in
+    pkgs.runCommand "check-counter-netlist" { nativeBuildInputs = [ pkgs.yosys ]; } ''
+      yosys -Q -p "
+        read_liberty -ignore_miss_func -ignore_miss_dir ${component.parameters.platform}/lib/NangateOpenCellLibrary_typical.lib
+        read_verilog ${netlist}/netlist.v
+        prep -flatten -top counter
+        sat -seq 2 -set reset 1 -prove-skip 1 -prove value 0 -verify
+        sat -seq 3 -set reset 0 -set-at 1 reset 1 -set enable 1 -prove-skip 2 -prove value 1 -verify
+        sat -seq 4 -set reset 0 -set-at 1 reset 1 -set enable 1 -prove-skip 3 -prove value 2 -verify
+      " > "$out"
+    '';
   incrementSimulation = increment.packages.${builtins.currentSystem}.simulate;
   incrementLint = increment.packages.${builtins.currentSystem}.lint;
   customMemorySimulation = custom.packages.${builtins.currentSystem}.simulate;

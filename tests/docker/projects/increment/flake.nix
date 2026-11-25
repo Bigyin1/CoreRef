@@ -18,7 +18,6 @@
           profile = "rtl";
           parameters = {
             top = "increment";
-            defines = if step == 1 then [ "INCREMENT_ONE" ] else [ ];
             verificationDefines = [ "TB_STEP=${toString step}" ];
           };
           rtl = {
