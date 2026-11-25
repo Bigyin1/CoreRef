@@ -46,6 +46,16 @@ let
       flow = withConfig overrides;
     };
   soc = socWith { };
+  counterPlusThree = counter.lib.variants.plus-3;
+  socPlusThree = socWith {
+    dependencies =
+      system:
+      map (
+        component:
+        if component.name == "counter" then counterPlusThree.lib.componentFor system else component
+      ) (soc.lib.componentFor system).dependencies;
+    parameters.verificationDefines = [ "TB_COUNTER_STEP=3" ];
+  };
   conflictingDefines = socWith { parameters.defines = [ "COUNTER_RESET=99" ]; };
 
   system = "aarch64-linux";
@@ -104,6 +114,26 @@ let
     depth = 1;
     width = 4;
   };
+  checkCounterNetlist =
+    variant:
+    let
+      pkgs = nixpkgs.legacyPackages.${builtins.currentSystem};
+      component = variant.lib.componentFor builtins.currentSystem;
+      inherit (component.parameters) step;
+      netlist = variant.packages.${builtins.currentSystem}.netlist;
+    in
+    pkgs.runCommand "check-counter-plus-${toString step}-netlist"
+      { nativeBuildInputs = [ pkgs.yosys ]; }
+      ''
+        yosys -Q -p "
+          read_liberty -ignore_miss_func -ignore_miss_dir ${component.parameters.platform}/lib/NangateOpenCellLibrary_typical.lib
+          read_verilog ${netlist}/netlist.v
+          prep -flatten -top counter
+          sat -seq 2 -set reset 1 -prove-skip 1 -prove value 0 -verify
+          sat -seq 3 -set reset 0 -set-at 1 reset 1 -set enable 1 -prove-skip 2 -prove value ${toString step} -verify
+          sat -seq 4 -set reset 0 -set-at 1 reset 1 -set enable 1 -prove-skip 3 -prove value ${toString (2 * step)} -verify
+        " > "$out"
+      '';
 in
 {
   check =
@@ -196,8 +226,19 @@ in
     assert !(builtins.tryEval invalid).success;
     assert inlineRtl.configuration.defines == [ ];
     assert (plan ready.dft).configuration.defines == [ ];
-    assert (plan ready.simulate).configuration.defines == [ ];
-    assert (plan ready.simulate-dft).configuration.defines == [ "COREREF_DFT" ];
+    assert (plan ready.simulate).configuration.defines == [ "TB_COUNTER_STEP=1" ];
+    assert
+      (plan ready.simulate-dft).configuration.defines == [
+        "TB_COUNTER_STEP=1"
+        "COREREF_DFT"
+      ];
+    assert
+      counter.packages.${system}.plus-1-rtl.drvPath != counter.packages.${system}.plus-3-rtl.drvPath;
+    assert
+      counter.packages.${system}.plus-1-gds.drvPath != counter.packages.${system}.plus-3-gds.drvPath;
+    assert
+      (plan socPlusThree.packages.${system}.netlist).inputs."macros/counter/rtl"
+      == (counterPlusThree.lib.componentFor system).views.rtl;
     assert
       builtins.attrNames (plan ready.gds).inputs == [
         "final.def"
@@ -245,22 +286,11 @@ in
   consumerDefinesDftSimulation = conflictingDefines.packages.${builtins.currentSystem}.simulate-dft;
   counterSimulation = counter.packages.${builtins.currentSystem}.simulate;
   statusSimulation = status.packages.${builtins.currentSystem}.simulate;
-  counterNetlistCheck =
-    let
-      pkgs = nixpkgs.legacyPackages.${builtins.currentSystem};
-      component = counter.lib.componentFor builtins.currentSystem;
-      netlist = counter.packages.${builtins.currentSystem}.netlist;
-    in
-    pkgs.runCommand "check-counter-netlist" { nativeBuildInputs = [ pkgs.yosys ]; } ''
-      yosys -Q -p "
-        read_liberty -ignore_miss_func -ignore_miss_dir ${component.parameters.platform}/lib/NangateOpenCellLibrary_typical.lib
-        read_verilog ${netlist}/netlist.v
-        prep -flatten -top counter
-        sat -seq 2 -set reset 1 -prove-skip 1 -prove value 0 -verify
-        sat -seq 3 -set reset 0 -set-at 1 reset 1 -set enable 1 -prove-skip 2 -prove value 1 -verify
-        sat -seq 4 -set reset 0 -set-at 1 reset 1 -set enable 1 -prove-skip 3 -prove value 2 -verify
-      " > "$out"
-    '';
+  counterNetlistCheck = checkCounterNetlist counter;
+  counterPlusThreeNetlistCheck = checkCounterNetlist counterPlusThree;
+  counterPlusThreeSimulation = counter.packages.${builtins.currentSystem}.plus-3-simulate;
+  socPlusThreeSimulation = socPlusThree.packages.${builtins.currentSystem}.simulate;
+  socPlusThreeDftSimulation = socPlusThree.packages.${builtins.currentSystem}.simulate-dft;
   incrementSimulation = increment.packages.${builtins.currentSystem}.simulate;
   incrementLint = increment.packages.${builtins.currentSystem}.lint;
   customMemorySimulation = custom.packages.${builtins.currentSystem}.simulate;

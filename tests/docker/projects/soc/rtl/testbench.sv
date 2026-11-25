@@ -1,4 +1,5 @@
 module testbench;
+  localparam int STEP = `TB_COUNTER_STEP;
   logic clk, reset, enable, scan_enable, scan_in, scan_out;
   logic [2:0] memory_address;
   logic [7:0] count, scanned_state, scratch_data;
@@ -27,29 +28,29 @@ module testbench;
     reset = 0;
     enable = 1;
     repeat (2) tick();
-    assert (count == 2 && scanned_state == 2) else $fatal(1, "counter to status datapath");
+    assert (count == 8'(2 * STEP) && scanned_state == 8'(STEP + 1)) else $fatal(1, "counter to status datapath");
     enable = 0;
     tick();
-    assert (count == 2 && scanned_state == 3) else $fatal(1, "counter hold and status capture");
-    assert (cache_data == 1 && scratch_data == 1) else $fatal(1, "SRAM read at address 1");
+    assert (count == 8'(2 * STEP) && scanned_state == 8'(2 * STEP + 1)) else $fatal(1, "counter hold and status capture");
+    assert (cache_data == 4'(STEP) && scratch_data == 1) else $fatal(1, "SRAM read at address 1");
 
     memory_address = 6;
     enable = 1;
     tick();
     enable = 0;
     tick();
-    assert (cache_data == 2 && scratch_data == 3) else $fatal(1, "independent SRAM data");
+    assert (cache_data == 4'(2 * STEP) && scratch_data == 8'(2 * STEP + 1)) else $fatal(1, "independent SRAM data");
     memory_address = 1;
     tick();
-    assert (cache_data == 1 && scratch_data == 1) else $fatal(1, "separate SRAM addresses");
+    assert (cache_data == 4'(STEP) && scratch_data == 1) else $fatal(1, "separate SRAM addresses");
 
     scan_enable = 1;
     scan_in = 1;
     tick();
 `ifdef COREREF_DFT
-    assert (scanned_state == 9 && !scan_out) else $fatal(1, "hierarchical scan shift");
+    assert (scanned_state == 8'(2 * (3 * STEP + 1) + 1) && !scan_out) else $fatal(1, "hierarchical scan shift");
 `else
-    assert (scanned_state == 4 && !scan_out) else $fatal(1, "hierarchical RTL capture");
+    assert (scanned_state == 8'(3 * STEP + 1) && !scan_out) else $fatal(1, "hierarchical RTL capture");
 `endif
     $display("PASS SoC");
     $finish;

@@ -15,7 +15,10 @@ integration-graph:
 	nix eval --impure --file tests/docker/route-graph.nix check
 
 integration-ip:
-	nix build --impure --no-link --file tests/docker/route-graph.nix counterSimulation statusSimulation counterNetlistCheck consumerDefinesSimulation consumerDefinesDftSimulation
+	nix build --impure --no-link --file tests/docker/route-graph.nix \
+		counterSimulation counterNetlistCheck counterPlusThreeSimulation counterPlusThreeNetlistCheck \
+		statusSimulation consumerDefinesSimulation consumerDefinesDftSimulation \
+		socPlusThreeSimulation socPlusThreeDftSimulation
 
 integration-docker:
 	bash tests/docker/run.sh

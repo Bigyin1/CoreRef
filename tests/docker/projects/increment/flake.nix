@@ -7,13 +7,24 @@
   outputs =
     { self, flow, ... }:
     let
+      sources = {
+        "1" = ./rtl/step_one.v;
+        "2" = ./rtl/step_two.v;
+        "3" = ./rtl/step_three.v;
+      };
       mkRtl =
         {
           step ? 1,
         }:
-        assert step == 1 || step == 2 || throw "increment: step must be 1 or 2";
+        assert
+          builtins.elem step [
+            1
+            2
+            3
+          ]
+          || throw "increment: step must be 1, 2 or 3";
         flow.lib.mkProject {
-          name = if step == 1 then "increment" else "increment-by-two";
+          name = if step == 1 then "increment" else "increment-by-${if step == 2 then "two" else "three"}";
           source = self.outPath;
           profile = "rtl";
           parameters = {
@@ -22,7 +33,7 @@
           };
           rtl = {
             sources = [
-              (if step == 1 then ./rtl/step_one.v else ./rtl/step_two.v)
+              sources.${toString step}
               ./rtl/increment.v
             ];
             testbench = ./rtl/increment_tb.sv;

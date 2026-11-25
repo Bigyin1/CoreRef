@@ -112,6 +112,7 @@ artifacts=(
     "$baseline#dft" "$baseline#netlist" "$baseline#floorplan"
     "$baseline#check-netlist" "$baseline#lef" "$baseline#liberty" "$baseline#spef" "$baseline#gds"
     "$counter#lef" "$counter#liberty" "$counter#gds"
+    "$counter#plus-3-lef" "$counter#plus-3-liberty" "$counter#plus-3-gds"
     "$status_register#dft" "$sram#4x4" "$sram#8x8"
 )
 for size in 4x4 8x8; do

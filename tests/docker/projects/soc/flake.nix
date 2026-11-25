@@ -31,12 +31,17 @@
       sram,
       ...
     }:
+    let
+      counterStep = 1;
+      counterVariant = counter.lib.variants."plus-${toString counterStep}";
+    in
     flow.lib.mkProject {
       name = "soc";
       source = self.outPath;
       profile = "soc";
       parameters = {
         top = "soc";
+        verificationDefines = [ "TB_COUNTER_STEP=${toString counterStep}" ];
         macroPlacement = {
           hard_macro = [
             21
@@ -65,7 +70,7 @@
         scripts.place = ./be/place.tcl;
       };
       dependencies = system: [
-        (counter.lib.componentFor system)
+        (counterVariant.lib.componentFor system)
         (status-register.lib.componentFor system)
         (
           (sram.lib.mkSram {
