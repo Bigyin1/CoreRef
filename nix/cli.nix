@@ -1,5 +1,9 @@
 # Expose the pinned CLI and install its dependency wheels into an optional venv.
-{ pkgs, flowPackage }:
+{
+  pkgs,
+  flowPackage,
+  cli,
+}:
 let
   pythonModules = pkgs.python3Packages.requiredPythonModules [ flowPackage ];
   wheels = pkgs.lib.concatMapStringsSep " " (package: "${package.dist}/*.whl") (
@@ -17,14 +21,12 @@ let
   };
 in
 {
-  apps = {
-    flow = {
-      type = "app";
-      program = "${flowPackage}/bin/coreref-flow";
-    };
-    venv = {
-      type = "app";
-      program = "${venv}/bin/coreref-venv";
-    };
+  flow = {
+    type = "app";
+    program = "${flowPackage}/bin/${cli}";
+  };
+  venv = {
+    type = "app";
+    program = "${venv}/bin/coreref-venv";
   };
 }

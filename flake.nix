@@ -5,14 +5,19 @@
   outputs =
     { nixpkgs, ... }:
     let
-      forSystems = nixpkgs.lib.genAttrs [
+      systems = [
         "aarch64-darwin"
         "aarch64-linux"
         "x86_64-linux"
       ];
-      core = {
+      forSystems = nixpkgs.lib.genAttrs systems;
+      core = rec {
         mkRoute = import ./nix/route.nix;
-        pythonPackage = import ./nix/python.nix;
+        pythonPackage = import ./nix/python.nix {
+          source = ./.;
+          imports = [ "coreref" ];
+        };
+        mkFlow = import ./nix/flow.nix { inherit systems mkRoute pythonPackage; };
       };
     in
     {

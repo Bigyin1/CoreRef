@@ -34,19 +34,14 @@
     flow.lib.mkProject {
       name = "soc";
       source = self.outPath;
-      kind = "soc";
-      use = [
-        "rtl"
-        "dft"
-        "backend"
-        "check-netlist"
-      ];
-      dftReadyIf = ./dft/enabled;
+      profile = "soc";
+      parameters.top = "soc";
       files = {
         rtl = ./rtl/rtl.v;
         testbench = ./rtl/testbench.sv;
         constraints = ./be/constraints.sdc;
         place = ./be/place.tcl;
+        dftReady = ./dft/enabled;
       };
       dependencies = system: [
         (counter.lib.componentFor system)

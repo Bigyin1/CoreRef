@@ -18,12 +18,8 @@
     flow.lib.mkProject {
       name = "counter";
       source = self.outPath;
-      kind = "macro";
-      use = [
-        "rtl"
-        "dft"
-        "backend"
-      ];
+      profile = "macro";
+      parameters.top = "counter";
       files = {
         rtl = ./rtl/rtl.v;
         testbench = ./rtl/testbench.sv;

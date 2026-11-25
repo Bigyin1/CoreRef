@@ -53,12 +53,15 @@ def simulate(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
 
 def simulate_sram(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Specialize the shared SRAM testbench for the generated RTL."""
+    depth = parameters["depth"]
+    width = parameters["width"]
+    module = f"{parameters['name']}_{depth}x{width}"
     _simulate(
         work,
         log,
         [
-            f"TB_SRAM={parameters['top']}",
-            f"TB_DEPTH={parameters['depth']}",
-            f"TB_WIDTH={parameters['width']}",
+            f"TB_SRAM={module}",
+            f"TB_DEPTH={depth}",
+            f"TB_WIDTH={width}",
         ],
     )

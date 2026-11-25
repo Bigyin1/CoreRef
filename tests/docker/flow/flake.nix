@@ -17,45 +17,30 @@
       coreref,
       ...
     }:
-    let
-      forSystems = nixpkgs.lib.genAttrs [
-        "aarch64-darwin"
-        "aarch64-linux"
-        "x86_64-linux"
-      ];
-      flowFor =
-        system:
-        import ./nix {
-          inherit system;
-          pkgs = nixpkgs.legacyPackages.${system};
-          core = coreref.lib;
-          inherit (verilatorPkgs.legacyPackages.${system}) verilator;
+    coreref.lib.mkFlow {
+      inherit nixpkgs;
+      source = ./.;
+      stageMap = ./src/coreref_flow/stage-map.toml;
+      cli = "coreref-flow";
+      pythonDependencies = p: [ p.typer ];
+      configure = pkgs: {
+        tools = {
+          yosys = [ pkgs.yosys ];
+          openroad = [ pkgs.openroad ];
+          verilator = [
+            verilatorPkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.verilator
+            pkgs.stdenv.cc
+            pkgs.gnumake
+          ];
         };
-      flows = forSystems flowFor;
-      apps = nixpkgs.lib.mapAttrs (_: flow: flow.apps) flows;
-      devShells = nixpkgs.lib.mapAttrs (_: flow: { default = flow.devShell; }) flows;
-      projectOutputs =
-        withVariants: build:
-        let
-          projects = nixpkgs.lib.mapAttrs (_: build) flows;
-        in
-        {
-          inherit apps devShells;
-          packages = nixpkgs.lib.mapAttrs (_: project: project.packages) projects;
-          lib = {
-            componentFor = system: projects.${system}.component;
-          }
-          // nixpkgs.lib.optionalAttrs withVariants {
-            mkVariant = { system, ... }@args: projects.${system}.variant (removeAttrs args [ "system" ]);
-          };
+        parameters.platform = pkgs.fetchgit {
+          name = "orfs-nangate45";
+          url = "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git";
+          rev = "a9adcf481395d3b1355afda40df1c8bde10a0e40";
+          rootDir = "flow/platforms/nangate45";
+          fetchSubmodules = false;
+          hash = "sha256-zGNtgSAEz96TXxUrmGQxM+7cXoIcihs2K5RT5mJ777U=";
         };
-    in
-    {
-      inherit apps devShells;
-      lib = {
-        mkProject = config: projectOutputs false (flow: flow.mkProject config);
-        mkMemory = config: projectOutputs true (flow: flow.mkMemory config);
       };
-      packages = nixpkgs.lib.mapAttrs (_: flow: { default = flow.flowPackage; }) flows;
     };
 }

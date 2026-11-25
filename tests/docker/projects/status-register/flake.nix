@@ -18,11 +18,8 @@
     flow.lib.mkProject {
       name = "status-register";
       source = self.outPath;
-      kind = "dft";
-      use = [
-        "rtl"
-        "dft"
-      ];
+      profile = "dft";
+      parameters.top = "status_register";
       files = {
         rtl = ./rtl/rtl.v;
         testbench = ./rtl/testbench.sv;

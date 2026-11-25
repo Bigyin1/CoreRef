@@ -9,6 +9,8 @@
     flow.lib.mkProject {
       name = "increment";
       source = self.outPath;
+      profile = "rtl";
+      parameters.top = "increment";
       files = {
         rtl = ./rtl/increment.v;
         testbench = ./rtl/increment_tb.sv;

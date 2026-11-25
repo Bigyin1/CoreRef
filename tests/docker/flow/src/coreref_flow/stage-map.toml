@@ -1,8 +1,113 @@
-# Stage connections and the files each Python transform consumes.
+# Route profiles, dependency views, and the inputs of each Python stage.
+
+[files]
+common = "src/coreref_flow/stages/scripts/common.tcl"
+floorplan = "src/coreref_flow/stages/scripts/floorplan.tcl"
+place = "src/coreref_flow/stages/scripts/place.tcl"
+cts = "src/coreref_flow/stages/scripts/cts.tcl"
+route = "src/coreref_flow/stages/scripts/route.tcl"
+
+[parameters]
+scan = false
+macroInstance = "hard_macro"
+
+[selections.synthesizable]
+stopAt = ["macro"]
+excludeKinds = ["macro"]
+
+[selections.macros]
+stopAt = ["macro"]
+kinds = ["macro"]
+
+[groups.rtl.files]
+"sources/{name}.v" = ["rtl"]
+
+[groups.synthesizable]
+selection = "synthesizable"
+files."sources/{name}.v" = ["rtl"]
+
+[groups.dft]
+selection = "synthesizable"
+files."sources/{name}.v" = ["dft", "rtl"]
+
+[groups.dftSimulation.files]
+"sources/{name}.v" = ["dft", "rtl"]
+
+[groups.abstracts]
+selection = "macros"
+files = { "macros/{name}/abstract.lef" = ["lef"], "macros/{name}/timing.lib" = ["liberty"] }
+
+[groups.macroRtl]
+selection = "macros"
+files."macro_rtl.v" = ["rtl"]
+
+[groups.macroLib]
+selection = "macros"
+files."macro.lib" = ["liberty"]
+
+[groups.macroLef]
+selection = "macros"
+files."macro.lef" = ["lef"]
+
+[groups.macroGds]
+selection = "macros"
+files."macro.gds" = ["gds"]
+
+[dependencyParameters.macro]
+selection = "macros"
+parameter = "top"
+default = ""
+
+[profiles.rtl]
+use = ["rtl"]
+default = "rtl"
+rules = [{ whenFiles = ["testbench"], use = ["simulation"] }]
+views = { rtl = "rtl" }
+
+[profiles.dft]
+use = ["rtl", "dft"]
+variants = ["hierarchical-dft"]
+default = "rtl"
+rules = [{ whenFiles = ["testbench"], use = ["simulation", "dft-simulation"] }]
+parameters.scan = true
+views = { rtl = "rtl", dft = { stage = "dft", output = "module" } }
+
+[profiles.macro]
+use = ["rtl", "dft", "backend"]
+default = "rtl"
+rules = [{ whenFiles = ["testbench"], use = ["simulation", "dft-simulation"] }]
+
+[profiles.macro.views]
+rtl = "rtl"
+lef = { stage = "route", output = "lef" }
+liberty = { stage = "route", output = "liberty" }
+gds = { stage = "gds", output = "out" }
+
+[profiles.soc]
+use = ["rtl", "backend", "check-netlist"]
+variants = ["checked-synthesis"]
+default = "rtl"
+rules = [
+  { whenFiles = ["dftReady"], use = ["dft"], otherwise = { use = ["rtl-synthesis"], variants = ["rtl-synthesis"] } },
+  { whenFiles = ["testbench"], use = ["simulation"] },
+  { whenFiles = ["testbench", "dftReady"], use = ["dft-simulation"] },
+]
+views = { rtl = "rtl" }
+
+[profiles.memory]
+kind = "rtl"
+use = ["memory"]
+default = "rtl"
+views.rtl = { stage = "rtl", output = "out" }
+
+[profiles.memory.matrix]
+axes = { depth = { min = 2 }, width = { min = 1 } }
+name = "{depth}x{width}"
+exports = { "{variant}" = "rtl", "simulate-{variant}" = "simulate" }
 
 [modules.rtl.rtl]
 transform = "coreref_flow.stages.rtl:assemble"
-inputs."own.v" = "rtlFile"
+inputs."own.v" = "rtl"
 groups = ["rtl"]
 outputs.out = "rtl.v"
 
@@ -15,8 +120,8 @@ outputs.out = "lint.log"
 
 [modules.rtl.lint-physical]
 transform = "coreref_flow.stages.physical_lint:check_inputs"
-inputs."own.v" = "rtlFile"
-groups = ["physicalLint"]
+inputs."own.v" = "rtl"
+groups = ["synthesizable", "abstracts"]
 parameters = ["top"]
 outputs.out = "inputs.json"
 
@@ -29,14 +134,14 @@ outputs.out = "simulation.log"
 
 [modules.dft.dft]
 transform = "coreref_flow.stages.rtl:assemble_dft"
-inputs."own.v" = "rtlFile"
+inputs."own.v" = "rtl"
 groups = ["dft"]
 parameters = ["scan"]
 outputs.out = "dft_output.v"
 
 [modules.dft-simulation.dft-simulation]
 transform = "coreref_flow.stages.rtl:assemble_dft"
-inputs."own.v" = "rtlFile"
+inputs."own.v" = "rtl"
 groups = ["dftSimulation"]
 parameters = ["scan"]
 outputs.out = "dft_output.v"
@@ -131,7 +236,7 @@ outputs.out = "rtl.v"
 transform = "coreref_flow.stages.verification:simulate_sram"
 inputs."rtl.v" = { stage = "rtl", output = "out" }
 inputs."testbench.sv" = "testbench"
-parameters = ["depth", "width", "top"]
+parameters = ["name", "depth", "width"]
 tools = ["verilator"]
 outputs.out = "simulation.log"
 
@@ -144,7 +249,7 @@ output = "out"
 
 [modules.rtl-synthesis.rtl-synthesis-input]
 transform = "coreref_flow.stages.rtl:assemble"
-inputs."own.v" = "rtlFile"
+inputs."own.v" = "rtl"
 groups = ["synthesizable"]
 outputs.out = "rtl.v"
 

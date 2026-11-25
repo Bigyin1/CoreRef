@@ -6,18 +6,23 @@
 
   outputs =
     { self, flow, ... }:
-    flow.lib.mkMemory {
+    flow.lib.mkProject {
       name = "sram";
       source = self.outPath;
-      template = ./memory.v.in;
-      testbench = ./testbench.sv;
-      depths = [
-        4
-        8
-      ];
-      widths = [
-        4
-        8
-      ];
+      profile = "memory";
+      files = {
+        template = ./memory.v.in;
+        testbench = ./testbench.sv;
+      };
+      options = {
+        depth = [
+          4
+          8
+        ];
+        width = [
+          4
+          8
+        ];
+      };
     };
 }
