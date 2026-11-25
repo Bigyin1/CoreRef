@@ -20,12 +20,15 @@
       source = self.outPath;
       profile = "macro";
       parameters.top = "counter";
-      files = {
-        rtl = [ ./rtl/rtl.v ];
+      rtl = {
+        sources = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;
-        constraints = ./be/constraints.sdc;
-        dftScript = ./dft/run.tcl;
       };
+      dft = {
+        enabled = true;
+        script = ./dft/run.tcl;
+      };
+      backend.constraints = ./be/constraints.sdc;
       dependencies = system: [ (increment.lib.componentFor system) ];
     };
 }

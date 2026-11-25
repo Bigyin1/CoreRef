@@ -24,11 +24,11 @@
           name = "sram-${size}";
           source = self.outPath;
           profile = "memory";
-          files = {
+          memory = {
             template = ./memory.v.in;
             testbench = ./testbench.sv;
-            constraints = ./constraints.sdc;
           };
+          backend.constraints = ./constraints.sdc;
           parameters = {
             inherit depth width;
             top = "sram_${size}";

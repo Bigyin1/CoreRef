@@ -2,7 +2,8 @@
 {
   lib,
   stage,
-  files,
+  sourceFiles,
+  testbench,
   configuration,
   verilator,
   rtlInputs,
@@ -19,7 +20,7 @@ let
       inherit name;
       transform = "rtl:assemble";
       inputs = {
-        files = files.rtl;
+        files = sourceFiles;
       }
       // rtlInputs components (views: views.rtl);
       configuration.defines = stageDefines;
@@ -36,7 +37,7 @@ let
         transform = "verification:simulate";
         inputs = {
           rtl = input;
-          inherit (files) testbench;
+          inherit testbench;
         };
         configuration = {
           defines = verificationDefines ++ extraDefines;

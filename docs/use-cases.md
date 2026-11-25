@@ -52,7 +52,7 @@ simulation = variant.packages.${system}.simulate;
 Вход `rtl` стадии симуляции подключён через `rtl.inline.out`. При сборке
 RTL-стадия сохраняет исходники и формирует `sources.f` с путями относительно
 своего выходного каталога. В списке сначала идут зависимости, затем файлы
-проекта в порядке, заданном в `files.rtl`. Симуляция передаёт файл списка
+проекта в порядке, заданном в `rtl.sources`. Симуляция передаёт файл списка
 Verilator. Маршрут явно передаёт список `defines` стадии RTL или DFT,
 которая сохраняет его рядом с исходниками. Симуляция и синтез используют
 опции выбранного RTL. `verificationDefines` добавляет параметры тестбенча.
@@ -64,13 +64,24 @@ Liberty, LEF и GDS для каждой геометрии.
 
 ## Бэкенд до готовности DFT
 
-В примере SoC маркер `dft/enabled` разрешает запуск DFT. Стадия включается при
-наличии маркера и скрипта `dft/run.tcl`. Flow выбирает вход синтеза обычным условием Nix.
+В SoC `dft.enabled = true` разрешает запуск DFT. Проект задаёт
+скрипт в `dft.script`. Flow выбирает вход синтеза обычным условием Nix.
 
 ~~~nix
-rtl = if dftReady then dft.artifact else rtl.forSynth.inline.out;
+dft = {
+  enabled = true;
+  script = ./dft/run.tcl;
+};
+backend = {
+  constraints = ./be/constraints.sdc;
+  scripts.place = ./be/place.tcl;
+};
 ~~~
 
-При пропуске DFT синтез получает обычный RTL с теми же правилами выбора
+~~~nix
+rtl = if dftReady then dftRoute.artifact else rtlRoute.forSynth.inline.out;
+~~~
+
+При `dft.enabled = false` или отсутствии скрипта синтез получает обычный RTL с теми же правилами выбора
 макроблоков. Ошибка выполнения Tcl завершает сборку DFT, её вывод доступен
 через `nix log .#dft`.

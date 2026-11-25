@@ -1,7 +1,8 @@
 # Generate and simulate one SRAM geometry.
 {
   stage,
-  files,
+  template,
+  testbench,
   configuration,
   verilator,
 }:
@@ -9,7 +10,7 @@ let
   rtl = stage {
     name = "rtl";
     transform = "memory:generate";
-    inputs.template = files.template;
+    inputs = { inherit template; };
     configuration = { inherit (configuration) depth width; };
     outputs.out = "hdl";
   };
@@ -19,7 +20,7 @@ let
       transform = "verification:simulate_sram";
       inputs = {
         rtl = rtl.artifacts.out;
-        inherit (files) testbench;
+        inherit testbench;
       };
       configuration = { inherit (configuration) top depth width; };
       outputs.out = "simulation.log";

@@ -21,8 +21,8 @@
             defines = if step == 1 then [ "INCREMENT_ONE" ] else [ ];
             verificationDefines = [ "TB_STEP=${toString step}" ];
           };
-          files = {
-            rtl = [
+          rtl = {
+            sources = [
               (if step == 1 then ./rtl/step_one.v else ./rtl/step_two.v)
               ./rtl/increment.v
             ];

@@ -2,7 +2,8 @@
 {
   lib,
   stage,
-  files,
+  constraints,
+  scriptOverrides,
   macros,
   configuration,
   tools,
@@ -17,7 +18,7 @@ let
     cts = ../src/coreref_flow/stages/scripts/cts.tcl;
     route = ../src/coreref_flow/stages/scripts/route.tcl;
   }
-  // files;
+  // scriptOverrides;
   macroInputs =
     suffix: view:
     builtins.listToAttrs (
@@ -57,7 +58,7 @@ let
         inherit name outputs needs;
         transform = "physical:openroad";
         inputs = {
-          "constraints.sdc" = files.constraints;
+          "constraints.sdc" = constraints;
           "common.tcl" = scripts.common;
           "${name}.tcl" = scripts.${name};
         }

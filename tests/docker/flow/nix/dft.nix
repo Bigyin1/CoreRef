@@ -2,7 +2,8 @@
 {
   lib,
   stage,
-  files,
+  sourceFiles,
+  script,
   tcl,
   defines,
   rtlInputs,
@@ -20,8 +21,8 @@ let
         inherit name;
         transform = "rtl:assemble_dft";
         inputs = {
-          files = files.rtl;
-          script = files.dftScript;
+          files = sourceFiles;
+          inherit script;
         }
         // rtlInputs components (views: views.dft or views.rtl);
         configuration = { inherit defines; };

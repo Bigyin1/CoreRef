@@ -44,7 +44,8 @@ Flow с зависимостями из закреплённого nixpkgs.
 `flow.lib.mkProject config` для каждой платформы. Она возвращает `packages` и
 `component`. Flow определяет форму `config` и выбирает готовый маршрут.
 Например, экспериментальный Flow принимает `profile`, `name`, `source`,
-`files`, `parameters` и функцию `dependencies` от платформы.
+настройки стадий `rtl`, `dft`, `backend` и `memory`, параметры проекта
+и функцию `dependencies` от платформы.
 
 `lib.componentFor system` даёт доступ к компоненту с полями `name`, `id`,
 `kind`, `views`, `parameters` и `dependencies`. Библиотечная функция

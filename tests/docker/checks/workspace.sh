@@ -24,10 +24,10 @@ locked_rtl=$("${cli[@]}" build rtl "path:$PWD" --no-link)
 test "$locked_rtl" != "$rtl_url"
 cmp "$lock" flake.lock
 
-# The mounted source has a DFT readiness marker. Remove it from the test checkout.
-rm dft/enabled
+# Disable DFT in the test checkout while leaving its script in place.
+sed -i 's/enabled = true;/enabled = false;/' flake.nix
 if nix eval --no-update-lock-file --raw .#dft.drvPath >/dev/null 2>&1; then
-    printf 'DFT is still available after removing its readiness marker.\n' >&2
+    printf 'DFT is still available after setting dft.enabled to false.\n' >&2
     exit 1
 fi
 nix eval --no-update-lock-file --raw .#synth.stagePlan |

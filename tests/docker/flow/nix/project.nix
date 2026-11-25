@@ -13,7 +13,10 @@
   name,
   source,
   profile,
-  files ? { },
+  rtl ? { },
+  dft ? { },
+  backend ? { },
+  memory ? { },
   parameters ? { },
   dependencies ? (_: [ ]),
   siteTools ? { },
@@ -55,14 +58,11 @@ let
       ;
   };
   inherit (components) macros;
-  hasFile =
-    key: files ? ${key} && (!builtins.isPath files.${key} || builtins.pathExists files.${key});
+  hasFile = file: file != null && (!builtins.isPath file || builtins.pathExists file);
   dftReady =
-    profile != "rtl"
-    && profile != "memory"
-    && hasFile "dftScript"
-    && (profile != "soc" || hasFile "dftReady");
-  hasTestbench = hasFile "testbench";
+    (dft.enabled or false) && profile != "rtl" && profile != "memory" && hasFile (dft.script or null);
+  testbench = rtl.testbench or null;
+  hasTestbench = hasFile testbench;
   hasBackend = builtins.elem profile [
     "macro"
     "soc"
@@ -81,47 +81,49 @@ let
     };
   }
   // parameters;
-  sources = {
+  rtlArgs = {
     inherit
       lib
       stage
-      files
       hasTestbench
       ;
+    sourceFiles = rtl.sources;
     inherit (components) rtlInputs all synthesizable;
   };
-  rtl = import ./rtl.nix (
-    sources
+  rtlRoute = import ./rtl.nix (
+    rtlArgs
     // {
-      inherit configuration verilator;
+      inherit configuration verilator testbench;
       inherit (components) abstracts;
     }
   );
-  dft = import ./dft.nix (
-    sources
+  dftRoute = import ./dft.nix (
+    rtlArgs
     // {
       inherit tcl;
       inherit (configuration) defines;
-      inherit (rtl) simulate;
+      inherit (rtlRoute) simulate;
+      inherit (dft) script;
       hierarchical = profile == "dft";
     }
   );
-  memory = import ./memory.nix {
+  memoryRoute = import ./memory.nix {
     inherit
       stage
-      files
       configuration
       verilator
       ;
+    inherit (memory) template testbench;
   };
   physical = import ./physical.nix {
     inherit
       lib
       stage
-      files
       macros
       configuration
       ;
+    inherit (backend) constraints;
+    scriptOverrides = backend.scripts or { };
     tools = {
       yosys = tool "yosys" [ pkgs.yosys ];
       openroad = tool "openroad" [ pkgs.openroad ];
@@ -129,11 +131,11 @@ let
     checkSynthesis = profile == "soc";
     rtl =
       if profile == "memory" then
-        memory.views.rtl
+        memoryRoute.views.rtl
       else if dftReady then
-        dft.artifact
+        dftRoute.artifact
       else
-        rtl.forSynth.inline.out;
+        rtlRoute.forSynth.inline.out;
   };
 in
 assert
@@ -148,10 +150,10 @@ assert
 {
   packages =
     if profile == "memory" then
-      memory.packages // physical.packages
+      memoryRoute.packages // physical.packages
     else
-      rtl.packages
-      // lib.optionalAttrs dftReady dft.packages
+      rtlRoute.packages
+      // lib.optionalAttrs dftReady dftRoute.packages
       // lib.optionalAttrs hasBackend physical.packages;
   component = {
     inherit name;
@@ -163,12 +165,12 @@ assert
     parameters = configuration;
     views =
       if profile == "memory" then
-        memory.views // physical.views
+        memoryRoute.views // physical.views
       else
         {
-          rtl = files.rtl;
+          rtl = rtl.sources;
         }
-        // lib.optionalAttrs dftReady dft.views
+        // lib.optionalAttrs dftReady dftRoute.views
         // lib.optionalAttrs (profile == "macro") physical.views;
     dependencies = roots;
   };

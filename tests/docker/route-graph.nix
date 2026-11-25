@@ -30,20 +30,20 @@ let
   counter = project "counter" { inherit increment; };
   status = project "status-register" { inherit increment; };
   sram = project "sram" { };
-  withFiles = overrides: {
-    lib.mkProject = config: flow.lib.mkProject (config // { files = config.files // overrides; });
+  withConfig = overrides: {
+    lib.mkProject = config: flow.lib.mkProject (lib.recursiveUpdate config overrides);
   };
   missingScript = ./missing-dft-script;
   statusWithoutDft = project "status-register" {
     inherit increment;
-    flow = withFiles { dftScript = missingScript; };
+    flow = withConfig { dft.script = missingScript; };
   };
   socWith =
     overrides:
     project "soc" {
       inherit counter sram;
       status-register = status;
-      flow = withFiles overrides;
+      flow = withConfig overrides;
     };
   soc = socWith { };
 
@@ -51,16 +51,16 @@ let
   ready = soc.packages.${system};
   failingScript = builtins.toFile "broken-dft.tcl" ''error "DFT fixture error"'';
   fallback = socWith {
-    dftReady = ./missing-dft-marker;
-    dftScript = failingScript;
+    dft.enabled = false;
+    dft.script = failingScript;
   };
-  withoutScript = socWith { dftScript = missingScript; };
-  broken = socWith { dftScript = failingScript; };
+  withoutScript = socWith { dft.script = missingScript; };
+  broken = socWith { dft.script = failingScript; };
   withoutDft = map (projectOutputs: projectOutputs.packages.${system}) [
     fallback
     withoutScript
   ];
-  changed = (socWith { place = ./variants/place.tcl; }).packages.${system};
+  changed = (socWith { backend.scripts.place = ./variants/place.tcl; }).packages.${system};
   changedEdalize =
     (project "soc" {
       inherit counter sram;

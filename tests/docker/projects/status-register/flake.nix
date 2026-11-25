@@ -20,10 +20,13 @@
       source = self.outPath;
       profile = "dft";
       parameters.top = "status_register";
-      files = {
-        rtl = [ ./rtl/rtl.v ];
+      rtl = {
+        sources = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;
-        dftScript = ./dft/run.tcl;
+      };
+      dft = {
+        enabled = true;
+        script = ./dft/run.tcl;
       };
       dependencies = system: [ (increment.lib.componentFor system) ];
     };

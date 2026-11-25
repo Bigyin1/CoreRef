@@ -53,13 +53,17 @@
           ];
         };
       };
-      files = {
-        rtl = [ ./rtl/rtl.v ];
+      rtl = {
+        sources = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;
+      };
+      dft = {
+        enabled = true;
+        script = ./dft/run.tcl;
+      };
+      backend = {
         constraints = ./be/constraints.sdc;
-        place = ./be/place.tcl;
-        dftReady = ./dft/enabled;
-        dftScript = ./dft/run.tcl;
+        scripts.place = ./be/place.tcl;
       };
       dependencies = system: [
         (counter.lib.componentFor system)
