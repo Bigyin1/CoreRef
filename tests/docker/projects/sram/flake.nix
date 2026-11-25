@@ -26,6 +26,7 @@
           profile = "memory";
           memory = {
             template = ./memory.v.in;
+            body = ./body.v.in;
             testbench = ./testbench.sv;
           };
           backend.constraints = ./constraints.sdc;

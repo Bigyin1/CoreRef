@@ -1,0 +1,6 @@
+  reg [@WIDTH@-1:0] data [0:@DEPTH@-1];
+  always @(posedge clk) begin
+    if (write_enable)
+      data[address] <= write_data;
+    read_data <= data[address];
+  end

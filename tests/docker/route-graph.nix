@@ -46,6 +46,32 @@ let
       flow = withConfig overrides;
     };
   soc = socWith { };
+  counterWith =
+    rtl:
+    project "counter" {
+      inherit increment;
+      flow = withConfig { inherit rtl; };
+    };
+  socUsing =
+    counter:
+    (project "soc" {
+      inherit counter sram;
+      status-register = status;
+    }).packages.${system};
+  counterBody = builtins.readFile ./projects/counter/rtl/rtl.v;
+  changedCounter = counterWith {
+    sources = [
+      (builtins.toFile "counter.v" (
+        lib.replaceStrings [ "value <= next_value" ] [ "value <= ~next_value" ] counterBody
+      ))
+    ];
+  };
+  changedPorts = counterWith {
+    blackbox = builtins.toFile "blackbox.v" (
+      lib.replaceStrings [ "[7:0]" ] [ "[8:0]" ] (builtins.readFile ./projects/counter/rtl/blackbox.v)
+    );
+  };
+  legacyCounter = counterWith { blackbox = null; };
 
   system = "aarch64-linux";
   ready = soc.packages.${system};
@@ -105,6 +131,17 @@ in
         "rtl"
         "testbench"
       ];
+    assert (socUsing changedCounter).netlist.drvPath == ready.netlist.drvPath;
+    assert (socUsing changedCounter).simulate.drvPath != ready.simulate.drvPath;
+    assert
+      changedCounter.packages.${system}.netlist.drvPath != counter.packages.${system}.netlist.drvPath;
+    assert (socUsing changedPorts).netlist.drvPath != ready.netlist.drvPath;
+    assert builtins.hasAttr "macros/counter/blackbox/000000/rtl.v"
+      (plan (socUsing legacyCounter).netlist).inputs;
+    assert lib.hasSuffix "-sram-4x4-blackbox/hdl"
+      (plan ready.netlist).inputs."macros/sram-4x4/blackbox";
+    assert lib.hasSuffix "-sram-8x8-blackbox/hdl"
+      (plan ready.netlist).inputs."macros/sram-8x8/blackbox";
     assert inlineRtl.name == "soc-rtl";
     assert inlineRtl.outputs.out == "hdl";
     assert

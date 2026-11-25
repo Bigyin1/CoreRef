@@ -109,11 +109,13 @@ let
   );
   memoryRoute = import ./memory.nix {
     inherit
+      lib
       stage
       configuration
       verilator
       ;
     inherit (memory) template testbench;
+    body = memory.body or null;
   };
   physical = import ./physical.nix {
     inherit
@@ -169,6 +171,9 @@ assert
       else
         {
           rtl = rtl.sources;
+        }
+        // lib.optionalAttrs (profile == "macro" && (rtl.blackbox or null) != null) {
+          inherit (rtl) blackbox;
         }
         // lib.optionalAttrs dftReady dftRoute.views
         // lib.optionalAttrs (profile == "macro") physical.views;

@@ -11,6 +11,8 @@ def generate(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
     """Render a separate RTL definition for this depth and width."""
     depth, width = cast(int, parameters["depth"]), cast(int, parameters["width"])
     model = (work / "template").read_text(encoding="utf-8")
+    body = work / "body"
+    model = model.replace("@BODY@", body.read_text(encoding="utf-8") if body.is_file() else "")
     model = model.replace("@DEPTH@", str(depth)).replace("@WIDTH@", str(width))
     model = model.replace("@ADDR@", str((depth - 1).bit_length()))
     directory = work / "hdl"

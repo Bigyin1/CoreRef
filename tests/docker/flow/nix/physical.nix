@@ -33,7 +33,7 @@ let
       inputs = {
         inherit rtl;
       }
-      // macroInputs "/rtl" (views: views.rtl);
+      // macroInputs "/blackbox" (views: views.blackbox or views.rtl);
       configuration = { inherit (configuration) top platform; };
       outputs.out = "netlist.v";
     }

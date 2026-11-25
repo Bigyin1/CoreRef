@@ -43,7 +43,7 @@ def synthesize(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     rtl = work / "rtl"
     defines = [f"-D{define}" for define in read_defines(rtl)]
     blackboxes = "".join(
-        _read_rtl(work, staged_sources(macro / "rtl"), ["-lib"])
+        _read_rtl(work, staged_sources(macro / "blackbox"), ["-lib"])
         for macro in sorted((work / "macros").glob("*"))
     )
     design = _read_rtl(work, read_source_list(rtl), defines)
