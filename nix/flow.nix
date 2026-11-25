@@ -71,11 +71,6 @@ in
     {
       inherit apps devShells;
       packages = lib.mapAttrs (_: project: project.packages) projects;
-      lib = {
-        componentFor = system: projects.${system}.component;
-      }
-      // lib.optionalAttrs (profile ? matrix) {
-        mkVariant = { system, ... }@options: projects.${system}.variant (removeAttrs options [ "system" ]);
-      };
+      lib.componentFor = system: projects.${system}.component;
     };
 }

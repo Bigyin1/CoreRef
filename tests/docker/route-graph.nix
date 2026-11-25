@@ -17,7 +17,7 @@ let
     (import (source + "/flake.nix")).outputs (
       {
         self.outPath = source;
-        inherit flow;
+        inherit flow nixpkgs;
       }
       // args
     );
@@ -42,14 +42,18 @@ let
   plan = stage: builtins.fromJSON (builtins.unsafeDiscardStringContext stage.stagePlan);
   lintFiles = (plan ready.lint-physical).inputs;
   dftFiles = (plan ready.dft).inputs;
-  first = sram.lib.mkVariant {
-    inherit system;
-    depth = 4;
-    width = 4;
+  first =
+    (sram.lib.mkSram {
+      depth = 4;
+      width = 4;
+    }).lib.componentFor
+      system;
+  custom = sram.lib.mkSram {
+    depth = 5;
+    width = 3;
   };
-  invalid = sram.lib.mkVariant {
-    inherit system;
-    depth = 2;
+  invalid = sram.lib.mkSram {
+    depth = 1;
     width = 4;
   };
 in
@@ -80,11 +84,18 @@ in
     assert memory."4x4".drvPath != memory."8x8".drvPath;
     assert
       (plan memory."simulate-4x4").configuration == {
-        name = "sram";
         depth = 4;
         width = 4;
+        top = "sram_4x4";
       };
-    assert !(builtins.tryEval invalid.name).success;
+    assert (custom.lib.componentFor system).views.rtl == "${custom.packages.${system}.rtl}/rtl.v";
+    assert
+      (plan custom.packages.${system}.simulate).configuration == {
+        depth = 5;
+        width = 3;
+        top = "sram_5x3";
+      };
+    assert !(builtins.tryEval invalid).success;
     assert lib.all (target: ready.${target}.drvPath == changed.${target}.drvPath) [
       "rtl"
       "dft"
@@ -100,4 +111,5 @@ in
     true;
 
   inherit (soc.packages.${builtins.currentSystem}) rtl dft;
+  customMemory = custom.packages.${builtins.currentSystem}.rtl;
 }

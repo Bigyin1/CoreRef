@@ -46,16 +46,20 @@
       dependencies = system: [
         (counter.lib.componentFor system)
         (status-register.lib.componentFor system)
-        (sram.lib.mkVariant {
-          inherit system;
-          depth = 4;
-          width = 4;
-        })
-        (sram.lib.mkVariant {
-          inherit system;
-          depth = 8;
-          width = 8;
-        })
+        (
+          (sram.lib.mkSram {
+            depth = 4;
+            width = 4;
+          }).lib.componentFor
+            system
+        )
+        (
+          (sram.lib.mkSram {
+            depth = 8;
+            width = 8;
+          }).lib.componentFor
+            system
+        )
       ];
     };
 }

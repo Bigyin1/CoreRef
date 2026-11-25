@@ -15,7 +15,6 @@ spec:
   files ? { },
   parameters ? { },
   dependencies ? (_: [ ]),
-  options ? { },
   siteTools ? { },
 }:
 let
@@ -50,61 +49,40 @@ let
     inherit lib name recipe;
     roots = components;
   };
-  build =
-    target: values:
-    let
-      configuration = {
-        inherit name;
-      }
-      // defaults
-      // (recipe.parameters or { })
-      // (spec.parameters or { })
-      // bindings.parameters
-      // parameters
-      // values;
-      result = route {
-        inherit use variants siteTools;
-        name = target;
-        files = projectFiles;
-        inherit (bindings) groups;
-        parameters = configuration;
-      };
-      view =
-        ref:
-        if builtins.isAttrs ref then result.artifacts.${ref.stage}.${ref.output} else projectFiles.${ref};
-    in
-    {
-      inherit (result) packages;
-      component = {
-        name = target;
-        kind = spec.kind or profile;
-        id = builtins.toJSON [
-          (toString source)
-          values
-        ];
-        parameters = configuration;
-        views = lib.mapAttrs (_: view) (spec.views or { });
-        dependencies = components;
-      };
-    };
-  single = build name { };
-in
-if spec ? matrix then
-  import ./variants.nix {
+  configuration =
+    defaults
+    // (recipe.parameters or { })
+    // (spec.parameters or { })
+    // bindings.parameters
+    // parameters;
+  result = route {
     inherit
-      lib
       name
-      options
-      build
+      use
+      variants
+      siteTools
       ;
-    inherit (spec) matrix;
-    defaultTarget = spec.default;
-  }
-else
-  assert options == { } || throw "${name}: route profile has no build options";
-  single
-  // {
-    packages = single.packages // {
-      default = single.packages.${spec.default};
-    };
-  }
+    files = projectFiles;
+    inherit (bindings) groups;
+    parameters = configuration;
+  };
+  view =
+    ref:
+    if builtins.isAttrs ref then result.artifacts.${ref.stage}.${ref.output} else projectFiles.${ref};
+in
+{
+  packages = result.packages // {
+    default = result.packages.${spec.default};
+  };
+  component = {
+    inherit name;
+    kind = spec.kind or profile;
+    id = builtins.toJSON [
+      (toString source)
+      parameters
+    ];
+    parameters = configuration;
+    views = lib.mapAttrs (_: view) (spec.views or { });
+    dependencies = components;
+  };
+}

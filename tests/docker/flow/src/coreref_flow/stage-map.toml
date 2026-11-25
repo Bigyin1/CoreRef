@@ -100,11 +100,6 @@ use = ["memory"]
 default = "rtl"
 views.rtl = { stage = "rtl", output = "out" }
 
-[profiles.memory.matrix]
-axes = { depth = { min = 2 }, width = { min = 1 } }
-name = "{depth}x{width}"
-exports = { "{variant}" = "rtl", "simulate-{variant}" = "simulate" }
-
 [modules.rtl.rtl]
 transform = "coreref_flow.stages.rtl:assemble"
 inputs."own.v" = "rtl"
@@ -236,7 +231,7 @@ outputs.out = "rtl.v"
 transform = "coreref_flow.stages.verification:simulate_sram"
 inputs."rtl.v" = { stage = "rtl", output = "out" }
 inputs."testbench.sv" = "testbench"
-parameters = ["name", "depth", "width"]
+parameters = ["depth", "width", "top"]
 tools = ["verilator"]
 outputs.out = "simulation.log"
 
