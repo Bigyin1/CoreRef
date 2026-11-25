@@ -23,6 +23,7 @@
       files = {
         rtl = ./rtl/rtl.v;
         testbench = ./rtl/testbench.sv;
+        dftScript = ./dft/run.tcl;
       };
       dependencies = system: [ (increment.lib.componentFor system) ];
     };

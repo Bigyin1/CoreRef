@@ -12,10 +12,26 @@ let
     parameters.label = "ok";
   };
   example = core.mkRoute args;
+  optionalArgs = args // {
+    variants = [ "optional-input" ];
+  };
+  fallback = core.mkRoute optionalArgs;
+  preferred = core.mkRoute (optionalArgs // { use = args.use ++ [ "optional" ]; });
   fails = value: !(builtins.tryEval value).success;
 in
 assert fails (core.mkRoute (args // { variants = [ "cycle" ]; }));
 assert fails (core.mkRoute (args // { use = [ "missing" ]; }));
+assert fails (
+  core.mkRoute (
+    args
+    // {
+      variants = [
+        "optional-input"
+        "unknown-primary"
+      ];
+    }
+  )
+);
 assert fails (core.mkRoute (args // { variants = [ "bad-output" ]; })).artifacts.consume.out;
 assert fails (
   core.mkRoute (
@@ -31,6 +47,8 @@ assert fails (
 {
   stage-graph = pkgs.runCommand "coreref-stage-graph-test" { } ''
     test "$(cat ${example.artifacts.consume.out})" = "summary ok"
+    test "$(cat ${fallback.artifacts.consume.out})" = "summary ok"
+    test "$(cat ${preferred.artifacts.consume.out})" = "data ok"
     test "$(cat ${lib.getOutput "summary" example.packages.summary}/summary.txt)" = "summary"
     touch "$out"
   '';

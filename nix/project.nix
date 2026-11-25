@@ -43,6 +43,7 @@ let
   );
   use = spec.use ++ lib.concatMap (rule: rule.use or [ ]) rules;
   variants = (spec.variants or [ ]) ++ lib.concatMap (rule: rule.variants or [ ]) rules;
+  views = lib.foldl' (merged: rule: merged // (rule.views or { })) (spec.views or { }) rules;
 
   components = dependencies system;
   bindings = import ./dependencies.nix {
@@ -82,7 +83,7 @@ in
       parameters
     ];
     parameters = configuration;
-    views = lib.mapAttrs (_: view) (spec.views or { });
+    views = lib.mapAttrs (_: view) views;
     dependencies = components;
   };
 }

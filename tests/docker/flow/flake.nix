@@ -27,6 +27,7 @@
         tools = {
           yosys = [ pkgs.yosys ];
           openroad = [ pkgs.openroad ];
+          tcl = [ pkgs.tcl ];
           verilator = [
             verilatorPkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.verilator
             pkgs.stdenv.cc

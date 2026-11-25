@@ -8,7 +8,6 @@ cts = "src/coreref_flow/stages/scripts/cts.tcl"
 route = "src/coreref_flow/stages/scripts/route.tcl"
 
 [parameters]
-scan = false
 macroInstance = "hard_macro"
 
 [selections.synthesizable]
@@ -65,17 +64,23 @@ rules = [{ whenFiles = ["testbench"], use = ["simulation"] }]
 views = { rtl = "rtl" }
 
 [profiles.dft]
-use = ["rtl", "dft"]
-variants = ["hierarchical-dft"]
+use = ["rtl"]
 default = "rtl"
-rules = [{ whenFiles = ["testbench"], use = ["simulation", "dft-simulation"] }]
-parameters.scan = true
-views = { rtl = "rtl", dft = { stage = "dft", output = "module" } }
+rules = [
+  { whenFiles = ["dftScript"], use = ["dft"], variants = ["hierarchical-dft"], views = { dft = { stage = "dft", output = "module" } } },
+  { whenFiles = ["testbench"], use = ["simulation"] },
+  { whenFiles = ["testbench", "dftScript"], use = ["dft-simulation"] },
+]
+views = { rtl = "rtl" }
 
 [profiles.macro]
-use = ["rtl", "dft", "backend"]
+use = ["rtl", "backend"]
 default = "rtl"
-rules = [{ whenFiles = ["testbench"], use = ["simulation", "dft-simulation"] }]
+rules = [
+  { whenFiles = ["dftScript"], use = ["dft"] },
+  { whenFiles = ["testbench"], use = ["simulation"] },
+  { whenFiles = ["testbench", "dftScript"], use = ["dft-simulation"] },
+]
 
 [profiles.macro.views]
 rtl = "rtl"
@@ -88,9 +93,9 @@ use = ["rtl", "backend", "check-netlist"]
 variants = ["checked-synthesis"]
 default = "rtl"
 rules = [
-  { whenFiles = ["dftReady"], use = ["dft"], otherwise = { use = ["rtl-synthesis"], variants = ["rtl-synthesis"] } },
+  { whenFiles = ["dftReady", "dftScript"], use = ["dft"] },
   { whenFiles = ["testbench"], use = ["simulation"] },
-  { whenFiles = ["testbench", "dftReady"], use = ["dft-simulation"] },
+  { whenFiles = ["testbench", "dftReady", "dftScript"], use = ["dft-simulation"] },
 ]
 views = { rtl = "rtl" }
 
@@ -130,15 +135,17 @@ outputs.out = "simulation.log"
 [modules.dft.dft]
 transform = "coreref_flow.stages.rtl:assemble_dft"
 inputs."own.v" = "rtl"
+inputs."dft.tcl" = "dftScript"
 groups = ["dft"]
-parameters = ["scan"]
+tools = ["tcl"]
 outputs.out = "dft_output.v"
 
 [modules.dft-simulation.dft-simulation]
 transform = "coreref_flow.stages.rtl:assemble_dft"
 inputs."own.v" = "rtl"
+inputs."dft.tcl" = "dftScript"
 groups = ["dftSimulation"]
-parameters = ["scan"]
+tools = ["tcl"]
 outputs.out = "dft_output.v"
 
 [modules.dft-simulation.simulate-dft]
@@ -149,14 +156,24 @@ tools = ["verilator"]
 configuration.defines = ["COREREF_DFT"]
 outputs.out = "simulation.log"
 
+[modules.backend.rtl-synthesis-input]
+transform = "coreref_flow.stages.rtl:assemble"
+inputs."own.v" = "rtl"
+groups = ["synthesizable"]
+outputs.out = "rtl.v"
+
 [modules.backend.synth]
 transform = "coreref_flow.stages.physical:synthesize"
-inputs."design.v" = { stage = "dft", output = "out" }
 groups = ["macroRtl"]
 parameters = ["top", "platform"]
 tools = ["yosys"]
 outputs.out = "netlist.v"
 exports.netlist = "out"
+
+[modules.backend.synth.inputs."design.v"]
+stage = "dft"
+output = "out"
+fallback = { stage = "rtl-synthesis-input", output = "out" }
 
 [modules.backend.floorplan]
 transform = "coreref_flow.stages.physical:openroad"
@@ -237,16 +254,6 @@ outputs.out = "simulation.log"
 
 [variants.hierarchical-dft.dft.outputs]
 module = "dft_module.v"
-
-[variants.rtl-synthesis.synth.inputs."design.v"]
-stage = "rtl-synthesis-input"
-output = "out"
-
-[modules.rtl-synthesis.rtl-synthesis-input]
-transform = "coreref_flow.stages.rtl:assemble"
-inputs."own.v" = "rtl"
-groups = ["synthesizable"]
-outputs.out = "rtl.v"
 
 [variants.checked-synthesis.floorplan]
 needs = ["check-netlist"]

@@ -25,18 +25,36 @@ let
   counter = project "counter" { inherit increment; };
   status = project "status-register" { inherit increment; };
   sram = project "sram" { };
+  withFiles = overrides: {
+    lib.mkProject = config: flow.lib.mkProject (config // { files = config.files // overrides; });
+  };
+  missingScript = ./missing-dft-script;
+  statusWithoutDft = project "status-register" {
+    inherit increment;
+    flow = withFiles { dftScript = missingScript; };
+  };
   socWith =
     overrides:
     project "soc" {
       inherit counter increment sram;
       status-register = status;
-      flow.lib.mkProject = config: flow.lib.mkProject (config // { files = config.files // overrides; });
+      flow = withFiles overrides;
     };
   soc = socWith { };
 
   system = "aarch64-linux";
   ready = soc.packages.${system};
-  fallback = (socWith { dftReady = ./missing-dft-marker; }).packages.${system};
+  failingScript = builtins.toFile "broken-dft.tcl" ''error "DFT fixture error"'';
+  fallback = socWith {
+    dftReady = ./missing-dft-marker;
+    dftScript = failingScript;
+  };
+  withoutScript = socWith { dftScript = missingScript; };
+  broken = socWith { dftScript = failingScript; };
+  withoutDft = map (projectOutputs: projectOutputs.packages.${system}) [
+    fallback
+    withoutScript
+  ];
   changed = (socWith { place = ./variants/place.tcl; }).packages.${system};
   memory = sram.packages.${system};
   plan = stage: builtins.fromJSON (builtins.unsafeDiscardStringContext stage.stagePlan);
@@ -65,8 +83,15 @@ in
         "venv"
       ];
     assert lib.hasSuffix "/dft_output.v" (plan ready.synth).inputs."design.v";
-    assert lib.hasSuffix "/rtl.v" (plan fallback.synth).inputs."design.v";
-    assert !(fallback ? dft) && !(fallback ? simulate-dft) && fallback ? simulate;
+    assert lib.hasSuffix "-run.tcl" dftFiles."dft.tcl";
+    assert lib.hasSuffix "/dft_output.v" (plan broken.packages.${system}.synth).inputs."design.v";
+    assert lib.all (
+      packages: lib.hasSuffix "-soc-rtl-synthesis-input/rtl.v" (plan packages.synth).inputs."design.v"
+    ) withoutDft;
+    assert lib.all (
+      packages: !(packages ? dft) && !(packages ? simulate-dft) && packages ? simulate
+    ) withoutDft;
+    assert !((statusWithoutDft.lib.componentFor system).views ? dft);
     assert lib.hasSuffix "-soc-check-netlist" (builtins.head (plan ready.floorplan).orderOnly);
     assert
       builtins.attrNames lintFiles == [
@@ -112,4 +137,6 @@ in
 
   inherit (soc.packages.${builtins.currentSystem}) rtl dft;
   customMemory = custom.packages.${builtins.currentSystem}.rtl;
+  fallbackRtl = fallback.packages.${builtins.currentSystem}.rtl-synthesis-input;
+  brokenDft = broken.packages.${builtins.currentSystem}.dft;
 }

@@ -42,6 +42,7 @@
         constraints = ./be/constraints.sdc;
         place = ./be/place.tcl;
         dftReady = ./dft/enabled;
+        dftScript = ./dft/run.tcl;
       };
       dependencies = system: [
         (counter.lib.componentFor system)

@@ -2,6 +2,8 @@
 
 import json
 from pathlib import Path
+from subprocess import CalledProcessError
+from unittest.mock import patch
 
 import pytest
 
@@ -13,12 +15,23 @@ from coreref_flow.stages.rtl import assemble_dft
 def test_hierarchical_dft_output_excludes_other_modules(tmp_path: Path) -> None:
     (tmp_path / "sources").mkdir()
     (tmp_path / "sources" / "dependency.v").write_text("module dependency; endmodule\n")
-    (tmp_path / "own.v").write_text("module scan_input; endmodule\n")
-    assemble_dft(tmp_path, tmp_path / "stage.log", {"scan": True})
+    (tmp_path / "dft_module.v").write_text("module scan_output; endmodule\n")
+    with patch("coreref_flow.stages.rtl.subprocess.run") as tcl:
+        assemble_dft(tmp_path, tmp_path / "stage.log", {})
+    assert tcl.call_args.args[0] == ["tclsh", "dft.tcl", "own.v", "dft_module.v"]
     module = (tmp_path / "dft_module.v").read_text()
-    assert "module scan_input" in module
+    assert "module scan_output" in module
     assert "module dependency" not in module
     assert "module dependency" in (tmp_path / "dft_output.v").read_text()
+
+
+def test_dft_propagates_a_tcl_error(tmp_path: Path) -> None:
+    with (
+        patch("coreref_flow.stages.rtl.subprocess.run", side_effect=CalledProcessError(1, "tclsh")),
+        pytest.raises(CalledProcessError),
+    ):
+        assemble_dft(tmp_path, tmp_path / "stage.log", {})
+    assert not (tmp_path / "dft_output.v").exists()
 
 
 def test_non_power_of_two_sram_depth(tmp_path: Path) -> None:

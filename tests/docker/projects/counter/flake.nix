@@ -24,6 +24,7 @@
         rtl = ./rtl/rtl.v;
         testbench = ./rtl/testbench.sv;
         constraints = ./be/constraints.sdc;
+        dftScript = ./dft/run.tcl;
       };
       dependencies = system: [ (increment.lib.componentFor system) ];
     };

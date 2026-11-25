@@ -47,7 +47,7 @@ let
       module: lib.mapAttrsToList lib.nameValuePair (lookup map.modules "route module" module)
     ) use
   );
-  specs = lib.foldl' (
+  selected = lib.foldl' (
     current: patch:
     current
     // mapAttrs (
@@ -55,10 +55,20 @@ let
     ) patch
   ) base patches;
 
-  predecessors =
-    spec:
-    (spec.needs or [ ])
-    ++ builtins.map (input: input.stage) (builtins.filter isAttrs (attrValues (spec.inputs or { })));
+  declaredStages = lib.concatMap attrNames (attrValues map.modules);
+  inputSource =
+    ref:
+    if isAttrs ref && ref ? fallback && !(hasAttr ref.stage selected) then
+      assert elem ref.stage declaredStages || throw "${name}: unknown stage dependency '${ref.stage}'";
+      ref.fallback
+    else
+      ref;
+  specs = mapAttrs (
+    _: spec: spec // { inputs = mapAttrs (_: inputSource) (spec.inputs or { }); }
+  ) selected;
+  inputStages =
+    spec: builtins.map (input: input.stage) (builtins.filter isAttrs (attrValues spec.inputs));
+  predecessors = spec: (spec.needs or [ ]) ++ inputStages spec;
   graph = lib.toposort (before: after: elem before (predecessors specs.${after})) (attrNames specs);
   requireKnownStages = lib.all (stage: builtins.seq (lookup specs "stage dependency" stage) true) (
     lib.concatMap predecessors (attrValues specs)
@@ -93,9 +103,7 @@ let
   stageFor =
     stage: spec:
     let
-      explicit = lib.mapAttrsToList (alias: value: lib.nameValuePair alias (bind value)) (
-        spec.inputs or { }
-      );
+      explicit = lib.mapAttrsToList (alias: value: lib.nameValuePair alias (bind value)) spec.inputs;
       groupFiles = lib.concatMap (
         group:
         lib.mapAttrsToList (alias: value: lib.nameValuePair alias (source value)) (
@@ -110,9 +118,7 @@ let
         builtins.filter (tool: hasAttr tool siteTools) toolNames
       );
       boundParams = lib.genAttrs (spec.parameters or [ ]) (lookup parameters "parameter");
-      filesFromStages = builtins.map (input: input.stage) (
-        builtins.filter isAttrs (attrValues (spec.inputs or { }))
-      );
+      filesFromStages = inputStages spec;
       orderOnly = builtins.map (dep: stages.${dep}.out) (
         builtins.filter (dep: !(elem dep filesFromStages)) (spec.needs or [ ])
       );

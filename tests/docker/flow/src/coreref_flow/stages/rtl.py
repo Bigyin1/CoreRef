@@ -1,5 +1,6 @@
 """Assemble behavioral RTL and hierarchical DFT inputs."""
 
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -14,10 +15,15 @@ def assemble(work: Path, _log: Path, _parameters: Mapping[str, object]) -> None:
     _bundle(work, (work / "own.v").read_bytes(), "rtl.v")
 
 
-def assemble_dft(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
-    """Emit the scan-enabled demonstration module and its standalone bundle."""
-    own = (work / "own.v").read_bytes()
-    if parameters["scan"]:
-        own = b"\x60define DEMO_SCAN\n" + own + b"\n\x60undef DEMO_SCAN\n"
-        (work / "dft_module.v").write_bytes(own)
-    _bundle(work, own, "dft_output.v")
+def assemble_dft(work: Path, log: Path, _parameters: Mapping[str, object]) -> None:
+    """Run the project script on its own RTL and bundle the selected dependencies."""
+    module = work / "dft_module.v"
+    with log.open("wb") as stream:
+        subprocess.run(
+            ["tclsh", "dft.tcl", "own.v", module.name],
+            cwd=work,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            check=True,
+        )
+    _bundle(work, module.read_bytes(), "dft_output.v")
