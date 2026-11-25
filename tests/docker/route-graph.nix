@@ -46,9 +46,14 @@ let
       flow = withConfig overrides;
     };
   soc = socWith { };
+  conflictingDefines = socWith { parameters.defines = [ "COUNTER_RESET=99" ]; };
 
   system = "aarch64-linux";
   ready = soc.packages.${system};
+  otherReset = project "counter" {
+    inherit increment;
+    flow = withConfig { parameters.defines = [ "COUNTER_RESET=7" ]; };
+  };
   suppliedStub = builtins.toFile "counter.v" "module counter(input clk, reset, enable, output [7:0] value); endmodule";
   vendorCounter = project "counter" {
     inherit increment;
@@ -111,9 +116,14 @@ in
         "rtl"
         "testbench"
       ];
-    assert builtins.hasAttr "macros/counter/rtl/000000/rtl.v" (plan ready.netlist).inputs;
-    assert lib.hasSuffix "-sram-4x4-rtl/hdl" (plan ready.netlist).inputs."macros/sram-4x4/rtl";
+    assert
+      (plan ready.netlist).inputs."macros/counter/rtl" == (counter.lib.componentFor system).views.rtl;
+    assert lib.hasSuffix "-sram-4x4-model/hdl" (plan ready.netlist).inputs."macros/sram-4x4/rtl";
     assert (plan vendorSoc.packages.${system}.netlist).inputs."macros/counter/rtl" == suppliedStub;
+    assert otherReset.packages.${system}.rtl.drvPath != counter.packages.${system}.rtl.drvPath;
+    assert otherReset.packages.${system}.netlist.drvPath != counter.packages.${system}.netlist.drvPath;
+    assert
+      (plan conflictingDefines.packages.${system}.simulate).inputs.rtl.plan.inputs == inlineRtl.inputs;
     assert inlineRtl.name == "soc-rtl";
     assert inlineRtl.outputs.out == "hdl";
     assert
@@ -154,7 +164,9 @@ in
         "sources/000001-status-register/000000/rtl.v"
       ];
     assert lib.hasSuffix "/dft_module.v" dftFiles."sources/000001-status-register";
-    assert builtins.any (lib.hasInfix "-counter/") (builtins.attrNames inlineRtl.inputs);
+    assert builtins.elem (counter.lib.componentFor system).views.rtl (
+      builtins.attrValues inlineRtl.inputs
+    );
     assert
       builtins.attrNames ((plan alternateRtl.packages.${system}.simulate).inputs.rtl.plan.inputs) == [
         "files/000000/step_two.v"
@@ -229,6 +241,8 @@ in
     netlist
     gds
     ;
+  consumerDefinesSimulation = conflictingDefines.packages.${builtins.currentSystem}.simulate;
+  consumerDefinesDftSimulation = conflictingDefines.packages.${builtins.currentSystem}.simulate-dft;
   counterSimulation = counter.packages.${builtins.currentSystem}.simulate;
   statusSimulation = status.packages.${builtins.currentSystem}.simulate;
   counterNetlistCheck =

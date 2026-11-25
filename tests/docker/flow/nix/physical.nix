@@ -26,19 +26,22 @@ let
     );
   macroCells = map (macro: macro.parameters.top) (macros (_: null));
   placements = configuration.macroPlacement;
-  synth = stage (
-    {
-      name = "synth";
-      transform = "physical:synthesize";
-      inputs = {
-        inherit rtl;
+  yosysStage =
+    name: transform: view: output:
+    stage (
+      {
+        inherit name transform;
+        inputs = {
+          inherit rtl;
+        }
+        // macroInputs "/rtl" view;
+        configuration = { inherit (configuration) top platform; };
+        outputs.out = output;
       }
-      // macroInputs "/rtl" (views: views.blackbox or views.rtl);
-      configuration = { inherit (configuration) top platform; };
-      outputs.out = "netlist.v";
-    }
-    // tools.yosys
-  );
+      // tools.yosys
+    );
+  synth = yosysStage "synth" "physical:synthesize" (views: views.blackbox or views.rtl) "netlist.v";
+  model = yosysStage "model" "physical:model" (views: views.rtl) "hdl";
   checkNetlist = stage {
     name = "check-netlist";
     transform = "netlist_check:check_synthesis";
@@ -127,6 +130,7 @@ let
   };
 in
 {
+  inherit model;
   packages =
     lib.mapAttrs (_: step: step.package) {
       inherit

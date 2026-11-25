@@ -2,6 +2,7 @@
 {
   lib,
   stage,
+  model,
   sourceFiles,
   testbench,
   configuration,
@@ -26,7 +27,9 @@ let
       configuration.defines = stageDefines;
       outputs.out = "hdl";
     };
-  rtl = assemble "rtl" all defines;
+  sources = assemble "rtl" all defines;
+  rtl = if model == null then sources else model;
+  simulationInput = if model == null then rtl.inline.out else model.artifacts.out;
   forSynth = assemble "rtl-synthesis-input" synthesizable defines;
 
   simulate =
@@ -58,7 +61,7 @@ in
         {
           name = "lint";
           transform = "verification:lint";
-          inputs.rtl = rtl.inline.out;
+          inputs.rtl = sources.inline.out;
           configuration = { inherit top; };
           outputs.out = "lint.log";
         }
@@ -77,6 +80,6 @@ in
       }).package;
   }
   // lib.optionalAttrs hasTestbench {
-    simulate = (simulate "simulate" rtl.inline.out [ ]).package;
+    simulate = (simulate "simulate" simulationInput [ ]).package;
   };
 }

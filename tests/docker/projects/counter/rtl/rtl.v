@@ -9,7 +9,7 @@ module counter(
 
   always @(posedge clk)
     if (reset)
-      value <= 8'd0;
+      value <= `COUNTER_RESET;
     else if (enable)
       value <= next_value;
 endmodule

@@ -19,7 +19,10 @@
       name = "counter";
       source = self.outPath;
       profile = "macro";
-      parameters.top = "counter";
+      parameters = {
+        top = "counter";
+        defines = [ "COUNTER_RESET=0" ];
+      };
       rtl = {
         sources = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;

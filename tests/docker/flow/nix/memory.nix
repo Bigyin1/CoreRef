@@ -2,6 +2,7 @@
 {
   stage,
   template,
+  model,
   testbench,
   configuration,
   verilator,
@@ -11,7 +12,7 @@ let
     name = "rtl";
     transform = "memory:generate";
     inputs = { inherit template; };
-    configuration = { inherit (configuration) depth width; };
+    configuration = { inherit (configuration) depth width defines; };
     outputs.out = "hdl";
   };
   simulate = stage (
@@ -19,7 +20,7 @@ let
       name = "simulate";
       transform = "verification:simulate_sram";
       inputs = {
-        rtl = rtl.artifacts.out;
+        rtl = model.artifacts.out;
         inherit testbench;
       };
       configuration = { inherit (configuration) top depth width; };
@@ -30,9 +31,10 @@ let
 in
 {
   packages = {
-    default = rtl.package;
-    rtl = rtl.package;
+    default = model.package;
+    rtl = model.package;
     simulate = simulate.package;
   };
-  views.rtl = rtl.artifacts.out;
+  source = rtl.artifacts.out;
+  views.rtl = model.artifacts.out;
 }

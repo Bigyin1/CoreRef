@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import cast
 
-from .rtl import read_defines, read_source_list, staged_sources
+from .rtl import read_defines, read_source_list, staged_sources, write_source_list
 
 
 def _run(work: Path, log: Path, parameters: Mapping[str, object], *command: str) -> None:
@@ -38,19 +38,37 @@ def _read_rtl(work: Path, sources: list[Path], flags: list[str]) -> str:
     return f"yosys read_verilog -sv {_tcl_words(args)}\n"
 
 
-def synthesize(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
-    """Map the design to Nangate45 cells, importing macro ports as a black box."""
+def _design(work: Path, macro_flags: list[str]) -> str:
+    """Read the selected RTL bundle and nested macro inputs in order."""
     rtl = work / "rtl"
     defines = [f"-D{define}" for define in read_defines(rtl)]
-    blackboxes = "".join(
-        _read_rtl(work, staged_sources(macro / "rtl"), ["-lib"])
+    macros = "".join(
+        _read_rtl(work, staged_sources(macro / "rtl"), macro_flags)
         for macro in sorted((work / "macros").glob("*"))
     )
-    design = _read_rtl(work, read_source_list(rtl), defines)
+    return macros + _read_rtl(work, read_source_list(rtl), defines)
+
+
+def model(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
+    """Elaborate one functional model with the producer's synthesis frontend."""
+    bundle = work / "hdl"
+    bundle.mkdir()
+    (work / "model.tcl").write_text(
+        _design(work, []) + "yosys hierarchy -check -top $::env(COREREF_TOP)\n"
+        "yosys proc\nyosys flatten -noscopeinfo\nyosys opt\nyosys splitnets\nyosys clean -purge\n"
+        "yosys write_verilog -noattr hdl/model.v\n",
+        encoding="utf-8",
+    )
+    _run(work, log, parameters, "yosys", "-c", "model.tcl")
+    write_source_list(bundle, [bundle / "model.v"])
+
+
+def synthesize(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
+    """Map the design to Nangate45 cells, importing macro ports as a black box."""
+    design = _design(work, ["-lib"])
     (work / "synth.tcl").write_text(
         "set lib $::env(COREREF_PLATFORM)/lib/NangateOpenCellLibrary_typical.lib\n"
         "yosys read_liberty -lib $lib\n"
-        f"{blackboxes}"
         f"{design}"
         "yosys synth -flatten -top $::env(COREREF_TOP) -noabc\n"
         "yosys dfflibmap -liberty $lib\n"

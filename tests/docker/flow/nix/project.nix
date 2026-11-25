@@ -87,6 +87,7 @@ let
       stage
       hasTestbench
       ;
+    model = if profile == "macro" then physical.model else null;
     sourceFiles = rtl.sources;
     inherit (components) rtlInputs all synthesizable;
   };
@@ -114,6 +115,7 @@ let
       verilator
       ;
     inherit (memory) template testbench;
+    inherit (physical) model;
   };
   physical = import ./physical.nix {
     inherit
@@ -131,7 +133,7 @@ let
     checkSynthesis = profile == "soc";
     rtl =
       if profile == "memory" then
-        memoryRoute.views.rtl
+        memoryRoute.source
       else if dftReady then
         dftRoute.artifact
       else
@@ -168,7 +170,7 @@ assert
         memoryRoute.views // physical.views
       else
         {
-          rtl = rtl.sources;
+          rtl = if profile == "macro" then physical.model.artifacts.out else rtl.sources;
         }
         // lib.optionalAttrs (profile == "macro" && rtl ? blackbox) { inherit (rtl) blackbox; }
         // lib.optionalAttrs dftReady dftRoute.views

@@ -18,3 +18,6 @@ def generate(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
     source = directory / f"sram_{depth}x{width}.v"
     source.write_text(model, encoding="utf-8")
     write_source_list(directory, [source])
+    defines = cast(list[str], parameters.get("defines", []))
+    if defines:
+        (directory / "defines.f").write_text("\n".join(defines) + "\n", encoding="utf-8")

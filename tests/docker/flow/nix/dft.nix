@@ -2,6 +2,7 @@
 {
   lib,
   stage,
+  model,
   sourceFiles,
   script,
   tcl,
@@ -34,7 +35,7 @@ let
       // tcl
     );
   dft = insert "dft" synthesizable (lib.optionalAttrs hierarchical { module = "dft_module.v"; });
-  forSimulation = insert "dft-simulation" all { };
+  forSimulation = if model == null then insert "dft-simulation" all { } else model;
 in
 {
   artifact = dft.artifacts.out;

@@ -10,6 +10,7 @@ let
     view:
     selectComponents {
       inherit roots;
+      stopAt = isMacro;
       viewKey = component: view component.views;
     };
   synthesizable =
