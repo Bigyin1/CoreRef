@@ -4,9 +4,12 @@ let
   inherit (core.inputs) nixpkgs;
   inherit (nixpkgs) lib;
   experimental = import ./flow/flake.nix;
+  # Use the same release as the fixture flake while replacing its GitLab input.
+  flowLock = builtins.fromJSON (builtins.readFile ./flow/flake.lock);
   flow = experimental.outputs {
     inherit nixpkgs;
     coreref = core;
+    edalizeSrc = builtins.fetchTree flowLock.nodes.edalizeSrc.locked;
     verilatorPkgs = builtins.getFlake experimental.inputs.verilatorPkgs.url;
   };
   project =
@@ -172,6 +175,8 @@ in
   inherit (soc.packages.${builtins.currentSystem}) rtl dft;
   inherit (soc.packages.${builtins.currentSystem}) simulate-dft lint-physical netlist;
   incrementSimulation = increment.packages.${builtins.currentSystem}.simulate;
+  incrementLint = increment.packages.${builtins.currentSystem}.lint;
+  customMemorySimulation = custom.packages.${builtins.currentSystem}.simulate;
   alternateRtlSimulation = alternateRtl.packages.${builtins.currentSystem}.simulate;
   fallbackNetlist = fallback.packages.${builtins.currentSystem}.netlist;
   customMemory = custom.packages.${builtins.currentSystem}.rtl;

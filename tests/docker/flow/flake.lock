@@ -1,5 +1,18 @@
 {
   "nodes": {
+    "edalizeSrc": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776718576,
+        "narHash": "sha256-l9KnPcJ7p6hEuhH93fcE73jk9P9RgfKvneUZRBm4zec=",
+        "type": "tarball",
+        "url": "https://files.pythonhosted.org/packages/source/e/edalize/edalize-0.6.7.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://files.pythonhosted.org/packages/source/e/edalize/edalize-0.6.7.tar.gz"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1795258312,
@@ -18,6 +31,7 @@
     },
     "root": {
       "inputs": {
+        "edalizeSrc": "edalizeSrc",
         "nixpkgs": "nixpkgs",
         "verilatorPkgs": "verilatorPkgs"
       }

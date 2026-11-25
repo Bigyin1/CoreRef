@@ -1,67 +1,84 @@
-"""Compile and run the selected RTL or hierarchical DFT testbench."""
+"""Run Verilator verification through Edalize."""
 
-import subprocess
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from shutil import copyfile
 from typing import cast
+
+from edalize.flows.lint import Lint  # type: ignore[import-untyped]
+from edalize.flows.sim import Sim  # type: ignore[import-untyped]
+
+from .rtl import read_source_list
 
 _WARNINGS = ("-Wall", "-Wno-DECLFILENAME")
 
 
+def _edam(
+    work: Path, top: str, defines: Sequence[str], *, testbench: Path | None = None
+) -> dict[str, object]:
+    sources = read_source_list(work / "rtl")
+    options = {"tool": "verilator", "verilator_options": list(_WARNINGS)}
+    if testbench is not None:
+        sources.append(testbench)
+        options = {
+            "tool": "verilator",
+            "mode": "binary",
+            "exe": "false",
+            "verilator_options": [*_WARNINGS, "--assert", "--timescale", "1ns/1ps", "-j", "2"],
+        }
+    parameters = {}
+    for define in defines:
+        name, separator, value = define.partition("=")
+        parameters[name] = {
+            "paramtype": "vlogdefine",
+            "datatype": "str" if separator else "bool",
+            # Preserve the literal when Verilator reads the generated argument file.
+            "default": json.dumps(value, ensure_ascii=False) if separator else True,
+        }
+    return {
+        "name": "verification",
+        "toplevel": top,
+        "files": [
+            {
+                "name": str(path.relative_to(work)),
+                "file_type": "systemVerilogSource" if path.suffix == ".sv" else "verilogSource",
+            }
+            for path in sources
+        ],
+        "parameters": parameters,
+        "flow_options": options,
+    }
+
+
 def lint(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
-    """Run Verilator with warnings treated as errors."""
-    command = ["verilator", *_WARNINGS, "--lint-only", "--top-module", str(parameters["top"])]
+    """Lint the selected RTL with warnings treated as errors."""
+    defines = cast(list[str], parameters.get("defines", []))
+    backend = Lint(_edam(work, str(parameters["top"]), defines), str(work))
     with log.open("wb") as stream:
-        subprocess.run(
-            [*command, *_defines(parameters), "-F", "rtl/sources.f"],
-            cwd=work,
-            stdout=stream,
-            stderr=stream,
-            check=True,
-        )
-    (work / "lint.log").write_bytes(log.read_bytes())
+        backend.stdout = backend.stderr = stream
+        backend.configure()
+        backend.build()
+    copyfile(log, work / "lint.log")
 
 
-def _defines(parameters: Mapping[str, object]) -> list[str]:
-    return [f"-D{define}" for define in cast(list[str], parameters.get("defines", []))]
-
-
-def _simulate(work: Path, log: Path, flags: Sequence[str]) -> None:
+def _simulate(work: Path, log: Path, defines: Sequence[str]) -> None:
     testbench = (work / "testbench").rename(work / "testbench.sv")
-    command = [
-        "verilator",
-        *_WARNINGS,
-        *flags,
-        "--binary",
-        "--assert",
-        "--timescale",
-        "1ns/1ps",
-        "-j",
-        "2",
-        "--top-module",
-        "testbench",
-        "-o",
-        "simulate",
-        "-F",
-        "rtl/sources.f",
-        testbench.name,
-    ]
+    backend = Sim(_edam(work, "testbench", defines, testbench=testbench), str(work))
     with log.open("wb") as stream:
-        subprocess.run(command, cwd=work, stdout=stream, stderr=stream, check=True)
-        result = subprocess.run(
-            [str(work / "obj_dir" / "simulate")],
-            cwd=work,
-            stdout=subprocess.PIPE,
-            stderr=stream,
-            check=True,
-        )
-    (work / "simulation.log").write_bytes(result.stdout)
+        backend.stdout = backend.stderr = stream
+        backend.configure()
+        backend.build()
+        with (work / "simulation.log").open("wb") as output:
+            backend.stdout = output
+            backend.run()
 
 
 def simulate(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Run the project's testbench against the supplied behavioral sources."""
+    defines = cast(list[str], parameters.get("defines", []))
     extra = cast(list[str], parameters.get("extraDefines", []))
-    _simulate(work, log, [*_defines(parameters), *(f"-D{define}" for define in extra)])
+    _simulate(work, log, [*defines, *extra])
 
 
 def simulate_sram(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
@@ -70,8 +87,8 @@ def simulate_sram(work: Path, log: Path, parameters: Mapping[str, object]) -> No
         work,
         log,
         [
-            f"-DTB_SRAM={parameters['top']}",
-            f"-DTB_DEPTH={parameters['depth']}",
-            f"-DTB_WIDTH={parameters['width']}",
+            f"TB_SRAM={parameters['top']}",
+            f"TB_DEPTH={parameters['depth']}",
+            f"TB_WIDTH={parameters['width']}",
         ],
     )

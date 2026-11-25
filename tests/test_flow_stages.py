@@ -1,8 +1,9 @@
-"""Test the Python transforms used by the Nix stage map."""
+"""Test the Python transforms used by the Nix stages."""
 
 import json
 from pathlib import Path
 from subprocess import CalledProcessError, CompletedProcess
+from typing import BinaryIO
 from unittest.mock import patch
 
 import pytest
@@ -71,15 +72,33 @@ def test_non_power_of_two_sram_depth(tmp_path: Path) -> None:
     assert source.read_text() == "sram_5x4; address_bits=3"
 
 
-def test_simulation_passes_source_list_and_defines_to_verilator(tmp_path: Path) -> None:
-    (tmp_path / "testbench").write_text("module testbench; endmodule\n")
-    with patch("coreref_flow.stages.verification.subprocess.run") as tool:
-        tool.side_effect = [CompletedProcess([], 0), CompletedProcess([], 0, stdout=b"PASS\n")]
-        simulate(tmp_path, tmp_path / "stage.log", {"defines": ["TB_STEP=2"]})
+def test_simulation_passes_ordered_sources_and_defines_to_edalize(tmp_path: Path) -> None:
+    directory = tmp_path / "rtl"
+    directory.mkdir()
+    (directory / "sources.f").write_text("z.v\na.sv\n", encoding="utf-8")
+    (tmp_path / "testbench").write_text("module testbench; endmodule\n", encoding="utf-8")
 
-    command = tool.call_args_list[0].args[0]
-    assert "-DTB_STEP=2" in command
-    assert command[-3:] == ["-F", "rtl/sources.f", "testbench.sv"]
+    def run_tool(
+        command: list[str], *, stdout: BinaryIO, **_kwargs: object
+    ) -> CompletedProcess[bytes]:
+        if command[0] == "./Vtestbench":
+            stdout.write(b"PASS\n")
+        return CompletedProcess(command, 0)
+
+    with patch("edalize.flows.edaflow.run", side_effect=run_tool) as tool:
+        simulate(
+            tmp_path,
+            tmp_path / "stage.log",
+            {"defines": ["TB_STEP=2", 'TB_LABEL="hello world"'], "extraDefines": ["DFT"]},
+        )
+
+    options = (tmp_path / "verification.vc").read_text(encoding="utf-8").splitlines()
+    sources = [line for line in options if line.endswith((".v", ".sv"))]
+    assert sources == ["rtl/z.v", "rtl/a.sv", "testbench.sv"]
+    assert {"--binary", "--assert", '-DTB_STEP="2"', "-DDFT=1"}.issubset(options)
+    assert r'-DTB_LABEL="\"hello world\""' in options
+    assert tool.call_args_list[0].args[0][0] == "make"
+    assert tool.call_args_list[1].args[0] == ["./Vtestbench"]
     assert (tmp_path / "simulation.log").read_bytes() == b"PASS\n"
 
 
