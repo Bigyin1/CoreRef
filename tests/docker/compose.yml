@@ -1,0 +1,50 @@
+x-worker: &worker
+  build: .
+  environment:
+    COREREF_TEST_PASSWORD: "${COREREF_TEST_PASSWORD:?Run make integration-docker}"
+  volumes:
+    - .:/suite:ro
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce@sha256:d3727f8b1a1ee6de44916bb9113f3dc40339dba2d6a6ad6ef331d0f239004056
+    hostname: gitlab
+    shm_size: 256m
+    environment:
+      COREREF_TEST_PASSWORD: "${COREREF_TEST_PASSWORD:?Run make integration-docker}"
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab:18081'
+        gitlab_rails['initial_root_password'] = ENV.fetch('COREREF_TEST_PASSWORD')
+        puma['worker_processes'] = 0
+        sidekiq['concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+        gitlab_kas['enable'] = false
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:18081/api/v4/projects?per_page=1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 90s
+      retries: 36
+  cache:
+    image: nginx@sha256:b50897d5c7b1aa08067c3d90c5e8b3e47ec4e3c91c91446f67820228f7b41e34
+    volumes:
+      - cache:/usr/share/nginx/html:ro,volume-nocopy
+  publisher:
+    <<: *worker
+    user: root
+    command:
+      - bash
+      - -ec
+      - |
+        chown flow:flow /cache
+        exec runuser -u flow -- bash /suite/publish.sh
+    volumes:
+      - ../..:/checkout:ro
+      - .:/suite:ro
+      - cache:/cache
+  verifier:
+    <<: *worker
+    command: ["bash", "/suite/verify.sh"]
+
+volumes:
+  cache:

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coreref-flow"
+version = "0.1.0"
+description = "Experimental RTL, hierarchical DFT and OpenROAD flow on CoreRef"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["coreref>=0.1,<0.2"]
+
+[project.scripts]
+coreref-flow = "coreref_flow.cli:app"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "SIM", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 6
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coreref_flow"]

@@ -25,6 +25,7 @@ packages = ["src/coreref"]
 required-version = ">=0.17.2,<0.18"
 target-version = "py310"
 line-length = 100
+src = ["src", "tests/docker/flow/src"]
 
 [tool.ruff.lint]
 preview = true
@@ -54,8 +55,11 @@ max-statements = 40
 [tool.mypy]
 python_version = "3.10"
 strict = true
+mypy_path = ["src", "tests/docker/flow/src"]
+explicit_package_bases = true
 files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests/docker/flow/src"]
 addopts = "-ra"

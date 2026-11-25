@@ -1,0 +1,37 @@
+"""Test the Python transforms used by the Nix stage map."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from coreref_flow.stages.memory import generate
+from coreref_flow.stages.netlist_check import check_synthesis
+from coreref_flow.stages.rtl import assemble_dft
+
+
+def test_hierarchical_dft_output_excludes_other_modules(tmp_path: Path) -> None:
+    (tmp_path / "sources").mkdir()
+    (tmp_path / "sources" / "dependency.v").write_text("module dependency; endmodule\n")
+    (tmp_path / "own.v").write_text("module scan_input; endmodule\n")
+    assemble_dft(tmp_path, tmp_path / "stage.log", {"scan": True})
+    module = (tmp_path / "dft_module.v").read_text()
+    assert "module scan_input" in module
+    assert "module dependency" not in module
+    assert "module dependency" in (tmp_path / "dft_output.v").read_text()
+
+
+def test_non_power_of_two_sram_depth(tmp_path: Path) -> None:
+    (tmp_path / "memory.v.in").write_text("sram_@DEPTH@x@WIDTH@; address_bits=@ADDR@")
+    generate(tmp_path, tmp_path / "log", {"depth": 5, "width": 4})
+    assert (tmp_path / "rtl.v").read_text() == "sram_5x4; address_bits=3"
+
+
+def test_netlist_check_requires_exact_top(tmp_path: Path) -> None:
+    netlist = tmp_path / "netlist.v"
+    netlist.write_text("module unexpected_top; endmodule\n")
+    with pytest.raises(ValueError, match="does not declare module top"):
+        check_synthesis(tmp_path, tmp_path / "log", {"top": "top"})
+    netlist.write_text("module top (a); endmodule\n")
+    check_synthesis(tmp_path, tmp_path / "log", {"top": "top"})
+    assert json.loads((tmp_path / "netlist-check.json").read_text()) == {"top": "top"}

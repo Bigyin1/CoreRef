@@ -1,4 +1,4 @@
-.PHONY: check unit integration build
+.PHONY: check unit integration integration-docker build
 
 check:
 	uv run --frozen ruff check .
@@ -10,6 +10,9 @@ unit:
 
 integration:
 	nix flake check
+
+integration-docker:
+	bash tests/docker/run.sh
 
 build:
 	uv build

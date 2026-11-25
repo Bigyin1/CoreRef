@@ -1,0 +1,152 @@
+# Stage connections and the files each Python transform consumes.
+
+[modules.rtl.rtl]
+transform = "coreref_flow.stages.rtl:assemble"
+inputs."own.v" = "rtlFile"
+groups = ["rtl"]
+outputs.out = "rtl.v"
+
+[modules.rtl.lint]
+transform = "coreref_flow.stages.verification:lint"
+inputs."rtl.v" = { stage = "rtl", output = "out" }
+parameters = ["top"]
+tools = ["verilator"]
+outputs.out = "lint.log"
+
+[modules.rtl.lint-physical]
+transform = "coreref_flow.stages.physical_lint:check_inputs"
+inputs."own.v" = "rtlFile"
+groups = ["physicalLint"]
+parameters = ["top"]
+outputs.out = "inputs.json"
+
+[modules.simulation.simulate]
+transform = "coreref_flow.stages.verification:simulate"
+inputs."rtl.v" = { stage = "rtl", output = "out" }
+inputs."testbench.sv" = "testbench"
+tools = ["verilator"]
+outputs.out = "simulation.log"
+
+[modules.dft.dft]
+transform = "coreref_flow.stages.rtl:assemble_dft"
+inputs."own.v" = "rtlFile"
+groups = ["dft"]
+parameters = ["scan"]
+outputs.out = "dft_output.v"
+
+[modules.dft-simulation.dft-simulation]
+transform = "coreref_flow.stages.rtl:assemble_dft"
+inputs."own.v" = "rtlFile"
+groups = ["dftSimulation"]
+parameters = ["scan"]
+outputs.out = "dft_output.v"
+
+[modules.dft-simulation.simulate-dft]
+transform = "coreref_flow.stages.verification:simulate"
+inputs."rtl.v" = { stage = "dft-simulation", output = "out" }
+inputs."testbench.sv" = "testbench"
+tools = ["verilator"]
+configuration.defines = ["COREREF_DFT"]
+outputs.out = "simulation.log"
+
+[modules.backend.synth]
+transform = "coreref_flow.stages.physical:synthesize"
+inputs."design.v" = { stage = "dft", output = "out" }
+groups = ["macroRtl"]
+parameters = ["top", "platform"]
+tools = ["yosys"]
+outputs.out = "netlist.v"
+exports.netlist = "out"
+
+[modules.backend.floorplan]
+transform = "coreref_flow.stages.physical:openroad"
+inputs."netlist.v" = { stage = "synth", output = "out" }
+inputs."constraints.sdc" = "constraints"
+inputs."common.tcl" = "common"
+inputs."floorplan.tcl" = "floorplan"
+groups = ["macroLib", "macroLef"]
+parameters = ["top", "platform", "macro", "macroInstance"]
+tools = ["openroad"]
+configuration.script = "floorplan.tcl"
+outputs.out = "floorplan.odb"
+
+[modules.backend.place]
+transform = "coreref_flow.stages.physical:openroad"
+inputs."floorplan.odb" = { stage = "floorplan", output = "out" }
+inputs."constraints.sdc" = "constraints"
+inputs."common.tcl" = "common"
+inputs."place.tcl" = "place"
+groups = ["macroLib"]
+parameters = ["top", "platform", "macro", "macroInstance"]
+tools = ["openroad"]
+configuration.script = "place.tcl"
+outputs.out = "placed.odb"
+
+[modules.backend.cts]
+transform = "coreref_flow.stages.physical:openroad"
+inputs."placed.odb" = { stage = "place", output = "out" }
+inputs."constraints.sdc" = "constraints"
+inputs."common.tcl" = "common"
+inputs."cts.tcl" = "cts"
+groups = ["macroLib"]
+parameters = ["top", "platform", "macro", "macroInstance"]
+tools = ["openroad"]
+configuration.script = "cts.tcl"
+outputs.out = "cts.odb"
+
+[modules.backend.route]
+transform = "coreref_flow.stages.physical:openroad"
+inputs."cts.odb" = { stage = "cts", output = "out" }
+inputs."constraints.sdc" = "constraints"
+inputs."common.tcl" = "common"
+inputs."route.tcl" = "route"
+groups = ["macroLib"]
+parameters = ["top", "platform", "macro", "macroInstance"]
+tools = ["openroad"]
+configuration.script = "route.tcl"
+outputs = { out = "routed.odb", verilog = "routed.v", def = "final.def", spef = "parasitics.spef", lef = "abstract.lef", liberty = "timing.lib", timing = "timing.rpt", drc = "routing_drc.rpt" }
+exports = { lef = "lef", liberty = "liberty", spef = "spef" }
+
+[modules.backend.gds]
+transform = "coreref_flow.stages.scripts.stream:stream"
+inputs."final.def" = { stage = "route", output = "def" }
+groups = ["macroLef", "macroGds"]
+parameters = ["top", "platform", "macro"]
+pythonPackages = ["klayout"]
+outputs.out = "final.gds"
+
+[modules.check-netlist.check-netlist]
+transform = "coreref_flow.stages.netlist_check:check_synthesis"
+inputs."netlist.v" = { stage = "synth", output = "out" }
+parameters = ["top"]
+outputs.out = "netlist-check.json"
+
+[modules.memory.rtl]
+transform = "coreref_flow.stages.memory:generate"
+inputs."memory.v.in" = "template"
+parameters = ["depth", "width"]
+outputs.out = "rtl.v"
+
+[modules.memory.simulate]
+transform = "coreref_flow.stages.verification:simulate_sram"
+inputs."rtl.v" = { stage = "rtl", output = "out" }
+inputs."testbench.sv" = "testbench"
+parameters = ["depth", "width", "top"]
+tools = ["verilator"]
+outputs.out = "simulation.log"
+
+[variants.hierarchical-dft.dft.outputs]
+module = "dft_module.v"
+
+[variants.rtl-synthesis.synth.inputs."design.v"]
+stage = "rtl-synthesis-input"
+output = "out"
+
+[modules.rtl-synthesis.rtl-synthesis-input]
+transform = "coreref_flow.stages.rtl:assemble"
+inputs."own.v" = "rtlFile"
+groups = ["synthesizable"]
+outputs.out = "rtl.v"
+
+[variants.checked-synthesis.floorplan]
+needs = ["check-netlist"]

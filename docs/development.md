@@ -14,6 +14,22 @@ nix build .#netlist .#lef .#liberty .#gds --no-link --print-out-paths
 nix copy --to file:///srv/nix-cache .#netlist .#lef .#liberty .#gds
 ~~~
 
+## Docker-интеграция
+
+Команда `make integration-docker` запускает полный маршрут через временные
+GitLab и HTTP-кэш. Для запуска нужен Docker Compose. CoreRef под тестом,
+Flow и проекты SoC монтируются для чтения. Исходники находятся в
+`tests/docker/flow` и `tests/docker/projects`. Тест публикует их копии
+в GitLab и фиксирует ревизии в тестовых lock-файлах.
+GitLab и Nix-сборщик работают одновременно и используют общий лимит памяти Docker.
+
+Издатель собирает SoC с иерархическим DFT, макроблоком и двумя конфигурациями
+SRAM, проверяет симуляцию, физический lint и локальный workspace. Второй
+контейнер получает подписанные выходы в собственный Nix store и проверяет
+переиспользование netlist и floorplan после изменения Tcl размещения.
+Лицензируемая проверка использует Environment Modules и тестовый инструмент
+с HTTP-доступом. Docker Compose удаляет данные временного стенда после прогона.
+
 ## Лицензируемые EDA
 
 Автор Flow использует одинаковый контракт Python-стадии и объявляет логическое имя

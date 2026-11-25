@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+profile=/etc/coreref/eda/test-v1
+if [ "${1:-}" = --version ]; then
+    cat "$profile/version"
+    exit
+fi
+touch "$profile/tool-ran"
+exec /usr/bin/curl --fail --silent --show-error --max-time 10 "$(cat "$profile/endpoint")"
