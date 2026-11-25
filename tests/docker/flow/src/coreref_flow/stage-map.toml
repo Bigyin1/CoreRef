@@ -1,5 +1,83 @@
 # Route profiles, dependency views, and the inputs of each Python stage.
 
+# Route profiles
+
+[profiles.rtl]
+use = ["rtl"]
+default = "rtl"
+views.rtl = "rtl"
+
+[[profiles.rtl.rules]]
+whenFiles = ["testbench"]
+use = ["simulation"]
+
+[profiles.dft]
+use = ["rtl"]
+default = "rtl"
+views.rtl = "rtl"
+
+[[profiles.dft.rules]]
+whenFiles = ["dftScript"]
+use = ["dft"]
+variants = ["hierarchical-dft"]
+views.dft = { stage = "dft", output = "module" }
+
+[[profiles.dft.rules]]
+whenFiles = ["testbench"]
+use = ["simulation"]
+
+[[profiles.dft.rules]]
+whenFiles = ["testbench", "dftScript"]
+use = ["dft-simulation"]
+
+[profiles.macro]
+use = ["rtl", "backend"]
+default = "rtl"
+
+[profiles.macro.views]
+rtl = "rtl"
+lef = { stage = "route", output = "lef" }
+liberty = { stage = "route", output = "liberty" }
+gds = { stage = "gds", output = "out" }
+
+[[profiles.macro.rules]]
+whenFiles = ["dftScript"]
+use = ["dft"]
+
+[[profiles.macro.rules]]
+whenFiles = ["testbench"]
+use = ["simulation"]
+
+[[profiles.macro.rules]]
+whenFiles = ["testbench", "dftScript"]
+use = ["dft-simulation"]
+
+[profiles.soc]
+use = ["rtl", "backend", "check-netlist"]
+default = "rtl"
+variants = ["checked-synthesis"]
+views.rtl = "rtl"
+
+[[profiles.soc.rules]]
+whenFiles = ["dftReady", "dftScript"]
+use = ["dft"]
+
+[[profiles.soc.rules]]
+whenFiles = ["testbench"]
+use = ["simulation"]
+
+[[profiles.soc.rules]]
+whenFiles = ["testbench", "dftReady", "dftScript"]
+use = ["dft-simulation"]
+
+[profiles.memory]
+kind = "rtl"
+use = ["memory"]
+default = "rtl"
+views.rtl = { stage = "rtl", output = "out" }
+
+# Default files and parameters
+
 [files]
 common = "src/coreref_flow/stages/scripts/common.tcl"
 floorplan = "src/coreref_flow/stages/scripts/floorplan.tcl"
@@ -9,6 +87,8 @@ route = "src/coreref_flow/stages/scripts/route.tcl"
 
 [parameters]
 macroInstance = "hard_macro"
+
+# Dependency selection and input groups
 
 [selections.synthesizable]
 stopAt = ["macro"]
@@ -34,7 +114,10 @@ files."sources/{name}.v" = ["dft", "rtl"]
 
 [groups.abstracts]
 selection = "macros"
-files = { "macros/{name}/abstract.lef" = ["lef"], "macros/{name}/timing.lib" = ["liberty"] }
+
+[groups.abstracts.files]
+"macros/{name}/abstract.lef" = ["lef"]
+"macros/{name}/timing.lib" = ["liberty"]
 
 [groups.macroRtl]
 selection = "macros"
@@ -57,53 +140,7 @@ selection = "macros"
 parameter = "top"
 default = ""
 
-[profiles.rtl]
-use = ["rtl"]
-default = "rtl"
-rules = [{ whenFiles = ["testbench"], use = ["simulation"] }]
-views = { rtl = "rtl" }
-
-[profiles.dft]
-use = ["rtl"]
-default = "rtl"
-rules = [
-  { whenFiles = ["dftScript"], use = ["dft"], variants = ["hierarchical-dft"], views = { dft = { stage = "dft", output = "module" } } },
-  { whenFiles = ["testbench"], use = ["simulation"] },
-  { whenFiles = ["testbench", "dftScript"], use = ["dft-simulation"] },
-]
-views = { rtl = "rtl" }
-
-[profiles.macro]
-use = ["rtl", "backend"]
-default = "rtl"
-rules = [
-  { whenFiles = ["dftScript"], use = ["dft"] },
-  { whenFiles = ["testbench"], use = ["simulation"] },
-  { whenFiles = ["testbench", "dftScript"], use = ["dft-simulation"] },
-]
-
-[profiles.macro.views]
-rtl = "rtl"
-lef = { stage = "route", output = "lef" }
-liberty = { stage = "route", output = "liberty" }
-gds = { stage = "gds", output = "out" }
-
-[profiles.soc]
-use = ["rtl", "backend", "check-netlist"]
-variants = ["checked-synthesis"]
-default = "rtl"
-rules = [
-  { whenFiles = ["dftReady", "dftScript"], use = ["dft"] },
-  { whenFiles = ["testbench"], use = ["simulation"] },
-  { whenFiles = ["testbench", "dftReady", "dftScript"], use = ["dft-simulation"] },
-]
-views = { rtl = "rtl" }
-
-[profiles.memory]
-kind = "rtl"
-use = ["memory"]
-default = "rtl"
-views.rtl = { stage = "rtl", output = "out" }
+# RTL and simulation
 
 [modules.rtl.rtl]
 transform = "coreref_flow.stages.rtl:assemble"
@@ -132,6 +169,8 @@ inputs."testbench.sv" = "testbench"
 tools = ["verilator"]
 outputs.out = "simulation.log"
 
+# DFT and DFT simulation
+
 [modules.dft.dft]
 transform = "coreref_flow.stages.rtl:assemble_dft"
 inputs."own.v" = "rtl"
@@ -156,6 +195,8 @@ tools = ["verilator"]
 configuration.defines = ["COREREF_DFT"]
 outputs.out = "simulation.log"
 
+# Synthesis and netlist checks
+
 [modules.backend.rtl-synthesis-input]
 transform = "coreref_flow.stages.rtl:assemble"
 inputs."own.v" = "rtl"
@@ -174,6 +215,14 @@ exports.netlist = "out"
 stage = "dft"
 output = "out"
 fallback = { stage = "rtl-synthesis-input", output = "out" }
+
+[modules.check-netlist.check-netlist]
+transform = "coreref_flow.stages.netlist_check:check_synthesis"
+inputs."netlist.v" = { stage = "synth", output = "out" }
+parameters = ["top"]
+outputs.out = "netlist-check.json"
+
+# Physical implementation
 
 [modules.backend.floorplan]
 transform = "coreref_flow.stages.physical:openroad"
@@ -221,8 +270,21 @@ groups = ["macroLib"]
 parameters = ["top", "platform", "macro", "macroInstance"]
 tools = ["openroad"]
 configuration.script = "route.tcl"
-outputs = { out = "routed.odb", verilog = "routed.v", def = "final.def", spef = "parasitics.spef", lef = "abstract.lef", liberty = "timing.lib", timing = "timing.rpt", drc = "routing_drc.rpt" }
-exports = { lef = "lef", liberty = "liberty", spef = "spef" }
+
+[modules.backend.route.outputs]
+out = "routed.odb"
+verilog = "routed.v"
+def = "final.def"
+spef = "parasitics.spef"
+lef = "abstract.lef"
+liberty = "timing.lib"
+timing = "timing.rpt"
+drc = "routing_drc.rpt"
+
+[modules.backend.route.exports]
+lef = "lef"
+liberty = "liberty"
+spef = "spef"
 
 [modules.backend.gds]
 transform = "coreref_flow.stages.scripts.stream:stream"
@@ -232,11 +294,7 @@ parameters = ["top", "platform", "macro"]
 pythonPackages = ["klayout"]
 outputs.out = "final.gds"
 
-[modules.check-netlist.check-netlist]
-transform = "coreref_flow.stages.netlist_check:check_synthesis"
-inputs."netlist.v" = { stage = "synth", output = "out" }
-parameters = ["top"]
-outputs.out = "netlist-check.json"
+# SRAM generation and simulation
 
 [modules.memory.rtl]
 transform = "coreref_flow.stages.memory:generate"
@@ -251,6 +309,8 @@ inputs."testbench.sv" = "testbench"
 parameters = ["depth", "width", "top"]
 tools = ["verilator"]
 outputs.out = "simulation.log"
+
+# Route variants
 
 [variants.hierarchical-dft.dft.outputs]
 module = "dft_module.v"
