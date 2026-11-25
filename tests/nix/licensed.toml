@@ -1,0 +1,4 @@
+[modules.test.licensed-test]
+transform = "coreref_test_stages:licensed"
+tools = ["example"]
+outputs.out = "result.txt"

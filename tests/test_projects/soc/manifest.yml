@@ -1,3 +1,0 @@
-ref: demo.soc/1.0
-dependencies:
-  - demo.cpu/1.0

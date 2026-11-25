@@ -1,54 +1,29 @@
-# Маршрут из Python-функций
+# Проект с двумя стадиями
 
-Flow описывает граф, а CoreRef связывает выходы со входами стадий.
+Автор Flow задаёт поставку входов синтезу и физической реализации в карте.
 
-```mermaid
-flowchart LR
-    sources["RTL и выбранные зависимости"] --> RTL["RTL"]
-    RTL --> DFT["DFT"]
-    DFT --> synth["Синтез"]
-    synth --> layout["Физическая реализация"]
-    layout --> views["Liberty и LEF"]
-    layout --> gds["GDS"]
-```
+~~~toml
+[modules.backend.synth]
+transform = "demo_flow.synth:run"
+inputs."source.v" = "rtl"
+tools = ["yosys"]
+outputs.out = "netlist.v"
+exports.netlist = "out"
 
-Flow может прочитать `stage-map.yml` через `StageMap.load()` и выбрать
-модули и варианты маршрута. Карта задаёт имена Python-функций, входы и выходы.
-Небольшой маршрут можно объявить напрямую в Python.
+[modules.backend.layout]
+transform = "demo_flow.layout:run"
+inputs."netlist.v" = { stage = "synth", output = "out" }
+inputs."constraints.sdc" = "constraints"
+tools = ["openroad"]
+outputs = { out = "layout.gds", lef = "abstract.lef" }
+exports = { gds = "out", lef = "lef" }
+~~~
 
-```python
-from functools import cached_property
+Проект передаёт Flow пути к RTL и SDC. `nix build .#netlist` запускает синтез.
+`nix build .#lef` выполняет физическую реализацию при промахе кэша. При наличии
+LEF в кэше Nix скачивает этот выход. Изменение SDC в приведённой карте меняет
+рецепт `layout`. Рецепт `synth` зависит от Verilog и своего инструмента.
 
-from coreref.api.build import Route, Stage, StageSpec
-from coreref.api.projects import Project
-
-
-def bundle(work, log, configuration):
-    (work / "rtl.v").write_text((work / "source.sv").read_text())
-
-
-class RtlProject(Project):
-    @cached_property
-    def route(self):
-        return Route([StageSpec(name="rtl", outputs=("rtl.v",))])
-
-    @cached_property
-    def stages(self):
-        return {"rtl": Stage(transform=bundle, files={"source.sv": self.source / "rtl/top.sv"})}
-```
-
-Поместите функцию в импортируемый модуль. `project.build("rtl")["rtl.v"]`
-возвращает путь к файлу в Nix store. Изменение объявленного входного RTL
-создаёт новую derivation.
-
-Релиз собирается из чистого Git checkout с существующим `manifest.lock`.
-`project.publish()` последовательно копирует результаты и индекс в настроенный
-Nix binary cache. Индекс можно зарегистрировать в каталоге потребителя.
-
-```python
-from coreref.api.packages import Catalog
-
-index = project.publish()
-consumer = Catalog(cache=cache, releases={project.ref: index})
-files = consumer.get_outputs(consumer.info(project.ref), ("rtl.v",))
-```
+Другой проект может использовать выход напрямую. Если ему одновременно нужны
+артефакты макроблока и его поведенческая модель, Flow передаёт эти представления
+разным стадиям.

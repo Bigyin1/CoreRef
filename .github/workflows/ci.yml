@@ -23,8 +23,4 @@ jobs:
         with:
           set_as_trusted_user: false
           enable_kvm: false
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.13.4"
-      - run: uv sync --frozen
       - run: make integration

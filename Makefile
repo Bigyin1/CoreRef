@@ -1,7 +1,4 @@
-.PHONY: install check unit integration build
-
-install:
-	uv sync --frozen
+.PHONY: check unit integration build
 
 check:
 	uv run --frozen ruff check .
@@ -9,10 +6,10 @@ check:
 	uv run --frozen mypy
 
 unit:
-	uv run --frozen pytest -m 'not nix'
+	uv run --frozen pytest
 
 integration:
-	uv run --frozen pytest -m nix
+	nix flake check
 
 build:
 	uv build

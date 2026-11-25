@@ -1,0 +1,16 @@
+[modules.example.produce]
+transform = "coreref_test_stages:produce"
+outputs = { out = "data.txt", summary = "summary.txt" }
+exports = { summary = "summary" }
+
+[modules.example.consume]
+transform = "coreref_test_stages:consume"
+inputs."summary.txt" = { stage = "produce", output = "summary" }
+parameters = ["label"]
+outputs.out = "result.txt"
+
+[variants.cycle.produce]
+needs = ["consume"]
+
+[variants.bad-output.consume.inputs."summary.txt"]
+output = "missing"

@@ -1,1 +1,1 @@
-"""Private implementation details; public contracts live in coreref.api submodules."""
+"""Implementation of the Nix stage runner."""

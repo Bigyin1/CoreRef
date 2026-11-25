@@ -5,15 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "coreref"
 version = "0.1.0"
-description = "Hardware component representations and build stages backed by Nix"
+description = "Framework for Nix build stages implemented in Python"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
- "packaging>=24,<27",
- "pyyaml>=6,<7",
- "pydantic>=2.12.5,<3",
- "frozendict>=2.4.7,<3",
-]
+dependencies = []
 
 [dependency-groups]
 dev = [
@@ -63,5 +58,4 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["nix: integration tests that use a Nix store"]
 addopts = "-ra"

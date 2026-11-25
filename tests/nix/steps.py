@@ -1,0 +1,23 @@
+"""Test transforms for the native stage graph."""
+
+import subprocess
+from collections.abc import Mapping
+from pathlib import Path
+
+
+def produce(work: Path, _log: Path, _params: Mapping[str, object]) -> None:
+    """Produce two independently selectable outputs."""
+    (work / "data.txt").write_text("data", encoding="utf-8")
+    (work / "summary.txt").write_text("summary", encoding="utf-8")
+
+
+def consume(work: Path, _log: Path, params: Mapping[str, object]) -> None:
+    """Join a single named output with a project parameter."""
+    summary = (work / "summary.txt").read_text(encoding="utf-8")
+    (work / "result.txt").write_text(f"{summary} {params['label']}", encoding="utf-8")
+
+
+def licensed(work: Path, _log: Path, _params: Mapping[str, object]) -> None:
+    """Run the sample tool with a license endpoint provided by the worker."""
+    with (work / "result.txt").open("w", encoding="utf-8") as stream:
+        subprocess.run(["example-tool"], stdout=stream, check=True)  # noqa: S607 - test module
