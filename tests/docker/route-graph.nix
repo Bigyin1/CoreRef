@@ -6,12 +6,13 @@ let
   experimental = import ./flow/flake.nix;
   # Use the same release as the fixture flake while replacing its GitLab input.
   flowLock = builtins.fromJSON (builtins.readFile ./flow/flake.lock);
-  flow = experimental.outputs {
+  flowInputs = {
     inherit nixpkgs;
     coreref = core;
     edalizeSrc = builtins.fetchTree flowLock.nodes.edalizeSrc.locked;
     verilatorPkgs = builtins.getFlake experimental.inputs.verilatorPkgs.url;
   };
+  flow = experimental.outputs flowInputs;
   project =
     name: args:
     let
@@ -60,6 +61,18 @@ let
     withoutScript
   ];
   changed = (socWith { place = ./variants/place.tcl; }).packages.${system};
+  changedEdalize =
+    (project "soc" {
+      inherit counter sram;
+      status-register = status;
+      flow = experimental.outputs (
+        flowInputs
+        // {
+          # Evaluation only. A different source must affect the verification environments.
+          edalizeSrc = builtins.toFile "different-edalize-source" "test source";
+        }
+      );
+    }).packages.${system};
   memory = sram.packages.${system};
   plan = stage: builtins.fromJSON (builtins.unsafeDiscardStringContext stage.stagePlan);
   synth = (plan ready.synth).inputs.rtl;
@@ -158,6 +171,17 @@ in
         top = "sram_5x3";
       };
     assert !(builtins.tryEval invalid).success;
+    assert lib.all (target: ready.${target}.drvPath == changedEdalize.${target}.drvPath) [
+      "rtl"
+      "dft"
+      "netlist"
+      "gds"
+    ];
+    assert lib.all (target: ready.${target}.drvPath != changedEdalize.${target}.drvPath) [
+      "lint"
+      "simulate"
+      "simulate-dft"
+    ];
     assert lib.all (target: ready.${target}.drvPath == changed.${target}.drvPath) [
       "rtl"
       "dft"

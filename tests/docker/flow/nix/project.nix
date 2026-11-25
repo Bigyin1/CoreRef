@@ -1,5 +1,9 @@
 # Select views and compose the routes of a hardware project.
-{ selectComponents, verilatorPkgs }:
+{
+  selectComponents,
+  verilatorPkgs,
+  edalize,
+}:
 {
   pkgs,
   system,
@@ -31,11 +35,15 @@ let
       { siteTools = [ siteTools.${key} ]; }
     else
       { nativeBuildInputs = packages; };
-  verilator = tool "verilator" [
-    verilatorPkgs.legacyPackages.${system}.verilator
-    pkgs.stdenv.cc
-    pkgs.gnumake
-  ];
+  verilator =
+    tool "verilator" [
+      verilatorPkgs.legacyPackages.${system}.verilator
+      pkgs.stdenv.cc
+      pkgs.gnumake
+    ]
+    // {
+      pythonPackages = p: [ (edalize p) ];
+    };
   tcl = tool "tcl" [ pkgs.tcl ];
 
   roots = dependencies system;

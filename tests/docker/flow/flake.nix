@@ -22,36 +22,33 @@
       coreref,
       ...
     }:
+    let
+      edalize =
+        p:
+        p.buildPythonPackage {
+          pname = "edalize";
+          version = "0.6.7";
+          pyproject = true;
+          src = edalizeSrc;
+          build-system = [
+            p.setuptools
+            p.setuptools-scm
+          ];
+          dependencies = [ p.jinja2 ];
+          pythonImportsCheck = [
+            "edalize.flows.lint"
+            "edalize.flows.sim"
+          ];
+        };
+    in
     coreref.lib.mkFlow {
       inherit nixpkgs;
       source = ./.;
       project = import ./nix/project.nix {
-        inherit verilatorPkgs;
+        inherit verilatorPkgs edalize;
         inherit (coreref.lib) selectComponents;
       };
       cli = "coreref-flow";
-      pythonDependencies =
-        p:
-        let
-          edalize = p.buildPythonPackage {
-            pname = "edalize";
-            version = "0.6.7";
-            pyproject = true;
-            src = edalizeSrc;
-            build-system = [
-              p.setuptools
-              p.setuptools-scm
-            ];
-            dependencies = [ p.jinja2 ];
-            pythonImportsCheck = [
-              "edalize.flows.lint"
-              "edalize.flows.sim"
-            ];
-          };
-        in
-        [
-          p.typer
-          edalize
-        ];
+      pythonDependencies = p: [ p.typer ];
     };
 }
