@@ -12,7 +12,7 @@ def _bundle(work: Path, own: bytes, output: str) -> None:
 
 def assemble(work: Path, _log: Path, _parameters: Mapping[str, object]) -> None:
     """Combine the selected dependencies and the project's RTL."""
-    _bundle(work, (work / "own.v").read_bytes(), "rtl.v")
+    _bundle(work, (work / "rtl").read_bytes(), "rtl.v")
 
 
 def assemble_dft(work: Path, log: Path, _parameters: Mapping[str, object]) -> None:
@@ -20,7 +20,7 @@ def assemble_dft(work: Path, log: Path, _parameters: Mapping[str, object]) -> No
     module = work / "dft_module.v"
     with log.open("wb") as stream:
         subprocess.run(
-            ["tclsh", "dft.tcl", "own.v", module.name],
+            ["tclsh", "script", "rtl", module.name],
             cwd=work,
             stdout=stream,
             stderr=subprocess.STDOUT,

@@ -7,7 +7,7 @@ from pathlib import Path
 
 def check_inputs(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
     """Record the views provided to a mixed-representation linter."""
-    rtl = [*sorted((work / "sources").glob("*.v")), work / "own.v"]
+    rtl = [*sorted((work / "sources").glob("*.v")), work / "rtl"]
     abstracts = sorted((work / "macros").glob("*/*"))
     for path in (*rtl, *abstracts):
         if path.stat().st_size == 0:

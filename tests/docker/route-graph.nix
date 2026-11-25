@@ -79,11 +79,18 @@ in
   check =
     assert builtins.attrNames soc.apps.${system} == [ "flow" ];
     assert lib.isDerivation soc.devShells.${system}.default;
-    assert lib.hasSuffix "/dft_output.v" (plan ready.synth).inputs."design.v";
-    assert lib.hasSuffix "-run.tcl" dftFiles."dft.tcl";
-    assert lib.hasSuffix "/dft_output.v" (plan broken.packages.${system}.synth).inputs."design.v";
+    assert lib.hasSuffix "/dft_output.v" (plan ready.synth).inputs.rtl;
+    assert lib.hasSuffix "-run.tcl" dftFiles.script;
+    assert
+      builtins.attrNames (plan ready.simulate).inputs == [
+        "rtl"
+        "testbench"
+      ];
+    assert lib.hasSuffix "-soc-rtl/rtl.v" (plan ready.simulate).inputs.rtl;
+    assert lib.hasSuffix "-soc-dft-simulation/dft_output.v" (plan ready.simulate-dft).inputs.rtl;
+    assert lib.hasSuffix "/dft_output.v" (plan broken.packages.${system}.synth).inputs.rtl;
     assert lib.all (
-      packages: lib.hasSuffix "-soc-rtl-synthesis-input/rtl.v" (plan packages.synth).inputs."design.v"
+      packages: lib.hasSuffix "-soc-rtl-synthesis-input/rtl.v" (plan packages.synth).inputs.rtl
     ) withoutDft;
     assert lib.all (
       packages: !(packages ? dft) && !(packages ? simulate-dft) && packages ? simulate
@@ -94,7 +101,7 @@ in
       builtins.attrNames lintFiles == [
         "macros/counter/abstract.lef"
         "macros/counter/timing.lib"
-        "own.v"
+        "rtl"
         "sources/increment.v"
         "sources/sram-4x4.v"
         "sources/sram-8x8.v"

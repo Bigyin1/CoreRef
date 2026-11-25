@@ -144,28 +144,28 @@ default = ""
 
 [modules.rtl.rtl]
 transform = "coreref_flow.stages.rtl:assemble"
-inputs."own.v" = "rtl"
+inputs.rtl = "rtl"
 groups = ["rtl"]
 outputs.out = "rtl.v"
 
 [modules.rtl.lint]
 transform = "coreref_flow.stages.verification:lint"
-inputs."rtl.v" = { stage = "rtl", output = "out" }
+inputs.rtl = { stage = "rtl" }
 parameters = ["top"]
 tools = ["verilator"]
 outputs.out = "lint.log"
 
 [modules.rtl.lint-physical]
 transform = "coreref_flow.stages.physical_lint:check_inputs"
-inputs."own.v" = "rtl"
+inputs.rtl = "rtl"
 groups = ["synthesizable", "abstracts"]
 parameters = ["top"]
 outputs.out = "inputs.json"
 
 [modules.simulation.simulate]
 transform = "coreref_flow.stages.verification:simulate"
-inputs."rtl.v" = { stage = "rtl", output = "out" }
-inputs."testbench.sv" = "testbench"
+inputs.rtl = { stage = "rtl" }
+inputs.testbench = "testbench"
 tools = ["verilator"]
 outputs.out = "simulation.log"
 
@@ -173,24 +173,24 @@ outputs.out = "simulation.log"
 
 [modules.dft.dft]
 transform = "coreref_flow.stages.rtl:assemble_dft"
-inputs."own.v" = "rtl"
-inputs."dft.tcl" = "dftScript"
+inputs.rtl = "rtl"
+inputs.script = "dftScript"
 groups = ["dft"]
 tools = ["tcl"]
 outputs.out = "dft_output.v"
 
 [modules.dft-simulation.dft-simulation]
 transform = "coreref_flow.stages.rtl:assemble_dft"
-inputs."own.v" = "rtl"
-inputs."dft.tcl" = "dftScript"
+inputs.rtl = "rtl"
+inputs.script = "dftScript"
 groups = ["dftSimulation"]
 tools = ["tcl"]
 outputs.out = "dft_output.v"
 
 [modules.dft-simulation.simulate-dft]
 transform = "coreref_flow.stages.verification:simulate"
-inputs."rtl.v" = { stage = "dft-simulation", output = "out" }
-inputs."testbench.sv" = "testbench"
+inputs.rtl = { stage = "dft-simulation" }
+inputs.testbench = "testbench"
 tools = ["verilator"]
 configuration.defines = ["COREREF_DFT"]
 outputs.out = "simulation.log"
@@ -199,7 +199,7 @@ outputs.out = "simulation.log"
 
 [modules.backend.rtl-synthesis-input]
 transform = "coreref_flow.stages.rtl:assemble"
-inputs."own.v" = "rtl"
+inputs.rtl = "rtl"
 groups = ["synthesizable"]
 outputs.out = "rtl.v"
 
@@ -211,14 +211,13 @@ tools = ["yosys"]
 outputs.out = "netlist.v"
 exports.netlist = "out"
 
-[modules.backend.synth.inputs."design.v"]
+[modules.backend.synth.inputs.rtl]
 stage = "dft"
-output = "out"
-fallback = { stage = "rtl-synthesis-input", output = "out" }
+fallback = { stage = "rtl-synthesis-input" }
 
 [modules.check-netlist.check-netlist]
 transform = "coreref_flow.stages.netlist_check:check_synthesis"
-inputs."netlist.v" = { stage = "synth", output = "out" }
+inputs.netlist = { stage = "synth" }
 parameters = ["top"]
 outputs.out = "netlist-check.json"
 
@@ -298,14 +297,14 @@ outputs.out = "final.gds"
 
 [modules.memory.rtl]
 transform = "coreref_flow.stages.memory:generate"
-inputs."memory.v.in" = "template"
+inputs.template = "template"
 parameters = ["depth", "width"]
 outputs.out = "rtl.v"
 
 [modules.memory.simulate]
 transform = "coreref_flow.stages.verification:simulate_sram"
-inputs."rtl.v" = { stage = "rtl", output = "out" }
-inputs."testbench.sv" = "testbench"
+inputs.rtl = { stage = "rtl" }
+inputs.testbench = "testbench"
 parameters = ["depth", "width", "top"]
 tools = ["verilator"]
 outputs.out = "simulation.log"

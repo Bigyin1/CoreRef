@@ -5,15 +5,15 @@
 ~~~toml
 [modules.backend.synth]
 transform = "demo_flow.synth:run"
-inputs."source.v" = "rtl"
+inputs.rtl = "rtl"
 tools = ["yosys"]
 outputs.out = "netlist.v"
 exports.netlist = "out"
 
 [modules.backend.layout]
 transform = "demo_flow.layout:run"
-inputs."netlist.v" = { stage = "synth", output = "out" }
-inputs."constraints.sdc" = "constraints"
+inputs.netlist = { stage = "synth" }
+inputs.constraints = "constraints"
 tools = ["openroad"]
 outputs = { out = "layout.gds", lef = "abstract.lef" }
 exports = { gds = "out", lef = "lef" }
@@ -34,10 +34,9 @@ LEF в кэше Nix скачивает этот выход. Изменение S
 наличии маркера и скрипта `dft/run.tcl`. Синтез выбирает вход в карте стадий.
 
 ~~~toml
-[modules.backend.synth.inputs."design.v"]
+[modules.backend.synth.inputs.rtl]
 stage = "dft"
-output = "out"
-fallback = { stage = "rtl-synthesis-input", output = "out" }
+fallback = { stage = "rtl-synthesis-input" }
 ~~~
 
 При пропуске DFT синтез получает обычный RTL с теми же правилами выбора

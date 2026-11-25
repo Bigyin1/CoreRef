@@ -96,7 +96,7 @@ let
   bind =
     input:
     if isAttrs input then
-      lookup (lookup artifacts "stage" input.stage) "output of ${input.stage}" input.output
+      lookup (lookup artifacts "stage" input.stage) "output of ${input.stage}" (input.output or "out")
     else
       source (lookup files "project file" input);
 

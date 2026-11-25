@@ -20,6 +20,7 @@ def _run(work: Path, log: Path, parameters: Mapping[str, object], *command: str)
 
 def synthesize(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Map the design to Nangate45 cells, importing macro ports as a black box."""
+    (work / "rtl").rename(work / "design.v")
     blackbox = "yosys read_verilog -lib macro_rtl.v\n" if (work / "macro_rtl.v").is_file() else ""
     (work / "synth.tcl").write_text(
         "set lib $::env(COREREF_PLATFORM)/lib/NangateOpenCellLibrary_typical.lib\n"

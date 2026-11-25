@@ -11,12 +11,15 @@ _WARNINGS = ("-Wall", "-Wno-DECLFILENAME")
 def lint(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Run Verilator with warnings treated as errors."""
     command = ["verilator", *_WARNINGS, "--lint-only", "--top-module", str(parameters["top"])]
+    rtl = (work / "rtl").rename(work / "rtl.v")
     with log.open("wb") as stream:
-        subprocess.run([*command, "rtl.v"], cwd=work, stdout=stream, stderr=stream, check=True)
+        subprocess.run([*command, rtl.name], cwd=work, stdout=stream, stderr=stream, check=True)
     (work / "lint.log").write_bytes(log.read_bytes())
 
 
 def _simulate(work: Path, log: Path, defines: Sequence[str]) -> None:
+    rtl = (work / "rtl").rename(work / "rtl.v")
+    testbench = (work / "testbench").rename(work / "testbench.sv")
     command = [
         "verilator",
         *_WARNINGS,
@@ -31,8 +34,8 @@ def _simulate(work: Path, log: Path, defines: Sequence[str]) -> None:
         "testbench",
         "-o",
         "simulate",
-        "rtl.v",
-        "testbench.sv",
+        rtl.name,
+        testbench.name,
     ]
     with log.open("wb") as stream:
         subprocess.run(command, cwd=work, stdout=stream, stderr=stream, check=True)
