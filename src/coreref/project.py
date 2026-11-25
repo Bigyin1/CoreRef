@@ -149,18 +149,20 @@ def _reference(attributes: dict[str, str | int | bool]) -> str:
         "dummy://",
         "eval",
         "--raw",
-        "--impure",
         "--expr",
-        "builtins.flakeRefToString (builtins.fromJSON (builtins.readFile /dev/stdin))",
-        data=json.dumps(attributes),
+        "{ input }: { reference = builtins.flakeRefToString (builtins.fromJSON input); }",
+        "--argstr",
+        "input",
+        json.dumps(attributes),
+        "reference",
     )
 
 
-def _run(program: str, *arguments: str, data: str | None = None) -> str:
+def _run(program: str, *arguments: str) -> str:
     executable = shutil.which(program)
     if executable is None:
         raise FileNotFoundError(f"{program} executable not found in PATH")
     result = subprocess.run(  # noqa: S603 - invoke Nix or Git directly with an argument list.
-        [executable, *arguments], input=data, stdout=subprocess.PIPE, text=True, check=True
+        [executable, *arguments], stdout=subprocess.PIPE, text=True, check=True
     )
     return result.stdout
