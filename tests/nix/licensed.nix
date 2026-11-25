@@ -11,7 +11,7 @@ let
     siteTools.example = {
       profile = "test-v1";
       executable = "example-tool";
-      module = "example/1.2-hf3";
+      module = "example/1.2";
       version = "1.2-hf3";
     };
   };

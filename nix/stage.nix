@@ -39,8 +39,7 @@ let
     if
       match "[A-Za-z0-9][A-Za-z0-9_.-]*" tool.profile != null
       && match "[A-Za-z0-9_.+-]*[0-9][A-Za-z0-9_.+-]*" tool.version != null
-      && match "[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)+" tool.module != null
-      && lib.hasSuffix ("/" + tool.version) tool.module
+      && match "[A-Za-z0-9][A-Za-z0-9_.+-]*(/[A-Za-z0-9_.+-]+)*" tool.module != null
       && match "[A-Za-z0-9_.+-]+" tool.executable != null
     then
       {
@@ -53,7 +52,7 @@ let
         versionArgs = tool.versionArgs or [ "--version" ];
       }
     else
-      throw "${name}: site tools require an exact version and a versioned module";
+      throw "${name}: site tools require an exact version and a module name";
 
   pins = map toolPin licensed;
   profiles = lib.unique (map (tool: tool.profile) pins);
