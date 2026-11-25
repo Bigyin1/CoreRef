@@ -16,7 +16,12 @@ nix develop --no-update-lock-file "$baseline" --command bash -ec '
 cp /suite/variants/increment.v .coreref/increment/rtl/increment.v
 rtl=$("${cli[@]}" build rtl . --no-link)
 grep -rF '// Workspace override' "$rtl/hdl"
+rtl_url=$("${cli[@]}" build rtl "path:$PWD" --no-link)
+grep -rF '// Workspace override' "$rtl_url/hdl"
+cmp "$lock" flake.lock
 "${cli[@]}" workspace remove increment
+locked_rtl=$("${cli[@]}" build rtl "path:$PWD" --no-link)
+test "$locked_rtl" != "$rtl_url"
 cmp "$lock" flake.lock
 
 # The mounted source has a DFT readiness marker. Remove it from the test checkout.

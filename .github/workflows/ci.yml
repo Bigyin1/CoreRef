@@ -23,4 +23,4 @@ jobs:
         with:
           set_as_trusted_user: false
           enable_kvm: false
-      - run: make integration
+      - run: make integration integration-graph

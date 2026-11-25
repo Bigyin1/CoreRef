@@ -10,7 +10,7 @@ let
     inherit nixpkgs;
     coreref = core;
     edalizeSrc = builtins.fetchTree flowLock.nodes.edalizeSrc.locked;
-    verilatorPkgs = builtins.getFlake experimental.inputs.verilatorPkgs.url;
+    verilatorPkgs = builtins.getFlake (builtins.flakeRefToString flowLock.nodes.verilatorPkgs.locked);
   };
   flow = experimental.outputs flowInputs;
   project =
@@ -41,7 +41,7 @@ let
   socWith =
     overrides:
     project "soc" {
-      inherit counter increment sram;
+      inherit counter sram;
       status-register = status;
       flow = withFiles overrides;
     };
@@ -132,6 +132,10 @@ in
       builtins.attrNames lintFiles == [
         "macros/counter/abstract.lef"
         "macros/counter/timing.lib"
+        "macros/sram-4x4/abstract.lef"
+        "macros/sram-4x4/timing.lib"
+        "macros/sram-8x8/abstract.lef"
+        "macros/sram-8x8/timing.lib"
         "rtl"
       ];
     assert
@@ -139,8 +143,6 @@ in
         "sources/000000-increment/000000/step_one.v"
         "sources/000000-increment/000001/increment.v"
         "sources/000001-status-register/000000/rtl.v"
-        "sources/000002-sram-4x4"
-        "sources/000003-sram-8x8"
       ];
     assert lib.hasSuffix "/dft_module.v" dftFiles."sources/000001-status-register";
     assert builtins.any (lib.hasInfix "-counter/") (builtins.attrNames inlineRtl.inputs);
@@ -171,6 +173,20 @@ in
         top = "sram_5x3";
       };
     assert !(builtins.tryEval invalid).success;
+    assert inlineRtl.configuration.defines == [ "INCREMENT_ONE" ];
+    assert (plan ready.dft).configuration.defines == [ "INCREMENT_ONE" ];
+    assert (plan ready.simulate).configuration.defines == [ ];
+    assert (plan ready.simulate-dft).configuration.defines == [ "COREREF_DFT" ];
+    assert
+      builtins.attrNames (plan ready.gds).inputs == [
+        "final.def"
+        "macros/counter.gds"
+        "macros/counter.lef"
+        "macros/sram-4x4.gds"
+        "macros/sram-4x4.lef"
+        "macros/sram-8x8.gds"
+        "macros/sram-8x8.lef"
+      ];
     assert lib.all (target: ready.${target}.drvPath == changedEdalize.${target}.drvPath) [
       "rtl"
       "dft"
@@ -197,7 +213,13 @@ in
     true;
 
   inherit (soc.packages.${builtins.currentSystem}) rtl dft;
-  inherit (soc.packages.${builtins.currentSystem}) simulate-dft lint-physical netlist;
+  inherit (soc.packages.${builtins.currentSystem})
+    simulate
+    simulate-dft
+    lint-physical
+    netlist
+    gds
+    ;
   incrementSimulation = increment.packages.${builtins.currentSystem}.simulate;
   incrementLint = increment.packages.${builtins.currentSystem}.lint;
   customMemorySimulation = custom.packages.${builtins.currentSystem}.simulate;

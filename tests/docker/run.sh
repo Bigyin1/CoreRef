@@ -9,7 +9,9 @@ compose=(docker compose --project-name "$project" -f "$suite/compose.yml")
 
 cleanup() {
     "${compose[@]}" down --volumes --remove-orphans
-    docker image rm "$project-publisher" "$project-verifier" >/dev/null 2>&1 || :
+    if [[ ${COREREF_TEST_KEEP_IMAGES:-0} != 1 ]]; then
+        docker image rm "$project-publisher" "$project-verifier" >/dev/null 2>&1 || :
+    fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT

@@ -1,7 +1,6 @@
 # Select the views used by behavioral and physical stages.
 {
   lib,
-  name,
   roots,
   selectComponents,
 }:
@@ -18,13 +17,6 @@ let
     stopAt = isMacro;
     filter = isMacro;
   };
-  macro =
-    if macros == [ ] then
-      null
-    else if builtins.length macros == 1 then
-      builtins.head macros
-    else
-      throw "${name}: the physical route expects at most one macro";
   rtlInputs =
     components: view:
     builtins.listToAttrs (
@@ -45,7 +37,7 @@ in
   inherit
     all
     synthesizable
-    macro
+    macros
     abstracts
     rtlInputs
     ;

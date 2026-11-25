@@ -11,7 +11,7 @@ import pytest
 from coreref_flow.stages.memory import generate
 from coreref_flow.stages.netlist_check import check_synthesis
 from coreref_flow.stages.physical_lint import check_inputs
-from coreref_flow.stages.rtl import assemble, assemble_dft, read_source_list
+from coreref_flow.stages.rtl import assemble, assemble_dft, read_defines, read_source_list
 from coreref_flow.stages.verification import simulate
 
 
@@ -25,10 +25,11 @@ def test_rtl_preserves_the_declared_source_order(tmp_path: Path) -> None:
         source.parent.mkdir(parents=True)
         source.write_text(filename)
 
-    assemble(tmp_path, tmp_path / "stage.log", {})
+    assemble(tmp_path, tmp_path / "stage.log", {"defines": ["MODE=2"]})
 
     bundle = tmp_path / "hdl"
     sources = read_source_list(bundle)
+    assert read_defines(bundle) == ["MODE=2"]
     assert [source.name for source in sources] == ["types.sv", "z.sv", "a.sv"]
     assert all(source.read_text() == str(source.relative_to(bundle)) for source in sources)
 
@@ -76,6 +77,7 @@ def test_simulation_passes_ordered_sources_and_defines_to_edalize(tmp_path: Path
     directory = tmp_path / "rtl"
     directory.mkdir()
     (directory / "sources.f").write_text("z.v\na.sv\n", encoding="utf-8")
+    (directory / "defines.f").write_text("LIBRARY=2\n", encoding="utf-8")
     (tmp_path / "testbench").write_text("module testbench; endmodule\n", encoding="utf-8")
 
     def run_tool(
@@ -89,13 +91,13 @@ def test_simulation_passes_ordered_sources_and_defines_to_edalize(tmp_path: Path
         simulate(
             tmp_path,
             tmp_path / "stage.log",
-            {"defines": ["TB_STEP=2", 'TB_LABEL="hello world"'], "extraDefines": ["DFT"]},
+            {"defines": ["TB_STEP=2", 'TB_LABEL="hello world"', "DFT"]},
         )
 
     options = (tmp_path / "verification.vc").read_text(encoding="utf-8").splitlines()
     sources = [line for line in options if line.endswith((".v", ".sv"))]
     assert sources == ["rtl/z.v", "rtl/a.sv", "testbench.sv"]
-    assert {"--binary", "--assert", '-DTB_STEP="2"', "-DDFT=1"}.issubset(options)
+    assert {"--binary", "--assert", '-DTB_STEP="2"', '-DLIBRARY="2"', "-DDFT=1"}.issubset(options)
     assert r'-DTB_LABEL="\"hello world\""' in options
     assert tool.call_args_list[0].args[0][0] == "make"
     assert tool.call_args_list[1].args[0] == ["./Vtestbench"]

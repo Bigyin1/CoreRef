@@ -35,7 +35,24 @@
       name = "soc";
       source = self.outPath;
       profile = "soc";
-      parameters.top = "soc";
+      parameters = {
+        top = "soc";
+        defines = [ "INCREMENT_ONE" ];
+        macroPlacement = {
+          hard_macro = [
+            21
+            47
+          ];
+          cache = [
+            116
+            47
+          ];
+          scratch = [
+            211
+            47
+          ];
+        };
+      };
       files = {
         rtl = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;

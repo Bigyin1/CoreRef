@@ -71,7 +71,7 @@ status_register=$(fixture_ref status-register)
 sram=$(fixture_ref sram)
 increment=$(fixture_ref increment)
 build=(nix build --no-update-lock-file --no-link)
-"${build[@]}" "$increment#simulate" "$baseline#simulate-dft" "$baseline#lint-physical"
+"${build[@]}" "$increment#simulate" "$baseline#simulate" "$baseline#simulate-dft" "$baseline#lint-physical"
 
 rtl=$(output_path "$baseline#rtl")/hdl
 dft=$(output_path "$baseline#dft")/hdl
@@ -83,15 +83,20 @@ grep -rF 'module sram_8x8' "$rtl"
 grep -rF 'module counter' "$rtl"
 test "$(grep -rF 'module increment(' "$dft" | wc -l)" -eq 1
 grep -rF 'define DEMO_SCAN' "$dft"
-if grep -qrF 'module counter' "$dft"; then
+if grep -qrE 'module (counter|sram_[48]x[48])' "$dft"; then
     printf 'DFT output includes the physical macro RTL.\n' >&2
     exit 1
 fi
 grep -F 'PASS increment' "$(output_path "$increment#simulate")/simulation.log"
+grep -F 'PASS SoC' "$(output_path "$baseline#simulate")/simulation.log"
 grep -F 'PASS SoC' "$(output_path "$baseline#simulate-dft")/simulation.log"
 grep -F '/increment.v' "$lint_report"
 grep -F 'macros/counter/abstract.lef' "$lint_report"
 grep -F 'macros/counter/timing.lib' "$lint_report"
+for size in 4x4 8x8; do
+    grep -F "macros/sram-$size/abstract.lef" "$lint_report"
+    grep -F "macros/sram-$size/timing.lib" "$lint_report"
+done
 if grep -qF -- '-counter/' "$lint_report"; then
     printf 'Physical lint received the macro RTL.\n' >&2
     exit 1
@@ -109,6 +114,9 @@ artifacts=(
     "$counter#lef" "$counter#liberty" "$counter#gds"
     "$status_register#dft" "$sram#4x4" "$sram#8x8"
 )
+for size in 4x4 8x8; do
+    artifacts+=("$sram#$size-lef" "$sram#$size-liberty" "$sram#$size-gds")
+done
 "${build[@]}" "${artifacts[@]}"
 nix key generate-secret --key-name coreref-test-1 > "$repos/cache.sec"
 nix key convert-secret-to-public < "$repos/cache.sec" > /cache/cache-key.pub

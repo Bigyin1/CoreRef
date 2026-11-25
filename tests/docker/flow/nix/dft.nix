@@ -4,6 +4,7 @@
   stage,
   files,
   tcl,
+  defines,
   rtlInputs,
   all,
   synthesizable,
@@ -23,6 +24,7 @@ let
           script = files.dftScript;
         }
         // rtlInputs components (views: views.dft or views.rtl);
+        configuration = { inherit defines; };
         outputs = {
           out = "hdl";
         }
@@ -41,9 +43,6 @@ in
   }
   // lib.optionalAttrs hasTestbench {
     dft-simulation = forSimulation.package;
-    simulate-dft =
-      (simulate "simulate-dft" forSimulation.artifacts.out {
-        extraDefines = [ "COREREF_DFT" ];
-      }).package;
+    simulate-dft = (simulate "simulate-dft" forSimulation.artifacts.out [ "COREREF_DFT" ]).package;
   };
 }

@@ -9,7 +9,7 @@ from typing import cast
 from edalize.flows.lint import Lint  # type: ignore[import-untyped]
 from edalize.flows.sim import Sim  # type: ignore[import-untyped]
 
-from .rtl import read_source_list
+from .rtl import read_defines, read_source_list
 
 _WARNINGS = ("-Wall", "-Wno-DECLFILENAME")
 
@@ -28,7 +28,7 @@ def _edam(
             "verilator_options": [*_WARNINGS, "--assert", "--timescale", "1ns/1ps", "-j", "2"],
         }
     parameters = {}
-    for define in defines:
+    for define in [*read_defines(work / "rtl"), *defines]:
         name, separator, value = define.partition("=")
         parameters[name] = {
             "paramtype": "vlogdefine",
@@ -53,8 +53,7 @@ def _edam(
 
 def lint(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Lint the selected RTL with warnings treated as errors."""
-    defines = cast(list[str], parameters.get("defines", []))
-    backend = Lint(_edam(work, str(parameters["top"]), defines), str(work))
+    backend = Lint(_edam(work, str(parameters["top"]), []), str(work))
     with log.open("wb") as stream:
         backend.stdout = backend.stderr = stream
         backend.configure()
@@ -77,8 +76,7 @@ def _simulate(work: Path, log: Path, defines: Sequence[str]) -> None:
 def simulate(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Run the project's testbench against the supplied behavioral sources."""
     defines = cast(list[str], parameters.get("defines", []))
-    extra = cast(list[str], parameters.get("extraDefines", []))
-    _simulate(work, log, [*defines, *extra])
+    _simulate(work, log, defines)
 
 
 def simulate_sram(work: Path, log: Path, parameters: Mapping[str, object]) -> None:

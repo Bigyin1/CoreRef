@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from typing import cast
 
 
 def read_source_list(directory: Path) -> list[Path]:
@@ -12,6 +13,12 @@ def read_source_list(directory: Path) -> list[Path]:
         directory / entry
         for entry in (directory / "sources.f").read_text(encoding="utf-8").splitlines()
     ]
+
+
+def read_defines(directory: Path) -> list[str]:
+    """Read the explicit compile options of this RTL bundle."""
+    defines = directory / "defines.f"
+    return defines.read_text(encoding="utf-8").splitlines() if defines.is_file() else []
 
 
 def write_source_list(directory: Path, sources: Iterable[Path]) -> None:
@@ -37,7 +44,7 @@ def _dependencies(work: Path) -> list[Path]:
     ]
 
 
-def _assemble(work: Path, sources: list[Path]) -> None:
+def _assemble(work: Path, sources: list[Path], parameters: Mapping[str, object]) -> None:
     directory = work / "hdl"
     staged = []
     for source in sources:
@@ -48,6 +55,9 @@ def _assemble(work: Path, sources: list[Path]) -> None:
         shutil.copyfile(source, target)
         staged.append(target)
     write_source_list(directory, staged)
+    defines = cast(list[str], parameters.get("defines", []))
+    if defines:
+        (directory / "defines.f").write_text("\n".join(defines) + "\n", encoding="utf-8")
 
 
 def _own_sources(work: Path) -> list[Path]:
@@ -57,12 +67,12 @@ def _own_sources(work: Path) -> list[Path]:
     return own
 
 
-def assemble(work: Path, _log: Path, _parameters: Mapping[str, object]) -> None:
+def assemble(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
     """Prepare dependency sources before the project's declared RTL."""
-    _assemble(work, [*_dependencies(work), *_own_sources(work)])
+    _assemble(work, [*_dependencies(work), *_own_sources(work)], parameters)
 
 
-def assemble_dft(work: Path, log: Path, _parameters: Mapping[str, object]) -> None:
+def assemble_dft(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Replace the project's RTL with its DFT output and retain dependency files."""
     module = work / "dft_module.v"
     sources = [str(source.relative_to(work)) for source in _own_sources(work)]
@@ -74,4 +84,4 @@ def assemble_dft(work: Path, log: Path, _parameters: Mapping[str, object]) -> No
             stderr=subprocess.STDOUT,
             check=True,
         )
-    _assemble(work, [*_dependencies(work), module])
+    _assemble(work, [*_dependencies(work), module], parameters)

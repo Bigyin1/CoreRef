@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import cast
 
-from .rtl import read_source_list, staged_sources
+from .rtl import read_defines, read_source_list, staged_sources
 
 
 def _run(work: Path, log: Path, parameters: Mapping[str, object], *command: str) -> None:
@@ -14,9 +14,14 @@ def _run(work: Path, log: Path, parameters: Mapping[str, object], *command: str)
         **os.environ,
         "COREREF_PLATFORM": str(parameters["platform"]),
         "COREREF_TOP": str(parameters["top"]),
-        "COREREF_MACRO": str(parameters.get("macro", "")),
-        "COREREF_MACRO_INSTANCE": str(parameters.get("macroInstance", "")),
     }
+    if "macroCells" in parameters:
+        cells = cast(list[str], parameters["macroCells"])
+        placements = cast(dict[str, list[int]], parameters.get("placements", {}))
+        environment["COREREF_MACRO_CELLS"] = _tcl_words(cells)
+        environment["COREREF_MACRO_PLACEMENTS"] = _tcl_words(
+            _tcl_words((instance, *map(str, location))) for instance, location in placements.items()
+        )
     with log.open("wb") as stream:
         subprocess.run(command, cwd=work, env=environment, stdout=stream, stderr=stream, check=True)
 
@@ -35,13 +40,17 @@ def _read_rtl(work: Path, sources: list[Path], flags: list[str]) -> str:
 
 def synthesize(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Map the design to Nangate45 cells, importing macro ports as a black box."""
-    defines = [f"-D{define}" for define in cast(list[str], parameters.get("defines", []))]
-    blackbox = _read_rtl(work, staged_sources(work / "macro-rtl"), ["-lib", *defines])
-    design = _read_rtl(work, read_source_list(work / "rtl"), defines)
+    rtl = work / "rtl"
+    defines = [f"-D{define}" for define in read_defines(rtl)]
+    blackboxes = "".join(
+        _read_rtl(work, staged_sources(macro / "rtl"), ["-lib"])
+        for macro in sorted((work / "macros").glob("*"))
+    )
+    design = _read_rtl(work, read_source_list(rtl), defines)
     (work / "synth.tcl").write_text(
         "set lib $::env(COREREF_PLATFORM)/lib/NangateOpenCellLibrary_typical.lib\n"
         "yosys read_liberty -lib $lib\n"
-        f"{blackbox}"
+        f"{blackboxes}"
         f"{design}"
         "yosys synth -flatten -top $::env(COREREF_TOP) -noabc\n"
         "yosys dfflibmap -liberty $lib\n"

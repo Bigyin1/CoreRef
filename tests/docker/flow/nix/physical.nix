@@ -3,7 +3,7 @@
   lib,
   stage,
   files,
-  macro,
+  macros,
   configuration,
   tools,
   checkSynthesis,
@@ -18,11 +18,13 @@ let
     route = ../src/coreref_flow/stages/scripts/route.tcl;
   }
   // files;
-  macroInput =
-    filename: view:
-    lib.optionalAttrs (macro != null) {
-      ${filename} = macro.views.${view};
-    };
+  macroInputs =
+    suffix: view:
+    builtins.listToAttrs (
+      map (macro: lib.nameValuePair "macros/${macro.name}${suffix}" macro.views.${view}) macros
+    );
+  macroCells = map (macro: macro.parameters.top) macros;
+  placements = configuration.macroPlacement;
   synth = stage (
     {
       name = "synth";
@@ -30,8 +32,8 @@ let
       inputs = {
         inherit rtl;
       }
-      // macroInput "macro-rtl" "rtl";
-      configuration = { inherit (configuration) top platform defines; };
+      // macroInputs "/rtl" "rtl";
+      configuration = { inherit (configuration) top platform; };
       outputs.out = "netlist.v";
     }
     // tools.yosys
@@ -59,17 +61,17 @@ let
           "common.tcl" = scripts.common;
           "${name}.tcl" = scripts.${name};
         }
-        // macroInput "macro.lib" "liberty"
+        // macroInputs ".lib" "liberty"
         // inputs;
         configuration = {
           inherit (configuration)
             top
             platform
-            macro
-            macroInstance
             ;
+          inherit macroCells;
           script = "${name}.tcl";
-        };
+        }
+        // lib.optionalAttrs (name == "floorplan") { inherit placements; };
       }
       // tools.openroad
     );
@@ -79,7 +81,7 @@ let
     inputs = {
       "netlist.v" = synth.artifacts.out;
     }
-    // macroInput "macro.lef" "lef";
+    // macroInputs ".lef" "lef";
     outputs.out = "floorplan.odb";
     needs = lib.optional checkSynthesis checkNetlist.package;
   };
@@ -113,9 +115,12 @@ let
     inputs = {
       "final.def" = route.artifacts.def;
     }
-    // macroInput "macro.lef" "lef"
-    // macroInput "macro.gds" "gds";
-    configuration = { inherit (configuration) top platform macro; };
+    // macroInputs ".lef" "lef"
+    // macroInputs ".gds" "gds";
+    configuration = {
+      inherit (configuration) top platform;
+      inherit macroCells;
+    };
     pythonPackages = p: [ p.klayout ];
     outputs.out = "final.gds";
   };

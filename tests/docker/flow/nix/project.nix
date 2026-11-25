@@ -50,13 +50,11 @@ let
   components = import ./components.nix {
     inherit
       lib
-      name
       roots
       selectComponents
       ;
   };
-  inherit (components) macro;
-
+  inherit (components) macros;
   hasFile =
     key: files ? ${key} && (!builtins.isPath files.${key} || builtins.pathExists files.${key});
   dftReady =
@@ -71,8 +69,8 @@ let
   ];
   configuration = {
     defines = [ ];
-    macroInstance = "hard_macro";
-    macro = if macro == null then "" else macro.parameters.top;
+    verificationDefines = [ ];
+    macroPlacement = { };
     platform = pkgs.fetchgit {
       name = "orfs-nangate45";
       url = "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git";
@@ -103,6 +101,7 @@ let
     sources
     // {
       inherit tcl;
+      inherit (configuration) defines;
       inherit (rtl) simulate;
       hierarchical = profile == "dft";
     }
@@ -120,7 +119,7 @@ let
       lib
       stage
       files
-      macro
+      macros
       configuration
       ;
     tools = {
@@ -128,7 +127,13 @@ let
       openroad = tool "openroad" [ pkgs.openroad ];
     };
     checkSynthesis = profile == "soc";
-    rtl = if dftReady then dft.artifact else rtl.forSynth.inline.out;
+    rtl =
+      if profile == "memory" then
+        memory.views.rtl
+      else if dftReady then
+        dft.artifact
+      else
+        rtl.forSynth.inline.out;
   };
 in
 assert
@@ -143,14 +148,14 @@ assert
 {
   packages =
     if profile == "memory" then
-      memory.packages
+      memory.packages // physical.packages
     else
       rtl.packages
       // lib.optionalAttrs dftReady dft.packages
       // lib.optionalAttrs hasBackend physical.packages;
   component = {
     inherit name;
-    kind = if profile == "memory" then "rtl" else profile;
+    kind = if profile == "memory" then "macro" else profile;
     id = builtins.toJSON [
       (toString source)
       parameters
@@ -158,7 +163,7 @@ assert
     parameters = configuration;
     views =
       if profile == "memory" then
-        memory.views
+        memory.views // physical.views
       else
         {
           rtl = files.rtl;

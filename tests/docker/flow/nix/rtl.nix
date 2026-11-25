@@ -12,9 +12,9 @@
   hasTestbench,
 }:
 let
-  inherit (configuration) top defines;
+  inherit (configuration) top defines verificationDefines;
   assemble =
-    name: components:
+    name: components: stageDefines:
     stage {
       inherit name;
       transform = "rtl:assemble";
@@ -22,13 +22,14 @@ let
         files = files.rtl;
       }
       // rtlInputs components (views: views.rtl);
+      configuration.defines = stageDefines;
       outputs.out = "hdl";
     };
-  rtl = assemble "rtl" all;
-  forSynth = assemble "rtl-synthesis-input" synthesizable;
+  rtl = assemble "rtl" all defines;
+  forSynth = assemble "rtl-synthesis-input" synthesizable defines;
 
   simulate =
-    name: input: extra:
+    name: input: extraDefines:
     stage (
       {
         inherit name;
@@ -38,9 +39,8 @@ let
           inherit (files) testbench;
         };
         configuration = {
-          inherit defines;
-        }
-        // extra;
+          defines = verificationDefines ++ extraDefines;
+        };
         outputs.out = "simulation.log";
       }
       // verilator
@@ -58,7 +58,7 @@ in
           name = "lint";
           transform = "verification:lint";
           inputs.rtl = rtl.inline.out;
-          configuration = { inherit top defines; };
+          configuration = { inherit top; };
           outputs.out = "lint.log";
         }
         // verilator
@@ -76,6 +76,6 @@ in
       }).package;
   }
   // lib.optionalAttrs hasTestbench {
-    simulate = (simulate "simulate" rtl.inline.out { }).package;
+    simulate = (simulate "simulate" rtl.inline.out [ ]).package;
   };
 }
