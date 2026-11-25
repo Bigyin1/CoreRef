@@ -2,22 +2,18 @@
 {
   stage,
   template,
-  body,
-  lib,
   testbench,
   configuration,
   verilator,
 }:
 let
-  model =
-    name: inputs:
-    stage {
-      inherit name inputs;
-      transform = "memory:generate";
-      configuration = { inherit (configuration) depth width; };
-      outputs.out = "hdl";
-    };
-  rtl = model "rtl" ({ inherit template; } // lib.optionalAttrs (body != null) { inherit body; });
+  rtl = stage {
+    name = "rtl";
+    transform = "memory:generate";
+    inputs = { inherit template; };
+    configuration = { inherit (configuration) depth width; };
+    outputs.out = "hdl";
+  };
   simulate = stage (
     {
       name = "simulate";
@@ -38,10 +34,5 @@ in
     rtl = rtl.package;
     simulate = simulate.package;
   };
-  views = {
-    rtl = rtl.artifacts.out;
-  }
-  // lib.optionalAttrs (body != null) {
-    blackbox = (model "blackbox" { inherit template; }).artifacts.out;
-  };
+  views.rtl = rtl.artifacts.out;
 }

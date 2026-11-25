@@ -21,7 +21,6 @@
       profile = "macro";
       parameters.top = "counter";
       rtl = {
-        blackbox = ./rtl/blackbox.v;
         sources = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;
       };

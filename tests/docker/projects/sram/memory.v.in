@@ -5,5 +5,10 @@ module sram_@DEPTH@x@WIDTH@(
   input [@WIDTH@-1:0] write_data,
   output reg [@WIDTH@-1:0] read_data
 );
-@BODY@
+  reg [@WIDTH@-1:0] data [0:@DEPTH@-1];
+  always @(posedge clk) begin
+    if (write_enable)
+      data[address] <= write_data;
+    read_data <= data[address];
+  end
 endmodule
