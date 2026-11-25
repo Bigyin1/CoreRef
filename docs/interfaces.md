@@ -1,5 +1,34 @@
 # API CoreRef
 
+## Для CLI на Python
+
+`Project` работает с локальной директорией или flake URL. `build()` возвращает
+пути выбранных результатов в Nix store, `dependencies()` показывает прямые
+входы проекта и закреплённые ревизии.
+
+~~~python
+from pathlib import Path
+
+from coreref import Project
+
+project = Project(Path.cwd())
+for dependency in project.dependencies():
+    print(dependency.name, dependency.revision)
+
+project.add_editable("counter", "/work/counter")
+(netlist,) = project.build("netlist", options=("--no-link",))
+print(netlist / "netlist.v")
+~~~
+
+`checkout("counter", "/work/counter")` клонирует закреплённую Git-ревизию
+и сразу подключает checkout. `editables()` показывает активные подстановки,
+а `remove_editable("counter")` убирает одну из них. Для вложенного входа
+укажите путь вроде `flow/coreref`. Входы в `flake.nix` и `flake.lock`
+остаются исходными. Подстановки записываются локально в
+`.coreref/workspace.json` и передаются Nix как `--override-input`.
+
+## Для автора маршрута
+
 `coreref.lib.mkRoute` принимает Nixpkgs `pkgs`, имя проекта, путь `stageMap`,
 список `use`, функцию `python` и данные для привязки входов. Функция `python`
 получает список дополнительных Python-пакетов стадии и возвращает интерпретатор
