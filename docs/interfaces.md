@@ -29,7 +29,7 @@ print(netlist / "netlist.v")
 `.coreref/workspace.json` и передаются Nix как `--override-input`.
 
 `lock()` добавляет недостающие записи в `flake.lock`. `lock("counter")` обновляет выбранный вход.
-`run("venv")` запускает приложение, которое Flow объявляет в flake.
+`run("flow", "deps")` запускает CLI Flow из флейка проекта.
 
 ## Для автора маршрута
 
@@ -38,8 +38,10 @@ Python-пакета через `source` и карту `stageMap`. В корне 
 `pyproject.toml` для Hatchling и каталог `src`. Функция `configure` связывает
 логические имена инструментов с пакетами Nix и задаёт общие `parameters`.
 Через `pythonDependencies` можно добавить зависимости Python-пакета Flow.
-Имя скрипта из `project.scripts`, переданное в `cli`, включает приложения
-`nix run .#flow` и `nix run .#venv`.
+Имя скрипта из `project.scripts`, переданное в `cli`, выставляет приложение
+`nix run .#flow`. В каталоге проекта `nix develop` даёт Python, CoreRef и Flow
+с зависимостями из закреплённого nixpkgs. Скрипты Flow доступны в `PATH`,
+например `nix develop -c coreref-flow deps`.
 
 Флейк аппаратного проекта вызывает `flow.lib.mkProject`. Он задаёт `profile`,
 `name`, `source` для идентификации ревизии, `files`, `parameters` и функцию

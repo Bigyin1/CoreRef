@@ -33,12 +33,12 @@ let
     in
     {
       inherit package;
-      apps = lib.optionalAttrs (cli != null) (
-        import ./cli.nix {
-          inherit pkgs cli;
-          flowPackage = package;
-        }
-      );
+      apps = lib.optionalAttrs (cli != null) {
+        flow = {
+          type = "app";
+          program = "${package}/bin/${cli}";
+        };
+      };
       devShell = pkgs.mkShell { packages = [ (python [ ]) ]; };
       project = import ./project.nix {
         inherit lib recipe system;

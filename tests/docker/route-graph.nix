@@ -77,11 +77,8 @@ let
 in
 {
   check =
-    assert
-      builtins.attrNames soc.apps.${system} == [
-        "flow"
-        "venv"
-      ];
+    assert builtins.attrNames soc.apps.${system} == [ "flow" ];
+    assert lib.isDerivation soc.devShells.${system}.default;
     assert lib.hasSuffix "/dft_output.v" (plan ready.synth).inputs."design.v";
     assert lib.hasSuffix "-run.tcl" dftFiles."dft.tcl";
     assert lib.hasSuffix "/dft_output.v" (plan broken.packages.${system}.synth).inputs."design.v";

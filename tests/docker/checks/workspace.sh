@@ -7,9 +7,10 @@ cli=(nix run --no-update-lock-file "$baseline#flow" --)
 lock=$(mktemp)
 cp flake.lock "$lock"
 
-"${cli[@]}" deps | grep -F $'increment\t'
-"${cli[@]}" venv .venv
-.venv/bin/python -c 'from coreref import Project; from coreref_flow.cli import app'
+nix develop --no-update-lock-file "$baseline" --command bash -ec '
+    python -c "from coreref import Project; from coreref_flow.cli import app"
+    coreref-flow deps
+' | grep -F $'increment\t'
 
 "${cli[@]}" workspace checkout increment .coreref/increment
 cp /suite/variants/increment.v .coreref/increment/rtl/increment.v

@@ -21,7 +21,7 @@ workspace = typer.Typer(help="Manage local input overrides.", no_args_is_help=Tr
 app.add_typer(workspace, name="workspace")
 
 ProjectOption = Annotated[str, typer.Option(help="Project flake reference.")]
-_COMMANDS = {"build", "deps", "lock", "venv", "workspace"}
+_COMMANDS = {"build", "deps", "lock", "workspace"}
 
 
 @app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
@@ -55,14 +55,6 @@ def lock(
 ) -> None:
     """Lock missing inputs or update the named inputs."""
     Project(project).lock(*(inputs or ()))
-
-
-@app.command()
-def venv(
-    directory: Annotated[str, typer.Argument()] = ".venv", *, project: ProjectOption = "."
-) -> None:
-    """Install Flow in a venv using the project's flake."""
-    typer.echo(Project(project).run("venv", directory), nl=False)
 
 
 @workspace.command()
