@@ -8,13 +8,15 @@ from pathlib import Path
 def produce(work: Path, _log: Path, _params: Mapping[str, object]) -> None:
     """Produce two independently selectable outputs."""
     (work / "data.txt").write_text("data", encoding="utf-8")
-    (work / "summary.txt").write_text("summary", encoding="utf-8")
+    summary = subprocess.check_output(["stage-tool"], text=True).strip()  # noqa: S607
+    (work / "summary.txt").write_text(summary, encoding="utf-8")
 
 
 def consume(work: Path, _log: Path, params: Mapping[str, object]) -> None:
     """Join a single named output with a project parameter."""
     summary = (work / "summary.txt").read_text(encoding="utf-8")
-    (work / "result.txt").write_text(f"{summary} {params['label']}", encoding="utf-8")
+    label = subprocess.check_output(["stage-tool"], text=True).strip()  # noqa: S607
+    (work / "result.txt").write_text(f"{summary} {label} {params['label']}", encoding="utf-8")
 
 
 def consume_directories(work: Path, _log: Path, _params: Mapping[str, object]) -> None:

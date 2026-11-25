@@ -137,7 +137,7 @@ let
       else if dftReady then
         dftRoute.artifact
       else
-        rtlRoute.forSynth.inline.out;
+        rtlRoute.forSynth.artifacts.out;
   };
 in
 assert

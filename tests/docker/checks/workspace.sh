@@ -31,7 +31,7 @@ if nix eval --no-update-lock-file --raw .#dft.drvPath >/dev/null 2>&1; then
     exit 1
 fi
 nix eval --no-update-lock-file --raw .#synth.stagePlan |
-    grep -F '"name":"soc-rtl-synthesis-input"'
+    grep -F -- '-soc-rtl-synthesis-input/hdl'
 netlist=$(nix build --no-update-lock-file --no-link --print-out-paths .#netlist)
 grep -F 'module soc' "$netlist/netlist.v"
 cmp "$lock" flake.lock

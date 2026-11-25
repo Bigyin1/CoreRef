@@ -21,20 +21,12 @@ class ToolPin(TypedDict):
     versionArgs: list[str]
 
 
-class InlineInput(TypedDict):
-    plan: TransformPlan
-    output: str
-
-
-class TransformPlan(TypedDict):
+class StagePlan(TypedDict):
     name: str
     transform: str
-    inputs: dict[str, str | InlineInput]
+    inputs: dict[str, str]
     outputs: dict[str, str]
     configuration: dict[str, object]
-
-
-class StagePlan(TransformPlan):
     pins: list[ToolPin]
 
 
@@ -69,23 +61,11 @@ def _report(log: Path) -> None:
             shutil.copyfileobj(stream, sys.stderr)
 
 
-def _stage_input(value: str | InlineInput, target: Path, scratch: Path) -> None:
-    if isinstance(value, str):
-        _copy(Path(value), target)
-        _make_writable(target)
-        for entry in target.rglob("*"):
-            _make_writable(entry)
-        return
-
-    plan = value["plan"]
-    work = scratch / "work"
-    log = scratch / "stage.log"
-    try:
-        run(plan, work, log)
-    finally:
-        _report(log)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    (work / plan["outputs"][value["output"]]).rename(target)
+def _stage_input(source: Path, target: Path) -> None:
+    _copy(source, target)
+    _make_writable(target)
+    for entry in target.rglob("*"):
+        _make_writable(entry)
 
 
 def _valid_output(path: Path, work: Path) -> bool:
@@ -98,14 +78,13 @@ def _valid_output(path: Path, work: Path) -> bool:
     return path.is_file()
 
 
-def run(plan: TransformPlan, work: Path, log: Path) -> None:
+def run(plan: StagePlan, work: Path, log: Path) -> None:
     """Stage inputs, run the transform, and verify its files or directories."""
     module, function = plan["transform"].split(":")
     transform = getattr(import_module(module), function)
     work.mkdir(parents=True)
-    scratch = work.with_name(f"{work.name}-inputs")
-    for filename, value in plan["inputs"].items():
-        _stage_input(value, work / filename, scratch / filename)
+    for filename, source in plan["inputs"].items():
+        _stage_input(Path(source), work / filename)
     transform(work, log, plan["configuration"])
     for filename in plan["outputs"].values():
         if not _valid_output(work / filename, work):

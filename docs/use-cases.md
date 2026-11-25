@@ -49,7 +49,7 @@ rtl = variant.packages.${system}.rtl;
 simulation = variant.packages.${system}.simulate;
 ~~~
 
-Вход `rtl` стадии симуляции подключён через `rtl.inline.out`. При сборке
+Вход `rtl` стадии симуляции подключён через `rtl.artifacts.out`. При сборке
 RTL-стадия сохраняет исходники и формирует `sources.f` с путями относительно
 своего выходного каталога. В списке сначала идут зависимости, затем файлы
 проекта в порядке, заданном в `rtl.sources`. Симуляция передаёт файл списка
@@ -102,7 +102,7 @@ backend = {
 ~~~
 
 ~~~nix
-rtl = if dftReady then dftRoute.artifact else rtlRoute.forSynth.inline.out;
+rtl = if dftReady then dftRoute.artifact else rtlRoute.forSynth.artifacts.out;
 ~~~
 
 При `dft.enabled = false` или отсутствии скрипта синтез получает обычный RTL с теми же правилами выбора

@@ -98,7 +98,7 @@ let
   plan = stage: builtins.fromJSON (builtins.unsafeDiscardStringContext stage.stagePlan);
   synth = (plan ready.synth).inputs.rtl;
   lintFiles = (plan ready.lint-physical).inputs;
-  inlineRtl = (plan ready.simulate).inputs.rtl.plan;
+  simulationRtl = plan ready.rtl;
   dftFiles = (plan ready.dft).inputs;
   first =
     (sram.lib.mkSram {
@@ -152,18 +152,13 @@ in
     assert (plan vendorSoc.packages.${system}.netlist).inputs."macros/counter/rtl" == suppliedStub;
     assert otherReset.packages.${system}.rtl.drvPath != counter.packages.${system}.rtl.drvPath;
     assert otherReset.packages.${system}.netlist.drvPath != counter.packages.${system}.netlist.drvPath;
-    assert
-      (plan conflictingDefines.packages.${system}.simulate).inputs.rtl.plan.inputs == inlineRtl.inputs;
-    assert inlineRtl.name == "soc-rtl";
-    assert inlineRtl.outputs.out == "hdl";
-    assert
-      !(builtins.hasAttr (builtins.unsafeDiscardStringContext ready.rtl.drvPath) (
-        builtins.getContext ready.simulate.stagePlan
-      ));
+    assert (plan conflictingDefines.packages.${system}.rtl).inputs == simulationRtl.inputs;
+    assert (plan ready.simulate).inputs.rtl == "${ready.rtl}/hdl";
+    assert (plan ready.lint).inputs.rtl == "${ready.rtl}/hdl";
     assert lib.hasSuffix "-soc-dft-simulation/hdl" (plan ready.simulate-dft).inputs.rtl;
     assert lib.hasSuffix "-soc-dft/hdl" (plan broken.packages.${system}.synth).inputs.rtl;
     assert lib.all (
-      packages: (plan packages.synth).inputs.rtl.plan.name == "soc-rtl-synthesis-input"
+      packages: (plan packages.synth).inputs.rtl == "${packages.rtl-synthesis-input}/hdl"
     ) withoutDft;
     assert lib.all (
       packages: !(packages ? dft) && !(packages ? simulate-dft) && packages ? simulate
@@ -188,17 +183,20 @@ in
         "rtl"
       ];
     assert
-      (builtins.filter (lib.hasPrefix "sources/") (builtins.attrNames lintFiles.rtl.plan.inputs)) == [
+      (builtins.filter (lib.hasPrefix "sources/") (
+        builtins.attrNames (plan ready.rtl-synthesis-input).inputs
+      )) == [
         "sources/000000-increment/000000/step_one.v"
         "sources/000000-increment/000001/increment.v"
         "sources/000001-status-register/000000/rtl.v"
       ];
+    assert lintFiles.rtl == "${ready.rtl-synthesis-input}/hdl";
     assert lib.hasSuffix "/dft_module.v" dftFiles."sources/000001-status-register";
     assert builtins.elem (counter.lib.componentFor system).views.rtl (
-      builtins.attrValues inlineRtl.inputs
+      builtins.attrValues simulationRtl.inputs
     );
     assert
-      builtins.attrNames ((plan alternateRtl.packages.${system}.simulate).inputs.rtl.plan.inputs) == [
+      builtins.attrNames (plan alternateRtl.packages.${system}.rtl).inputs == [
         "files/000000/step_two.v"
         "files/000001/increment.v"
       ];
@@ -224,7 +222,7 @@ in
         top = "sram_5x3";
       };
     assert !(builtins.tryEval invalid).success;
-    assert inlineRtl.configuration.defines == [ ];
+    assert simulationRtl.configuration.defines == [ ];
     assert (plan ready.dft).configuration.defines == [ ];
     assert (plan ready.simulate).configuration.defines == [ "TB_COUNTER_STEP=1" ];
     assert

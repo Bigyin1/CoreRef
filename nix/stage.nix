@@ -21,18 +21,14 @@ let
     match "[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*" path != null
     && lib.all (part: part != "." && part != "..") (lib.splitString "/" path);
   validPlan =
-    step:
-    let
-      inherit (step) name inputs outputs;
-    in
     if !(outputs ? out) then
       throw "${name}: declare outputs.out"
-    else if !(lib.all validFile (attrNames inputs ++ attrValues outputs)) then
+    else if !(lib.all validFile (attrNames plan.inputs ++ attrValues outputs)) then
       throw "${name}: stage input and output paths must be relative"
     else if length (lib.unique (attrValues outputs)) != length (attrValues outputs) then
       throw "${name}: two outputs refer to the same path"
     else
-      lib.all (input: !builtins.isAttrs input || validPlan input.plan) (attrValues inputs);
+      true;
 
   toolPin =
     tool:
@@ -76,7 +72,7 @@ let
     requiredSystemFeatures = [ "coreref-eda-${profile}" ];
   };
 in
-assert validPlan plan;
+assert validPlan;
 pkgs.runCommand name attrs ''
   ${setup}
   exec ${python}/bin/python -m coreref._internal.nix_builder

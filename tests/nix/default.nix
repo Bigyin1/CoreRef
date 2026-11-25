@@ -1,4 +1,4 @@
-# Exercise a named output both as a derivation edge and as inline preparation.
+# Exercise named outputs and separate stage environments.
 { pkgs, core }:
 let
   inherit (pkgs) lib;
@@ -7,9 +7,11 @@ let
     inherit pkgs;
     python = _: runtime;
   };
+  tool = label: pkgs.writeShellScriptBin "stage-tool" "echo ${label}";
   producer = stage {
     name = "coreref-test-produce";
     transform = "coreref_test_stages:produce";
+    nativeBuildInputs = [ (tool "producer") ];
     outputs = {
       out = "data.txt";
       summary = "summary.txt";
@@ -20,12 +22,12 @@ let
     stage {
       inherit name;
       transform = "coreref_test_stages:consume";
+      nativeBuildInputs = [ (tool "consumer") ];
       inputs."summary.txt" = summary;
       outputs.out = "result.txt";
       configuration.label = "ok";
     };
   materialized = consume "coreref-test-materialized" producer.artifacts.summary;
-  inline = consume "coreref-test-inline" producer.inline.summary;
   consumeDirectories = stage {
     name = "coreref-test-outputs";
     transform = "coreref_test_stages:consume_directories";
@@ -163,13 +165,11 @@ assert fails
     outputs.out = "../data.txt";
   }).package.drvPath;
 assert builtins.hasAttr producerDrv (builtins.getContext materialized.package.stagePlan);
-assert !(builtins.hasAttr producerDrv (builtins.getContext inline.package.stagePlan));
 {
   stage-graph = pkgs.runCommand "coreref-stage-graph-test" { } ''
-    test "$(cat ${materialized.artifacts.out})" = "summary ok"
-    test "$(cat ${inline.artifacts.out})" = "summary ok"
-    test "$(cat ${lib.getOutput "summary" producer.package}/summary.txt)" = "summary"
-    test "$(cat ${consumeDirectories.artifacts.out})" = "data summary"
+    test "$(cat ${materialized.artifacts.out})" = "producer consumer ok"
+    test "$(cat ${lib.getOutput "summary" producer.package}/summary.txt)" = "producer"
+    test "$(cat ${consumeDirectories.artifacts.out})" = "data producer"
     touch "$out"
   '';
 }

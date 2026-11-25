@@ -13,8 +13,6 @@
 }:
 let
   inherit (pkgs) lib;
-  isInline = value: builtins.isAttrs value && (value.__corerefInline or false);
-  inlineInputs = builtins.filter isInline (builtins.attrValues inputs);
 
   source =
     path:
@@ -32,9 +30,7 @@ let
 
   bind =
     alias: value:
-    if isInline value then
-      [ (lib.nameValuePair alias { inherit (value) plan output; }) ]
-    else if builtins.isList value then
+    if builtins.isList value then
       lib.imap0 (
         index: file:
         let
@@ -62,28 +58,14 @@ let
     orderOnly = map toString needs;
   };
 
-  runtime = {
-    packages = lib.unique (nativeBuildInputs ++ lib.concatMap (step: step.packages) inlineInputs);
-    pythonPackages =
-      p: lib.unique (pythonPackages p ++ lib.concatMap (step: step.pythonPackages p) inlineInputs);
-    licensed = lib.unique (siteTools ++ lib.concatMap (step: step.licensed) inlineInputs);
-  };
-
   package = import ./stage.nix {
     inherit pkgs plan;
-    python = python runtime.pythonPackages;
-    inherit (runtime) packages licensed;
+    python = python pythonPackages;
+    packages = nativeBuildInputs;
+    licensed = siteTools;
   };
 in
 {
   inherit package;
   artifacts = lib.mapAttrs (output: path: "${lib.getOutput output package}/${path}") outputs;
-  inline = lib.mapAttrs (
-    output: _:
-    runtime
-    // {
-      inherit plan output;
-      __corerefInline = true;
-    }
-  ) outputs;
 }

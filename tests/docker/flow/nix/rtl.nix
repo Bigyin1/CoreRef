@@ -29,7 +29,6 @@ let
     };
   sources = assemble "rtl" all defines;
   rtl = if model == null then sources else model;
-  simulationInput = if model == null then rtl.inline.out else model.artifacts.out;
   forSynth = assemble "rtl-synthesis-input" synthesizable defines;
 
   simulate =
@@ -61,7 +60,7 @@ in
         {
           name = "lint";
           transform = "verification:lint";
-          inputs.rtl = sources.inline.out;
+          inputs.rtl = sources.artifacts.out;
           configuration = { inherit top; };
           outputs.out = "lint.log";
         }
@@ -72,7 +71,7 @@ in
         name = "lint-physical";
         transform = "physical_lint:check_inputs";
         inputs = {
-          rtl = forSynth.inline.out;
+          rtl = forSynth.artifacts.out;
         }
         // abstracts;
         configuration = { inherit top; };
@@ -80,6 +79,6 @@ in
       }).package;
   }
   // lib.optionalAttrs hasTestbench {
-    simulate = (simulate "simulate" simulationInput [ ]).package;
+    simulate = (simulate "simulate" rtl.artifacts.out [ ]).package;
   };
 }
