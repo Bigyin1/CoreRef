@@ -8,10 +8,10 @@ version = "0.1.0"
 description = "Experimental RTL, hierarchical DFT and OpenROAD flow on CoreRef"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["coreref>=0.1,<0.2"]
+dependencies = ["coreref>=0.1,<0.2", "typer>=0.24"]
 
 [project.scripts]
-coreref-flow = "coreref_flow.cli:app"
+coreref-flow = "coreref_flow.cli:main"
 
 [tool.ruff]
 line-length = 100

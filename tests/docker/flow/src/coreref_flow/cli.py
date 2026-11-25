@@ -2,105 +2,112 @@
 
 from __future__ import annotations
 
-import argparse
 import subprocess
 import sys
 from collections.abc import Sequence
+from pathlib import Path
+from typing import Annotated
 
+import typer
 from coreref import Project
 
-_COMMANDS = {"build", "deps", "lock", "venv", "workspace", "-h", "--help"}
+app = typer.Typer(
+    help=__doc__,
+    no_args_is_help=True,
+    add_completion=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+workspace = typer.Typer(help="Manage local input overrides.", no_args_is_help=True)
+app.add_typer(workspace, name="workspace")
+
+ProjectOption = Annotated[str, typer.Option(help="Project flake reference.")]
+_COMMANDS = {"build", "deps", "lock", "venv", "workspace"}
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="coreref-flow", description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-
-    build = commands.add_parser("build", help="Build a named target")
-    build.add_argument("target")
-    build.add_argument("project", nargs="?", default=".", help="Project flake reference")
-    build.add_argument("options", nargs=argparse.REMAINDER, help="Additional nix build options")
-
-    deps = commands.add_parser("deps", help="List the project's direct flake inputs")
-    deps.add_argument("--project", default=".")
-
-    lock = commands.add_parser("lock", help="Lock missing inputs or update the named inputs")
-    lock.add_argument("inputs", nargs="*")
-    lock.add_argument("--project", default=".")
-
-    venv = commands.add_parser("venv", help="Install Flow in a venv using the project's flake")
-    venv.add_argument("directory", nargs="?", default=".venv")
-    venv.add_argument("--project", default=".")
-
-    workspace = commands.add_parser("workspace", help="Manage local input overrides")
-    actions = workspace.add_subparsers(dest="action", required=True)
-    for name, description in (
-        ("add", "Use an existing checkout"),
-        ("checkout", "Clone the input at the locked revision and use it locally"),
-        ("remove", "Restore the locked input"),
-        ("list", "Show the active local checkouts"),
-    ):
-        action = actions.add_parser(name, help=description)
-        action.add_argument("--project", default=".")
-        if name != "list":
-            action.add_argument("input")
-        if name == "add":
-            action.add_argument("directory")
-        if name == "checkout":
-            action.add_argument("directory", nargs="?")
-    return parser
+@app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
+def build(
+    ctx: typer.Context,
+    target: str,
+    project: Annotated[str, typer.Argument(help="Project flake reference.")] = ".",
+) -> None:
+    """Build a target and forward trailing arguments to Nix."""
+    options = ctx.args
+    # With no PROJECT, Typer can assign the first Nix option to that position.
+    if project.startswith("-"):
+        options = [project, *options]
+        project = "."
+    for path in Project(project).build(target, options=options):
+        typer.echo(path)
 
 
-def _workspace(project: Project, args: argparse.Namespace) -> None:
-    match args.action:
-        case "add":
-            print(project.add_editable(args.input, args.directory))
-        case "checkout":
-            print(project.checkout(args.input, args.directory))
-        case "remove":
-            project.remove_editable(args.input)
-        case "list":
-            for name, directory in project.editables().items():
-                print(f"{name}\t{directory}")
-
-
-def _show_dependencies(project: Project) -> None:
-    for dep in project.dependencies():
+@app.command()
+def deps(project: ProjectOption = ".") -> None:
+    """List the project's direct flake inputs."""
+    for dep in Project(project).dependencies():
         columns = (dep.name, dep.revision, dep.editable)
-        print("\t".join(str(value) for value in columns if value))
+        typer.echo("\t".join(str(value) for value in columns if value))
 
 
-def _run(args: argparse.Namespace) -> None:
-    project = Project(args.project)
-    match args.command:
-        case "build":
-            paths = project.build(args.target, options=args.options)
-            sys.stdout.writelines(f"{path}\n" for path in paths)
-        case "deps":
-            _show_dependencies(project)
-        case "workspace":
-            _workspace(project, args)
-        case "lock":
-            project.lock(*args.inputs)
-        case "venv":
-            sys.stdout.write(project.run("venv", args.directory))
+@app.command()
+def lock(
+    inputs: Annotated[list[str] | None, typer.Argument(help="Inputs to update.")] = None,
+    project: ProjectOption = ".",
+) -> None:
+    """Lock missing inputs or update the named inputs."""
+    Project(project).lock(*(inputs or ()))
 
 
-def app(argv: Sequence[str] | None = None) -> int:
-    """Dispatch a project operation or report its failure to the terminal."""
+@app.command()
+def venv(
+    directory: Annotated[str, typer.Argument()] = ".venv", *, project: ProjectOption = "."
+) -> None:
+    """Install Flow in a venv using the project's flake."""
+    typer.echo(Project(project).run("venv", directory), nl=False)
+
+
+@workspace.command()
+def add(input_name: str, directory: Path, *, project: ProjectOption = ".") -> None:
+    """Use an existing checkout."""
+    typer.echo(Project(project).add_editable(input_name, directory))
+
+
+@workspace.command()
+def checkout(
+    input_name: str,
+    directory: Annotated[Path | None, typer.Argument()] = None,
+    *,
+    project: ProjectOption = ".",
+) -> None:
+    """Clone the input at the locked revision and use it locally."""
+    typer.echo(Project(project).checkout(input_name, directory))
+
+
+@workspace.command()
+def remove(input_name: str, *, project: ProjectOption = ".") -> None:
+    """Restore the locked input."""
+    Project(project).remove_editable(input_name)
+
+
+@workspace.command("list")
+def list_editables(project: ProjectOption = ".") -> None:
+    """Show the active local checkouts."""
+    for name, directory in Project(project).editables().items():
+        typer.echo(f"{name}\t{directory}")
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the CLI, also accepting a target name as shorthand for build."""
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] not in _COMMANDS:
+    if arguments and not arguments[0].startswith("-") and arguments[0] not in _COMMANDS:
         arguments.insert(0, "build")
-    args = _parser().parse_args(arguments)
     try:
-        _run(args)
+        app(args=arguments, prog_name="coreref-flow")
     except subprocess.CalledProcessError as exc:
-        return exc.returncode
+        raise SystemExit(exc.returncode) from exc
     except (OSError, ValueError) as exc:
-        print(f"coreref-flow: {exc}", file=sys.stderr)
-        return 1
-    return 0
+        typer.echo(f"coreref-flow: {exc}", err=True)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
-    raise SystemExit(app())
+    main()

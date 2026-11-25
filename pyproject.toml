@@ -16,6 +16,7 @@ dev = [
     "pytest-cov>=6",
     "ruff>=0.14",
     "mypy>=1.18",
+    "typer==0.24.0",  # Match the Flow fixture's Typer from nixpkgs.
 ]
 
 [tool.hatch.build.targets.wheel]

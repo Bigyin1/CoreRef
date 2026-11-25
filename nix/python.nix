@@ -1,4 +1,4 @@
-# Build the runner from the same pinned source that supplies the Nix library.
+# Package the CoreRef SDK and stage runner from the flake's source.
 pythonPackages:
 let
   inherit (pythonPackages) buildPythonPackage hatchling;

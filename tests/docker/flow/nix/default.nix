@@ -25,15 +25,15 @@ let
         ];
       };
       build-system = [ p.hatchling ];
-      dependencies = [ (core.pythonPackage p) ];
+      dependencies = [
+        (core.pythonPackage p)
+        p.typer
+      ];
       pythonImportsCheck = [ "coreref_flow.cli" ];
     };
   flowPackage = flow pkgs.python3Packages;
   python = names: pkgs.python3.withPackages (p: [ (flow p) ] ++ map (name: p.${name}) names);
-  cli = import ./cli.nix {
-    inherit pkgs flowPackage;
-    sdkPackage = core.pythonPackage pkgs.python3Packages;
-  };
+  cli = import ./cli.nix { inherit pkgs flowPackage; };
   mkRoute =
     config:
     core.mkRoute (
