@@ -46,6 +46,25 @@ class Project:
         )
         return tuple(Path(path) for path in outputs.splitlines())
 
+    def run(self, app: str, *arguments: str) -> str:
+        """Run a named flake app with the workspace inputs and return its standard output."""
+        return _run(
+            "nix",
+            "run",
+            f"{self._reference}#{app}",
+            *workspace.arguments(self.editables()),
+            "--",
+            *arguments,
+        )
+
+    def lock(self, *inputs: str) -> None:
+        """Fill in missing lock entries, or update only the named inputs."""
+        self._local_project()
+        if inputs:
+            _run("nix", "flake", "update", "--flake", self._reference, *inputs)
+        else:
+            _run("nix", "flake", "lock", self._reference)
+
     def dependencies(self) -> tuple[Dependency, ...]:
         """List the direct inputs in flake.lock, with workspace changes shown alongside."""
         lock = self._lock()
@@ -72,7 +91,7 @@ class Project:
         """Restore the locked dependency and report whether a substitution existed."""
         return workspace.update(self._local_project(), name, None)
 
-    def checkout(self, name: str, destination: str | Path) -> Path:
+    def checkout(self, name: str, destination: str | Path | None = None) -> Path:
         """Clone a Git input at its locked revision and add the checkout to the workspace."""
         project = self._local_project()
         node = input_node(self._lock(), name)
@@ -80,14 +99,17 @@ class Project:
         revision = source.get("rev")
         if revision is None or source.get("type") not in {"git", "github", "gitlab", "sourcehut"}:
             raise ValueError(f"Input {name!r} has no locked Git revision to clone")
-        destination = Path(destination).resolve()
+        target = (
+            project / ".coreref" / "checkouts" / name if destination is None else Path(destination)
+        )
+        target = target.resolve()
         # Nix 2.33 can clone the repository, while Git selects the locked commit.
         remote = {
             key: value for key, value in source.items() if key not in {"ref", "rev", "narHash"}
         }
-        _run("nix", "flake", "clone", _reference(remote), "--dest", str(destination))
-        _run("git", "-C", str(destination), "switch", "--detach", "--", str(revision))
-        directory = destination / str(source.get("dir", ""))
+        _run("nix", "flake", "clone", _reference(remote), "--dest", str(target))
+        _run("git", "-C", str(target), "switch", "--detach", "--", str(revision))
+        directory = target / str(source.get("dir", ""))
         _check_directory(directory, flake=node.get("flake", True))
         workspace.update(project, name, directory)
         return directory

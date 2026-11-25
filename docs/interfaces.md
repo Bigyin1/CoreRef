@@ -20,12 +20,16 @@ project.add_editable("counter", "/work/counter")
 print(netlist / "netlist.v")
 ~~~
 
-`checkout("counter", "/work/counter")` клонирует закреплённую Git-ревизию
-и сразу подключает checkout. `editables()` показывает активные подстановки,
+`checkout("counter")` клонирует закреплённую Git-ревизию в
+`.coreref/checkouts/counter` и сразу подключает checkout. Можно также передать
+свой путь. `editables()` показывает активные подстановки,
 а `remove_editable("counter")` убирает одну из них. Для вложенного входа
 укажите путь вроде `flow/coreref`. Входы в `flake.nix` и `flake.lock`
 остаются исходными. Подстановки записываются локально в
 `.coreref/workspace.json` и передаются Nix как `--override-input`.
+
+`lock()` добавляет недостающие записи в `flake.lock`. `lock("counter")` обновляет выбранный вход.
+`run("venv")` запускает приложение, которое Flow объявляет в flake.
 
 ## Для автора маршрута
 

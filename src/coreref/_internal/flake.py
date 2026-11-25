@@ -22,8 +22,11 @@ def root_node(lock: FlakeLock) -> InputNode:
 
 def input_node(lock: FlakeLock, name: str) -> InputNode:
     """Look up a direct or nested input and resolve Nix follows edges."""
+    parts = name.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError(f"Invalid flake input path {name!r}")
     try:
-        return _find(lock, name.split("/"))
+        return _find(lock, parts)
     except KeyError as exc:
         raise ValueError(f"Unknown flake input {name!r}") from exc
 
