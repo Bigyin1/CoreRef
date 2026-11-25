@@ -21,6 +21,7 @@ let
     elem
     hasAttr
     isAttrs
+    isList
     isPath
     length
     mapAttrs
@@ -96,43 +97,82 @@ let
   bind =
     input:
     if isAttrs input then
-      lookup (lookup artifacts "stage" input.stage) "output of ${input.stage}" (input.output or "out")
+      let
+        spec = lookup specs "stage" input.stage;
+        output = input.output or "out";
+      in
+      if spec.inline or false then
+        builtins.seq (lookup spec.outputs "output of ${input.stage}" output) {
+          plan = plans.${input.stage};
+          inherit output;
+        }
+      else
+        lookup artifacts.${input.stage} "output of ${input.stage}" output
     else
-      source (lookup files "project file" input);
+      lookup files "project file" input;
+
+  inputFiles =
+    alias: value:
+    if isAttrs value && value ? plan then
+      [ (lib.nameValuePair alias value) ]
+    else if isList value then
+      lib.imap0 (
+        index: file:
+        lib.nameValuePair "${alias}/${lib.fixedWidthNumber 6 index}/${baseNameOf file}" (source file)
+      ) value
+    else
+      [ (lib.nameValuePair alias (source value)) ];
+
+  stagePlan =
+    stage: spec:
+    let
+      explicit = lib.concatLists (
+        lib.mapAttrsToList (alias: value: inputFiles alias (bind value)) spec.inputs
+      );
+      groupFiles = lib.concatMap (
+        group: lib.concatLists (lib.mapAttrsToList inputFiles (lookup groups "input group" group))
+      ) (spec.groups or [ ]);
+      boundParams = lib.genAttrs (spec.parameters or [ ]) (lookup parameters "parameter");
+      filesFromStages = inputStages spec;
+    in
+    {
+      name = "${name}-${stage}";
+      inherit (spec) transform outputs;
+      configuration = boundParams // (spec.configuration or { });
+      inputs = collect "input for ${stage}" (explicit ++ groupFiles);
+      orderOnly = builtins.map (dep: stages.${dep}.out) (
+        builtins.filter (dep: !(elem dep filesFromStages)) (spec.needs or [ ])
+      );
+    };
+
+  # Inline transforms run in the same builder as their consumer.
+  withInline =
+    spec:
+    [ spec ]
+    ++ lib.concatMap (
+      stage: lib.optionals (specs.${stage}.inline or false) (withInline specs.${stage})
+    ) (inputStages spec);
 
   stageFor =
     stage: spec:
     let
-      explicit = lib.mapAttrsToList (alias: value: lib.nameValuePair alias (bind value)) spec.inputs;
-      groupFiles = lib.concatMap (
-        group:
-        lib.mapAttrsToList (alias: value: lib.nameValuePair alias (source value)) (
-          lookup groups "input group" group
-        )
-      ) (spec.groups or [ ]);
-      toolNames = spec.tools or [ ];
+      steps = withInline spec;
+      toolNames = lib.unique (lib.concatMap (step: step.tools or [ ]) steps);
       nativePackages = concatLists (
         builtins.map (lookup tools "tool") (builtins.filter (tool: !(hasAttr tool siteTools)) toolNames)
       );
       licensed = builtins.map (lookup siteTools "site tool") (
         builtins.filter (tool: hasAttr tool siteTools) toolNames
       );
-      boundParams = lib.genAttrs (spec.parameters or [ ]) (lookup parameters "parameter");
-      filesFromStages = inputStages spec;
-      orderOnly = builtins.map (dep: stages.${dep}.out) (
-        builtins.filter (dep: !(elem dep filesFromStages)) (spec.needs or [ ])
-      );
     in
     import ./stage.nix {
-      inherit pkgs orderOnly licensed;
-      python = python (spec.pythonPackages or [ ]);
-      name = "${name}-${stage}";
-      inherit (spec) transform outputs;
-      configuration = boundParams // (spec.configuration or { });
-      inputs = collect "input for ${stage}" (explicit ++ groupFiles);
+      inherit pkgs licensed;
+      plan = plans.${stage};
+      python = python (lib.unique (lib.concatMap (step: step.pythonPackages or [ ]) steps));
       packages = nativePackages;
     };
 
+  plans = mapAttrs stagePlan specs;
   stages = mapAttrs stageFor specs;
   artifacts = mapAttrs (
     stage: spec: mapAttrs (output: file: "${stages.${stage}.${output}}/${file}") spec.outputs

@@ -2,17 +2,13 @@
 {
   pkgs,
   python,
-  name,
-  transform,
-  inputs,
-  outputs,
-  configuration,
+  plan,
   packages,
-  orderOnly,
   licensed,
 }:
 let
   inherit (pkgs) lib;
+  inherit (plan) name outputs;
   inherit (builtins)
     attrNames
     attrValues
@@ -24,15 +20,19 @@ let
     path:
     match "[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*" path != null
     && lib.all (part: part != "." && part != "..") (lib.splitString "/" path);
-  validation =
+  validPlan =
+    step:
+    let
+      inherit (step) name inputs outputs;
+    in
     if !(outputs ? out) then
       throw "${name}: declare outputs.out"
     else if !(lib.all validFile (attrNames inputs ++ attrValues outputs)) then
-      throw "${name}: stage input and output filenames must be relative"
+      throw "${name}: stage input and output paths must be relative"
     else if length (lib.unique (attrValues outputs)) != length (attrValues outputs) then
-      throw "${name}: two outputs refer to the same file"
+      throw "${name}: two outputs refer to the same path"
     else
-      true;
+      lib.all (input: !builtins.isAttrs input || validPlan input.plan) (attrValues inputs);
 
   toolPin =
     tool:
@@ -69,24 +69,14 @@ let
     nativeBuildInputs = [ python ] ++ packages;
     outputs = [ "out" ] ++ builtins.filter (output: output != "out") (attrNames outputs);
     passAsFile = [ "stagePlan" ];
-    stagePlan = toJSON {
-      inherit
-        name
-        transform
-        inputs
-        outputs
-        configuration
-        orderOnly
-        pins
-        ;
-    };
+    stagePlan = toJSON (plan // { inherit pins; });
   }
   // lib.optionalAttrs (pins != [ ]) {
     __noChroot = true;
     requiredSystemFeatures = [ "coreref-eda-${profile}" ];
   };
 in
-assert validation;
+assert validPlan plan;
 pkgs.runCommand name attrs ''
   ${setup}
   exec ${python}/bin/python -m coreref._internal.nix_builder

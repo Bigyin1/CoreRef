@@ -4,10 +4,12 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+from .rtl import read_source_list
+
 
 def check_inputs(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
     """Record the views provided to a mixed-representation linter."""
-    rtl = [*sorted((work / "sources").glob("*.v")), work / "rtl"]
+    rtl = read_source_list(work / "rtl")
     abstracts = sorted((work / "macros").glob("*/*"))
     for path in (*rtl, *abstracts):
         if path.stat().st_size == 0:

@@ -15,13 +15,14 @@ nix develop --no-update-lock-file "$baseline" --command bash -ec '
 "${cli[@]}" workspace checkout increment .coreref/increment
 cp /suite/variants/increment.v .coreref/increment/rtl/increment.v
 rtl=$("${cli[@]}" build rtl . --no-link)
-grep -F '// Workspace override' "$rtl/rtl.v"
+grep -rF '// Workspace override' "$rtl/hdl"
 "${cli[@]}" workspace remove increment
 cmp "$lock" flake.lock
 
 # The mounted source has a DFT readiness marker. Remove it from the test checkout.
 rm dft/enabled
-nix derivation show --no-update-lock-file .#netlist | grep -F -- '-soc-rtl-synthesis-input.drv'
+nix eval --no-update-lock-file --raw .#synth.stagePlan |
+    grep -F '"name":"soc-rtl-synthesis-input"'
 netlist=$(nix build --no-update-lock-file --no-link --print-out-paths .#netlist)
 grep -F 'module soc' "$netlist/netlist.v"
 cmp "$lock" flake.lock

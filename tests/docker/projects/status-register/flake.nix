@@ -21,7 +21,7 @@
       profile = "dft";
       parameters.top = "status_register";
       files = {
-        rtl = ./rtl/rtl.v;
+        rtl = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;
         dftScript = ./dft/run.tcl;
       };

@@ -34,10 +34,14 @@ let
     else
       flowSource + "/${path}";
   projectFiles = lib.mapAttrs defaultFile (recipe.files or { }) // files;
+  available = path: !builtins.isPath path || builtins.pathExists path;
   hasFile =
     key:
+    let
+      value = projectFiles.${key};
+    in
     projectFiles ? ${key}
-    && (!builtins.isPath projectFiles.${key} || builtins.pathExists projectFiles.${key});
+    && (if builtins.isList value then value != [ ] && lib.all available value else available value);
   rules = map (rule: if lib.all hasFile rule.whenFiles then rule else rule.otherwise or { }) (
     spec.rules or [ ]
   );

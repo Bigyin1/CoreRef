@@ -11,19 +11,27 @@ _WARNINGS = ("-Wall", "-Wno-DECLFILENAME")
 def lint(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Run Verilator with warnings treated as errors."""
     command = ["verilator", *_WARNINGS, "--lint-only", "--top-module", str(parameters["top"])]
-    rtl = (work / "rtl").rename(work / "rtl.v")
     with log.open("wb") as stream:
-        subprocess.run([*command, rtl.name], cwd=work, stdout=stream, stderr=stream, check=True)
+        subprocess.run(
+            [*command, *_defines(parameters), "-F", "rtl/sources.f"],
+            cwd=work,
+            stdout=stream,
+            stderr=stream,
+            check=True,
+        )
     (work / "lint.log").write_bytes(log.read_bytes())
 
 
-def _simulate(work: Path, log: Path, defines: Sequence[str]) -> None:
-    rtl = (work / "rtl").rename(work / "rtl.v")
+def _defines(parameters: Mapping[str, object]) -> list[str]:
+    return [f"-D{define}" for define in cast(list[str], parameters.get("defines", []))]
+
+
+def _simulate(work: Path, log: Path, flags: Sequence[str]) -> None:
     testbench = (work / "testbench").rename(work / "testbench.sv")
     command = [
         "verilator",
         *_WARNINGS,
-        *(f"-D{define}" for define in defines),
+        *flags,
         "--binary",
         "--assert",
         "--timescale",
@@ -34,7 +42,8 @@ def _simulate(work: Path, log: Path, defines: Sequence[str]) -> None:
         "testbench",
         "-o",
         "simulate",
-        rtl.name,
+        "-F",
+        "rtl/sources.f",
         testbench.name,
     ]
     with log.open("wb") as stream:
@@ -51,7 +60,8 @@ def _simulate(work: Path, log: Path, defines: Sequence[str]) -> None:
 
 def simulate(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
     """Run the project's testbench against the supplied behavioral sources."""
-    _simulate(work, log, cast(list[str], parameters.get("defines", [])))
+    extra = cast(list[str], parameters.get("extraDefines", []))
+    _simulate(work, log, [*_defines(parameters), *(f"-D{define}" for define in extra)])
 
 
 def simulate_sram(work: Path, log: Path, parameters: Mapping[str, object]) -> None:
@@ -60,8 +70,8 @@ def simulate_sram(work: Path, log: Path, parameters: Mapping[str, object]) -> No
         work,
         log,
         [
-            f"TB_SRAM={parameters['top']}",
-            f"TB_DEPTH={parameters['depth']}",
-            f"TB_WIDTH={parameters['width']}",
+            f"-DTB_SRAM={parameters['top']}",
+            f"-DTB_DEPTH={parameters['depth']}",
+            f"-DTB_WIDTH={parameters['width']}",
         ],
     )

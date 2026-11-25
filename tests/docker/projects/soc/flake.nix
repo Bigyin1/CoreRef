@@ -37,7 +37,7 @@
       profile = "soc";
       parameters.top = "soc";
       files = {
-        rtl = ./rtl/rtl.v;
+        rtl = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;
         constraints = ./be/constraints.sdc;
         place = ./be/place.tcl;

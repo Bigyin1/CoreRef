@@ -73,33 +73,33 @@ increment=$(fixture_ref increment)
 build=(nix build --no-update-lock-file --no-link)
 "${build[@]}" "$increment#simulate" "$baseline#simulate-dft" "$baseline#lint-physical"
 
-rtl=$(output_path "$baseline#rtl")/rtl.v
-dft=$(output_path "$baseline#dft")/dft_output.v
+rtl=$(output_path "$baseline#rtl")/hdl
+dft=$(output_path "$baseline#dft")/hdl
 lint_report=$(output_path "$baseline#lint-physical")/inputs.json
 "${build[@]}" "$baseline#rtl" "$baseline#dft"
-test "$(grep -cF 'module increment' "$rtl")" -eq 1
-grep -F 'module sram_4x4' "$rtl"
-grep -F 'module sram_8x8' "$rtl"
-grep -F 'module counter' "$rtl"
-test "$(grep -cF 'module increment' "$dft")" -eq 1
-grep -F 'define DEMO_SCAN' "$dft"
-if grep -qF 'module counter' "$dft"; then
+test "$(grep -rF 'module increment(' "$rtl" | wc -l)" -eq 1
+grep -rF 'module sram_4x4' "$rtl"
+grep -rF 'module sram_8x8' "$rtl"
+grep -rF 'module counter' "$rtl"
+test "$(grep -rF 'module increment(' "$dft" | wc -l)" -eq 1
+grep -rF 'define DEMO_SCAN' "$dft"
+if grep -qrF 'module counter' "$dft"; then
     printf 'DFT output includes the physical macro RTL.\n' >&2
     exit 1
 fi
 grep -F 'PASS increment' "$(output_path "$increment#simulate")/simulation.log"
 grep -F 'PASS SoC' "$(output_path "$baseline#simulate-dft")/simulation.log"
-grep -F 'sources/increment.v' "$lint_report"
+grep -F '/increment.v' "$lint_report"
 grep -F 'macros/counter/abstract.lef' "$lint_report"
 grep -F 'macros/counter/timing.lib' "$lint_report"
-if grep -qF 'sources/counter.v' "$lint_report"; then
+if grep -qF -- '-counter/' "$lint_report"; then
     printf 'Physical lint received the macro RTL.\n' >&2
     exit 1
 fi
 
 artifacts=(
     "$flow#default"
-    "$baseline#rtl" "$baseline#dft" "$baseline#netlist" "$baseline#floorplan"
+    "$baseline#dft" "$baseline#netlist" "$baseline#floorplan"
     "$baseline#check-netlist" "$baseline#lef" "$baseline#liberty" "$baseline#spef" "$baseline#gds"
     "$counter#lef" "$counter#liberty" "$counter#gds"
     "$status_register#dft" "$sram#4x4" "$sram#8x8"

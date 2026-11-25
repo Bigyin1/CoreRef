@@ -38,7 +38,8 @@ let
         component:
         (kinds == null || builtins.elem component.kind kinds) && !(builtins.elem component.kind exclude)
       ) components;
-  selections = lib.mapAttrs (_: select) (recipe.selections or { });
+  selectionRules = recipe.selections or { };
+  selections = lib.mapAttrs (_: select) selectionRules;
   all = select { };
   selected =
     rule:
@@ -59,15 +60,27 @@ let
   groupFiles =
     group: spec:
     let
-      entries = lib.concatMap (
-        component:
-        lib.mapAttrsToList (
-          pattern: alternatives:
-          lib.nameValuePair (builtins.replaceStrings [ "{name}" ] [ component.name ] pattern) (
-            readView component alternatives
-          )
-        ) spec.files
-      ) (selected spec);
+      components = selected spec;
+      stops = (selectionRules.${spec.selection or ""} or { }).stopAt or [ ];
+      dependsOn =
+        before: after:
+        !(builtins.elem after.kind stops)
+        && lib.any (dependency: dependency.name == before.name) after.dependencies;
+      ordered =
+        (lib.toposort dependsOn components).result or (throw "${name}: cycle in group '${group}'");
+      entries = lib.concatLists (
+        lib.imap0 (
+          index: component:
+          lib.mapAttrsToList (
+            pattern: alternatives:
+            lib.nameValuePair (builtins.replaceStrings
+              [ "{index}" "{name}" ]
+              [ (lib.fixedWidthNumber 6 index) component.name ]
+              pattern
+            ) (readView component alternatives)
+          ) spec.files
+        ) (if lib.any (lib.hasInfix "{index}") (builtins.attrNames spec.files) then ordered else components)
+      );
       files = builtins.listToAttrs entries;
     in
     if builtins.length entries != builtins.length (builtins.attrNames files) then

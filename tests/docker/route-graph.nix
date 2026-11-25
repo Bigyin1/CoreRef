@@ -22,6 +22,7 @@ let
       // args
     );
   increment = project "increment" { };
+  alternateRtl = increment.lib.mkRtl { step = 2; };
   counter = project "counter" { inherit increment; };
   status = project "status-register" { inherit increment; };
   sram = project "sram" { };
@@ -58,7 +59,9 @@ let
   changed = (socWith { place = ./variants/place.tcl; }).packages.${system};
   memory = sram.packages.${system};
   plan = stage: builtins.fromJSON (builtins.unsafeDiscardStringContext stage.stagePlan);
+  synth = (plan ready.synth).inputs.rtl;
   lintFiles = (plan ready.lint-physical).inputs;
+  inlineRtl = (plan ready.simulate).inputs.rtl.plan;
   dftFiles = (plan ready.dft).inputs;
   first =
     (sram.lib.mkSram {
@@ -79,18 +82,23 @@ in
   check =
     assert builtins.attrNames soc.apps.${system} == [ "flow" ];
     assert lib.isDerivation soc.devShells.${system}.default;
-    assert lib.hasSuffix "/dft_output.v" (plan ready.synth).inputs.rtl;
+    assert lib.hasSuffix "-soc-dft/hdl" synth;
     assert lib.hasSuffix "-run.tcl" dftFiles.script;
     assert
       builtins.attrNames (plan ready.simulate).inputs == [
         "rtl"
         "testbench"
       ];
-    assert lib.hasSuffix "-soc-rtl/rtl.v" (plan ready.simulate).inputs.rtl;
-    assert lib.hasSuffix "-soc-dft-simulation/dft_output.v" (plan ready.simulate-dft).inputs.rtl;
-    assert lib.hasSuffix "/dft_output.v" (plan broken.packages.${system}.synth).inputs.rtl;
+    assert inlineRtl.name == "soc-rtl";
+    assert inlineRtl.outputs.out == "hdl";
+    assert
+      !(builtins.hasAttr (builtins.unsafeDiscardStringContext ready.rtl.drvPath) (
+        builtins.getContext ready.simulate.stagePlan
+      ));
+    assert lib.hasSuffix "-soc-dft-simulation/hdl" (plan ready.simulate-dft).inputs.rtl;
+    assert lib.hasSuffix "-soc-dft/hdl" (plan broken.packages.${system}.synth).inputs.rtl;
     assert lib.all (
-      packages: lib.hasSuffix "-soc-rtl-synthesis-input/rtl.v" (plan packages.synth).inputs.rtl
+      packages: (plan packages.synth).inputs.rtl.plan.name == "soc-rtl-synthesis-input"
     ) withoutDft;
     assert lib.all (
       packages: !(packages ? dft) && !(packages ? simulate-dft) && packages ? simulate
@@ -102,14 +110,29 @@ in
         "macros/counter/abstract.lef"
         "macros/counter/timing.lib"
         "rtl"
-        "sources/increment.v"
-        "sources/sram-4x4.v"
-        "sources/sram-8x8.v"
-        "sources/status-register.v"
       ];
-    assert lib.hasSuffix "/dft_module.v" dftFiles."sources/status-register.v";
-    assert builtins.hasAttr "sources/counter.v" (plan ready.rtl).inputs;
-    assert first.views.rtl == "${memory."4x4"}/rtl.v";
+    assert
+      (builtins.filter (lib.hasPrefix "sources/") (builtins.attrNames lintFiles.rtl.plan.inputs)) == [
+        "sources/000000-increment/000000/step_one.v"
+        "sources/000000-increment/000001/increment.v"
+        "sources/000001-status-register/000000/rtl.v"
+        "sources/000002-sram-4x4"
+        "sources/000003-sram-8x8"
+      ];
+    assert lib.hasSuffix "/dft_module.v" dftFiles."sources/000001-status-register";
+    assert builtins.any (lib.hasInfix "-counter/") (builtins.attrNames inlineRtl.inputs);
+    assert
+      builtins.attrNames ((plan alternateRtl.packages.${system}.simulate).inputs.rtl.plan.inputs) == [
+        "files/000000/step_two.v"
+        "files/000001/increment.v"
+      ];
+    assert (plan alternateRtl.packages.${system}.simulate).configuration.defines == [ "TB_STEP=2" ];
+    assert
+      map builtins.baseNameOf (alternateRtl.lib.componentFor system).views.rtl == [
+        "step_two.v"
+        "increment.v"
+      ];
+    assert first.views.rtl == "${memory."4x4"}/hdl";
     assert memory."4x4".drvPath != memory."8x8".drvPath;
     assert
       (plan memory."simulate-4x4").configuration == {
@@ -117,7 +140,7 @@ in
         width = 4;
         top = "sram_4x4";
       };
-    assert (custom.lib.componentFor system).views.rtl == "${custom.packages.${system}.rtl}/rtl.v";
+    assert (custom.lib.componentFor system).views.rtl == "${custom.packages.${system}.rtl}/hdl";
     assert
       (plan custom.packages.${system}.simulate).configuration == {
         depth = 5;
@@ -140,6 +163,10 @@ in
     true;
 
   inherit (soc.packages.${builtins.currentSystem}) rtl dft;
+  inherit (soc.packages.${builtins.currentSystem}) simulate-dft lint-physical netlist;
+  incrementSimulation = increment.packages.${builtins.currentSystem}.simulate;
+  alternateRtlSimulation = alternateRtl.packages.${builtins.currentSystem}.simulate;
+  fallbackNetlist = fallback.packages.${builtins.currentSystem}.netlist;
   customMemory = custom.packages.${builtins.currentSystem}.rtl;
   fallbackRtl = fallback.packages.${builtins.currentSystem}.rtl-synthesis-input;
   brokenDft = broken.packages.${builtins.currentSystem}.dft;

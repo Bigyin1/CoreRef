@@ -6,8 +6,8 @@ module testbench;
     for (int i = 0; i < 256; i++) begin
       value = 8'(i);
       #1;
-      assert (next_value == 8'(i + 1))
-        else $fatal(1, "increment %0d: expected %0d, got %0d", value, 8'(i + 1), next_value);
+      assert (next_value == 8'(i + `TB_STEP))
+        else $fatal(1, "increment %0d: expected %0d, got %0d", value, 8'(i + `TB_STEP), next_value);
     end
     $display("PASS increment");
     $finish;

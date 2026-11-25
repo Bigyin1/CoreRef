@@ -86,6 +86,7 @@ cts = "src/coreref_flow/stages/scripts/cts.tcl"
 route = "src/coreref_flow/stages/scripts/route.tcl"
 
 [parameters]
+defines = []
 macroInstance = "hard_macro"
 
 # Dependency selection and input groups
@@ -99,18 +100,18 @@ stopAt = ["macro"]
 kinds = ["macro"]
 
 [groups.rtl.files]
-"sources/{name}.v" = ["rtl"]
+"sources/{index}-{name}" = ["rtl"]
 
 [groups.synthesizable]
 selection = "synthesizable"
-files."sources/{name}.v" = ["rtl"]
+files."sources/{index}-{name}" = ["rtl"]
 
 [groups.dft]
 selection = "synthesizable"
-files."sources/{name}.v" = ["dft", "rtl"]
+files."sources/{index}-{name}" = ["dft", "rtl"]
 
 [groups.dftSimulation.files]
-"sources/{name}.v" = ["dft", "rtl"]
+"sources/{index}-{name}" = ["dft", "rtl"]
 
 [groups.abstracts]
 selection = "macros"
@@ -121,7 +122,7 @@ selection = "macros"
 
 [groups.macroRtl]
 selection = "macros"
-files."macro_rtl.v" = ["rtl"]
+files."macro-rtl" = ["rtl"]
 
 [groups.macroLib]
 selection = "macros"
@@ -144,21 +145,29 @@ default = ""
 
 [modules.rtl.rtl]
 transform = "coreref_flow.stages.rtl:assemble"
-inputs.rtl = "rtl"
+inline = true
+inputs.files = "rtl"
 groups = ["rtl"]
-outputs.out = "rtl.v"
+outputs.out = "hdl"
 
 [modules.rtl.lint]
 transform = "coreref_flow.stages.verification:lint"
 inputs.rtl = { stage = "rtl" }
-parameters = ["top"]
+parameters = ["top", "defines"]
 tools = ["verilator"]
 outputs.out = "lint.log"
 
+[modules.rtl.rtl-synthesis-input]
+transform = "coreref_flow.stages.rtl:assemble"
+inline = true
+inputs.files = "rtl"
+groups = ["synthesizable"]
+outputs.out = "hdl"
+
 [modules.rtl.lint-physical]
 transform = "coreref_flow.stages.physical_lint:check_inputs"
-inputs.rtl = "rtl"
-groups = ["synthesizable", "abstracts"]
+inputs.rtl = { stage = "rtl-synthesis-input" }
+groups = ["abstracts"]
 parameters = ["top"]
 outputs.out = "inputs.json"
 
@@ -166,6 +175,7 @@ outputs.out = "inputs.json"
 transform = "coreref_flow.stages.verification:simulate"
 inputs.rtl = { stage = "rtl" }
 inputs.testbench = "testbench"
+parameters = ["defines"]
 tools = ["verilator"]
 outputs.out = "simulation.log"
 
@@ -173,40 +183,35 @@ outputs.out = "simulation.log"
 
 [modules.dft.dft]
 transform = "coreref_flow.stages.rtl:assemble_dft"
-inputs.rtl = "rtl"
+inputs.files = "rtl"
 inputs.script = "dftScript"
 groups = ["dft"]
 tools = ["tcl"]
-outputs.out = "dft_output.v"
+outputs.out = "hdl"
 
 [modules.dft-simulation.dft-simulation]
 transform = "coreref_flow.stages.rtl:assemble_dft"
-inputs.rtl = "rtl"
+inputs.files = "rtl"
 inputs.script = "dftScript"
 groups = ["dftSimulation"]
 tools = ["tcl"]
-outputs.out = "dft_output.v"
+outputs.out = "hdl"
 
 [modules.dft-simulation.simulate-dft]
 transform = "coreref_flow.stages.verification:simulate"
 inputs.rtl = { stage = "dft-simulation" }
 inputs.testbench = "testbench"
+parameters = ["defines"]
 tools = ["verilator"]
-configuration.defines = ["COREREF_DFT"]
+configuration.extraDefines = ["COREREF_DFT"]
 outputs.out = "simulation.log"
 
 # Synthesis and netlist checks
 
-[modules.backend.rtl-synthesis-input]
-transform = "coreref_flow.stages.rtl:assemble"
-inputs.rtl = "rtl"
-groups = ["synthesizable"]
-outputs.out = "rtl.v"
-
 [modules.backend.synth]
 transform = "coreref_flow.stages.physical:synthesize"
 groups = ["macroRtl"]
-parameters = ["top", "platform"]
+parameters = ["top", "platform", "defines"]
 tools = ["yosys"]
 outputs.out = "netlist.v"
 exports.netlist = "out"
@@ -299,7 +304,7 @@ outputs.out = "final.gds"
 transform = "coreref_flow.stages.memory:generate"
 inputs.template = "template"
 parameters = ["depth", "width"]
-outputs.out = "rtl.v"
+outputs.out = "hdl"
 
 [modules.memory.simulate]
 transform = "coreref_flow.stages.verification:simulate_sram"

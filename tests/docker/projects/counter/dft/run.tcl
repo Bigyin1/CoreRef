@@ -1,2 +1,9 @@
 # Copy the demo module with its existing ports.
-file copy -force [lindex $argv 0] [lindex $argv 1]
+set output [open [lindex $argv 0] w]
+foreach source [lrange $argv 1 end] {
+    set rtl [open $source r]
+    fcopy $rtl $output
+    puts $output ""
+    close $rtl
+}
+close $output

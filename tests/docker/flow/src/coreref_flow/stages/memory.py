@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+from .rtl import write_source_list
+
 
 def generate(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
     """Render a separate RTL definition for this depth and width."""
@@ -11,4 +13,8 @@ def generate(work: Path, _log: Path, parameters: Mapping[str, object]) -> None:
     model = (work / "template").read_text(encoding="utf-8")
     model = model.replace("@DEPTH@", str(depth)).replace("@WIDTH@", str(width))
     model = model.replace("@ADDR@", str((depth - 1).bit_length()))
-    (work / "rtl.v").write_text(model, encoding="utf-8")
+    directory = work / "hdl"
+    directory.mkdir()
+    source = directory / f"sram_{depth}x{width}.v"
+    source.write_text(model, encoding="utf-8")
+    write_source_list(directory, [source])

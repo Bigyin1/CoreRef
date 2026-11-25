@@ -21,7 +21,7 @@
       profile = "macro";
       parameters.top = "counter";
       files = {
-        rtl = ./rtl/rtl.v;
+        rtl = [ ./rtl/rtl.v ];
         testbench = ./rtl/testbench.sv;
         constraints = ./be/constraints.sdc;
         dftScript = ./dft/run.tcl;
