@@ -22,9 +22,9 @@ let
   macroInputs =
     suffix: view:
     builtins.listToAttrs (
-      map (macro: lib.nameValuePair "macros/${macro.name}${suffix}" macro.views.${view}) macros
+      map (macro: lib.nameValuePair "macros/${macro.name}${suffix}" (view macro.views)) (macros view)
     );
-  macroCells = map (macro: macro.parameters.top) macros;
+  macroCells = map (macro: macro.parameters.top) (macros (_: null));
   placements = configuration.macroPlacement;
   synth = stage (
     {
@@ -33,7 +33,7 @@ let
       inputs = {
         inherit rtl;
       }
-      // macroInputs "/rtl" "rtl";
+      // macroInputs "/rtl" (views: views.rtl);
       configuration = { inherit (configuration) top platform; };
       outputs.out = "netlist.v";
     }
@@ -62,7 +62,7 @@ let
           "common.tcl" = scripts.common;
           "${name}.tcl" = scripts.${name};
         }
-        // macroInputs ".lib" "liberty"
+        // macroInputs ".lib" (views: views.liberty)
         // inputs;
         configuration = {
           inherit (configuration)
@@ -82,7 +82,7 @@ let
     inputs = {
       "netlist.v" = synth.artifacts.out;
     }
-    // macroInputs ".lef" "lef";
+    // macroInputs ".lef" (views: views.lef);
     outputs.out = "floorplan.odb";
     needs = lib.optional checkSynthesis checkNetlist.package;
   };
@@ -116,8 +116,8 @@ let
     inputs = {
       "final.def" = route.artifacts.def;
     }
-    // macroInputs ".lef" "lef"
-    // macroInputs ".gds" "gds";
+    // macroInputs ".lef" (views: views.lef)
+    // macroInputs ".gds" (views: views.gds);
     configuration = {
       inherit (configuration) top platform;
       inherit macroCells;

@@ -4,6 +4,7 @@
   roots,
   stopAt ? (_: false),
   filter ? (_: true),
+  viewKey ? (_: null),
 }:
 let
   children = component: lib.optionals (!(stopAt component)) component.dependencies;
@@ -31,6 +32,11 @@ let
     component.name
     component.id
   ];
+  selection = component: {
+    included = filter component;
+    stopped = stopAt component;
+    view = if filter component then viewKey component else null;
+  };
   record =
     seen: node:
     let
@@ -42,12 +48,13 @@ let
       seen // { ${name} = node; }
     else if
       previous.component.id == component.id
+      && selection previous.component == selection component
       && map identity (children previous.component) == map identity (children component)
     then
       seen
     else
       throw ''
-        conflicting component revisions in the dependency graph for '${name}'
+        conflicting revisions or views in the dependency graph for '${name}'
           ${lib.concatStringsSep " -> " previous.chain}
           ${lib.concatStringsSep " -> " node.chain}
       '';

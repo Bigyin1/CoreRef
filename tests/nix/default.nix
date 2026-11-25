@@ -51,6 +51,37 @@ let
   conflictingRight = node "right" "1" [
     (node "mid" "1" [ (node "leaf" "2" [ ]) ])
   ];
+  selectRtl =
+    roots:
+    names (select {
+      inherit roots;
+      viewKey = component: component.views.rtl or null;
+    });
+  rtlBranch =
+    name: files:
+    node name "1" [
+      (
+        leaf
+        // {
+          views = {
+            rtl = files;
+            gds = throw "unused physical view";
+          };
+        }
+      )
+    ];
+  a = rtlBranch "a" [
+    "pkg.sv"
+    "top.sv"
+  ];
+  b = rtlBranch "b" [
+    "pkg.sv"
+    "top.sv"
+  ];
+  other = rtlBranch "b" [
+    "top.sv"
+    "pkg.sv"
+  ];
   cycle = node "cycle" "1" [ cycle ];
   opaque = node "macro" "1" (throw "opaque macro inputs were inspected");
   cut = component: component.name == "macro";
@@ -81,6 +112,32 @@ assert fails (select {
     conflictingRight
   ];
 });
+assert
+  selectRtl [
+    a
+    b
+  ] == [
+    "leaf"
+    "a"
+    "b"
+  ];
+assert
+  selectRtl [
+    b
+    a
+  ] == [
+    "leaf"
+    "b"
+    "a"
+  ];
+assert fails (selectRtl [
+  a
+  other
+]);
+assert fails (selectRtl [
+  other
+  a
+]);
 assert fails (select {
   roots = [ cycle ];
 });
