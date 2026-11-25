@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+from urllib.parse import unquote
 
 from ._internal import workspace
 from ._internal.flake import FlakeLock, input_node, root_node
@@ -27,9 +28,17 @@ class Project:
     """Access a flake by directory or reference and manage its local workspace."""
 
     def __init__(self, flake: str | Path = ".") -> None:
-        directory = Path(flake)
-        self._directory = directory.resolve() if directory.is_dir() else None
-        self._reference = str(self._directory or flake)
+        reference = str(flake)
+        self._reference = reference
+        if reference.startswith("path:"):
+            path = unquote(reference.removeprefix("path:").partition("?")[0])
+            directory = Path(path)
+            self._directory = directory.resolve() if path and directory.is_dir() else None
+        else:
+            directory = Path(flake)
+            self._directory = directory.resolve() if directory.is_dir() else None
+            if self._directory is not None:
+                self._reference = str(self._directory)
 
     def build(self, *targets: str, options: Sequence[str] = ()) -> tuple[Path, ...]:
         """Build the selected targets with the workspace inputs and return their store paths."""

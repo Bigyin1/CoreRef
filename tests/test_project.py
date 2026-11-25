@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
+from urllib.parse import quote
 
 import pytest
 
@@ -69,3 +70,20 @@ def test_workspace_rejects_missing_input_and_non_flake(project: Project, tmp_pat
     with pytest.raises(ValueError, match=r"Expected flake\.nix"):
         project.add_editable("flow", source)
     assert project.editables() == {}
+
+
+def test_local_path_reference_uses_same_workspace(project: Project, tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    project.add_editable("flow/common", source)
+    reference = f"path:{quote(str(tmp_path), safe='/')}"
+    alternative = Project(reference)
+    assert alternative.editables() == project.editables()
+    with (
+        patch("coreref.project.shutil.which", return_value="/usr/bin/nix"),
+        patch("coreref.project.subprocess.run") as run,
+    ):
+        run.return_value = CompletedProcess([], 0, stdout="/nix/store/example\n")
+        alternative.build("rtl")
+        assert run.call_args.args[0][2] == f"{reference}#rtl"
+        assert "flow/common" in run.call_args.args[0]

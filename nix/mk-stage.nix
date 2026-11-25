@@ -23,7 +23,9 @@ let
         inherit path;
         name = baseNameOf path;
       }
-    else if (builtins.isString path && builtins.hasContext path) || lib.isDerivation path then
+    else if lib.isDerivation path then
+      toString path
+    else if builtins.isString path && builtins.hasContext path then
       path
     else
       throw "${name}: stage inputs must be Nix paths or derivation outputs";
@@ -35,7 +37,10 @@ let
     else if builtins.isList value then
       lib.imap0 (
         index: file:
-        lib.nameValuePair "${alias}/${lib.fixedWidthNumber 6 index}/${baseNameOf file}" (source file)
+        let
+          basename = builtins.unsafeDiscardStringContext (baseNameOf (toString file));
+        in
+        lib.nameValuePair "${alias}/${lib.fixedWidthNumber 6 index}/${basename}" (source file)
       ) value
     else
       [ (lib.nameValuePair alias (source value)) ];

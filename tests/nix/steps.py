@@ -17,6 +17,18 @@ def consume(work: Path, _log: Path, params: Mapping[str, object]) -> None:
     (work / "result.txt").write_text(f"{summary} {params['label']}", encoding="utf-8")
 
 
+def consume_directories(work: Path, _log: Path, _params: Mapping[str, object]) -> None:
+    """Read both the default and explicitly selected output directories."""
+    data = (work / "data" / "data.txt").read_text(encoding="utf-8")
+    summary = (work / "summary" / "summary.txt").read_text(encoding="utf-8")
+    ordered = sorted((work / "ordered").glob("*/*"))
+    assert [file.name for directory in ordered for file in directory.iterdir()] == [
+        "data.txt",
+        "summary.txt",
+    ]
+    (work / "result.txt").write_text(f"{data} {summary}", encoding="utf-8")
+
+
 def licensed(work: Path, _log: Path, _params: Mapping[str, object]) -> None:
     """Run the sample tool with a license endpoint provided by the worker."""
     with (work / "result.txt").open("w", encoding="utf-8") as stream:
