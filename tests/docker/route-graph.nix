@@ -105,6 +105,13 @@ in
     ) withoutDft;
     assert !((statusWithoutDft.lib.componentFor system).views ? dft);
     assert lib.hasSuffix "-soc-check-netlist" (builtins.head (plan ready.floorplan).orderOnly);
+    assert lib.all
+      (output: ready.${output}.outputName == output && ready.${output}.drvPath == ready.route.drvPath)
+      [
+        "lef"
+        "liberty"
+        "spef"
+      ];
     assert
       builtins.attrNames lintFiles == [
         "macros/counter/abstract.lef"

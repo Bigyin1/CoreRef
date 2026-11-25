@@ -1,55 +1,48 @@
-# Exercise the stage contracts with ordinary derivations and one named output edge.
+# Exercise a named output both as a derivation edge and as inline preparation.
 { pkgs, core }:
 let
   inherit (pkgs) lib;
   runtime = import ./runtime.nix { inherit pkgs core; };
-  args = {
+  stage = core.mkStage {
     inherit pkgs;
     python = _: runtime;
-    name = "coreref-test";
-    stageMap = ./stages.toml;
-    use = [ "example" ];
-    parameters.label = "ok";
   };
-  example = core.mkRoute args;
-  optionalArgs = args // {
-    variants = [ "optional-input" ];
+  producer = stage {
+    name = "coreref-test-produce";
+    transform = "coreref_test_stages:produce";
+    outputs = {
+      out = "data.txt";
+      summary = "summary.txt";
+    };
   };
-  fallback = core.mkRoute optionalArgs;
-  preferred = core.mkRoute (optionalArgs // { use = args.use ++ [ "optional" ]; });
+  consume =
+    name: summary:
+    stage {
+      inherit name;
+      transform = "coreref_test_stages:consume";
+      inputs."summary.txt" = summary;
+      outputs.out = "result.txt";
+      configuration.label = "ok";
+    };
+  materialized = consume "coreref-test-materialized" producer.artifacts.summary;
+  inline = consume "coreref-test-inline" producer.inline.summary;
+  producerDrv = builtins.unsafeDiscardStringContext producer.package.drvPath;
   fails = value: !(builtins.tryEval value).success;
 in
-assert fails (core.mkRoute (args // { variants = [ "cycle" ]; }));
-assert fails (core.mkRoute (args // { use = [ "missing" ]; }));
-assert fails (
-  core.mkRoute (
-    args
-    // {
-      variants = [
-        "optional-input"
-        "unknown-primary"
-      ];
-    }
-  )
-);
-assert fails (core.mkRoute (args // { variants = [ "bad-output" ]; })).artifacts.consume.out;
-assert fails (
-  core.mkRoute (
-    args
-    // {
-      use = [
-        "example"
-        "example"
-      ];
-    }
-  )
-);
+assert fails (consume "coreref-test-invalid" "unbound-file").package.drvPath;
+assert fails
+  (stage {
+    name = "coreref-test-unsafe-path";
+    transform = "coreref_test_stages:produce";
+    outputs.out = "../data.txt";
+  }).package.drvPath;
+assert builtins.hasAttr producerDrv (builtins.getContext materialized.package.stagePlan);
+assert !(builtins.hasAttr producerDrv (builtins.getContext inline.package.stagePlan));
 {
   stage-graph = pkgs.runCommand "coreref-stage-graph-test" { } ''
-    test "$(cat ${example.artifacts.consume.out})" = "summary ok"
-    test "$(cat ${fallback.artifacts.consume.out})" = "summary ok"
-    test "$(cat ${preferred.artifacts.consume.out})" = "data ok"
-    test "$(cat ${lib.getOutput "summary" example.packages.summary}/summary.txt)" = "summary"
+    test "$(cat ${materialized.artifacts.out})" = "summary ok"
+    test "$(cat ${inline.artifacts.out})" = "summary ok"
+    test "$(cat ${lib.getOutput "summary" producer.package}/summary.txt)" = "summary"
     touch "$out"
   '';
 }

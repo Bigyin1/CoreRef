@@ -21,6 +21,10 @@ cmp "$lock" flake.lock
 
 # The mounted source has a DFT readiness marker. Remove it from the test checkout.
 rm dft/enabled
+if nix eval --no-update-lock-file --raw .#dft.drvPath >/dev/null 2>&1; then
+    printf 'DFT is still available after removing its readiness marker.\n' >&2
+    exit 1
+fi
 nix eval --no-update-lock-file --raw .#synth.stagePlan |
     grep -F '"name":"soc-rtl-synthesis-input"'
 netlist=$(nix build --no-update-lock-file --no-link --print-out-paths .#netlist)

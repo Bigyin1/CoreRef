@@ -25,7 +25,8 @@ nix copy --to file:///srv/nix-cache .#netlist .#lef .#liberty .#gds
 GitLab и HTTP-кэш. Для запуска нужен Docker Compose. CoreRef под тестом,
 Flow и проекты SoC монтируются для чтения. Исходники находятся в
 `tests/docker/flow` и `tests/docker/projects`. Тест публикует их копии
-в GitLab и фиксирует ревизии в тестовых lock-файлах.
+в GitLab и фиксирует ревизии в тестовых lock-файлах. Маршруты примера
+описаны в `tests/docker/flow/nix`.
 GitLab и Nix-сборщик работают одновременно и используют общий лимит памяти Docker.
 
 Издатель собирает SoC с иерархическим DFT, макроблоком и двумя конфигурациями
@@ -37,18 +38,17 @@ SRAM, проверяет симуляцию, физический lint, `nix dev
 
 ## Лицензируемые EDA
 
-Автор Flow использует одинаковый контракт Python-стадии и объявляет логическое имя
-инструмента в карте. Для внешнего инструмента проект передаёт точный модуль и
-полный идентификатор версии.
+Автор Flow передаёт список `siteTools` в `mkStage`.
+Каждая запись задаёт точный модуль и полный идентификатор версии.
 
 ~~~nix
-siteTools.genus = {
+siteTools = [ {
   profile = "cadence-2026-11-r1";
   module = "genus/23.11-s123";
   executable = "genus";
   version = "23.11-s123";
   versionArgs = [ "-version" ];
-};
+} ];
 ~~~
 
 На выделенном Linux worker задайте `sandbox = relaxed` и добавьте

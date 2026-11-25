@@ -97,6 +97,11 @@ if grep -qF -- '-counter/' "$lint_report"; then
     exit 1
 fi
 
+# The physical route exports each reusable view as a separate Nix output.
+for view in lef liberty spef; do
+    test "$(nix eval --no-update-lock-file --raw "$baseline#$view.outputName")" = "$view"
+done
+
 artifacts=(
     "$flow#default"
     "$baseline#dft" "$baseline#netlist" "$baseline#floorplan"

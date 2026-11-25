@@ -20,28 +20,11 @@
     coreref.lib.mkFlow {
       inherit nixpkgs;
       source = ./.;
-      stageMap = ./src/coreref_flow/stage-map.toml;
+      project = import ./nix/project.nix {
+        inherit verilatorPkgs;
+        inherit (coreref.lib) selectComponents;
+      };
       cli = "coreref-flow";
       pythonDependencies = p: [ p.typer ];
-      configure = pkgs: {
-        tools = {
-          yosys = [ pkgs.yosys ];
-          openroad = [ pkgs.openroad ];
-          tcl = [ pkgs.tcl ];
-          verilator = [
-            verilatorPkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.verilator
-            pkgs.stdenv.cc
-            pkgs.gnumake
-          ];
-        };
-        parameters.platform = pkgs.fetchgit {
-          name = "orfs-nangate45";
-          url = "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git";
-          rev = "a9adcf481395d3b1355afda40df1c8bde10a0e40";
-          rootDir = "flow/platforms/nangate45";
-          fetchSubmodules = false;
-          hash = "sha256-zGNtgSAEz96TXxUrmGQxM+7cXoIcihs2K5RT5mJ777U=";
-        };
-      };
     };
 }

@@ -1,20 +1,18 @@
-# Bind a stage map and a Python distribution to a set of flake outputs.
+# Package a Python Flow and expose the projects it defines.
 {
   systems,
-  mkRoute,
+  mkStage,
   pythonPackage,
 }:
 {
   nixpkgs,
   source,
-  stageMap,
-  configure ? (_: { }),
+  project,
   pythonDependencies ? (_: [ ]),
   cli ? null,
 }:
 let
   inherit (nixpkgs) lib;
-  recipe = builtins.fromTOML (builtins.readFile stageMap);
   metadata = (builtins.fromTOML (builtins.readFile (source + "/pyproject.toml"))).project;
   flowPython = import ./python.nix {
     inherit source;
@@ -27,8 +25,7 @@ let
     system:
     let
       pkgs = nixpkgs.legacyPackages.${system};
-      environment = configure pkgs;
-      python = names: pkgs.python3.withPackages (p: [ (flowPython p) ] ++ map (name: p.${name}) names);
+      python = packages: pkgs.python3.withPackages (p: [ (flowPython p) ] ++ packages p);
       package = flowPython pkgs.python3Packages;
     in
     {
@@ -39,20 +36,10 @@ let
           program = "${package}/bin/${cli}";
         };
       };
-      devShell = pkgs.mkShell { packages = [ (python [ ]) ]; };
-      project = import ./project.nix {
-        inherit lib recipe system;
-        flowSource = source;
-        defaults = environment.parameters or { };
-        route =
-          config:
-          mkRoute (
-            {
-              inherit pkgs python stageMap;
-              tools = environment.tools or { };
-            }
-            // config
-          );
+      devShell = pkgs.mkShell { packages = [ (python (_: [ ])) ]; };
+      mkProject = project {
+        inherit pkgs system;
+        mkStage = mkStage { inherit pkgs python; };
       };
     }
   );
@@ -65,8 +52,7 @@ in
   lib.mkProject =
     config:
     let
-      profile = recipe.profiles.${config.profile} or (throw "unknown route profile '${config.profile}'");
-      projects = lib.mapAttrs (_: flow: flow.project profile config) outputs;
+      projects = lib.mapAttrs (_: flow: flow.mkProject config) outputs;
     in
     {
       inherit apps devShells;

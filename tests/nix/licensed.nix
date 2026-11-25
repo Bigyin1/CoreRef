@@ -2,20 +2,26 @@
 { pkgs, core }:
 let
   runtime = import ./runtime.nix { inherit pkgs core; };
-  route = core.mkRoute {
-    inherit pkgs;
-    python = _: runtime;
-    name = "coreref-test";
-    stageMap = ./licensed.toml;
-    use = [ "test" ];
-    siteTools.example = {
-      profile = "test-v1";
-      executable = "example-tool";
-      module = "example/1.2";
-      version = "1.2-hf3";
-    };
-  };
+  stage =
+    core.mkStage
+      {
+        inherit pkgs;
+        python = _: runtime;
+      }
+      {
+        name = "coreref-test-licensed-test";
+        transform = "coreref_test_stages:licensed";
+        outputs.out = "result.txt";
+        siteTools = [
+          {
+            profile = "test-v1";
+            executable = "example-tool";
+            module = "example/1.2";
+            version = "1.2-hf3";
+          }
+        ];
+      };
 in
 {
-  licensed-test = route.packages.licensed-test;
+  licensed-test = stage.package;
 }

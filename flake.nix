@@ -12,12 +12,13 @@
       ];
       forSystems = nixpkgs.lib.genAttrs systems;
       core = rec {
-        mkRoute = import ./nix/route.nix;
+        mkStage = import ./nix/mk-stage.nix;
+        selectComponents = import ./nix/dependencies.nix { inherit (nixpkgs) lib; };
         pythonPackage = import ./nix/python.nix {
           source = ./.;
           imports = [ "coreref" ];
         };
-        mkFlow = import ./nix/flow.nix { inherit systems mkRoute pythonPackage; };
+        mkFlow = import ./nix/flow.nix { inherit systems mkStage pythonPackage; };
       };
     in
     {
