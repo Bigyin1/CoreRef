@@ -13,13 +13,27 @@ let
     attrNames
     attrValues
     length
-    match
     toJSON
     ;
-  validFile =
-    path:
-    match "[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*" path != null
-    && lib.all (part: part != "." && part != "..") (lib.splitString "/" path);
+  validPart =
+    part:
+    !(builtins.elem part [
+      ""
+      "."
+      ".."
+    ]);
+  validFile = path: lib.all validPart (lib.splitString "/" path);
+  validName = value: validPart value && !(lib.hasInfix "/" value);
+  nonEmptyToken =
+    value:
+    builtins.isString value
+    && value != ""
+    && !(lib.any (separator: lib.hasInfix separator value) [
+      " "
+      "\t"
+      "\n"
+      "\r"
+    ]);
   validPlan =
     if !(outputs ? out) then
       throw "${name}: declare outputs.out"
@@ -33,10 +47,12 @@ let
   toolPin =
     tool:
     if
-      match "[A-Za-z0-9][A-Za-z0-9_.-]*" tool.profile != null
-      && match "[A-Za-z0-9_.+-]*[0-9][A-Za-z0-9_.+-]*" tool.version != null
-      && match "[A-Za-z0-9][A-Za-z0-9_.+-]*(/[A-Za-z0-9_.+-]+)*" tool.module != null
-      && match "[A-Za-z0-9_.+-]+" tool.executable != null
+      nonEmptyToken tool.profile
+      && validName tool.profile
+      && nonEmptyToken tool.version
+      && validFile tool.module
+      && !(lib.hasPrefix "-" tool.module)
+      && validName tool.executable
     then
       {
         inherit (tool)
@@ -48,7 +64,7 @@ let
         versionArgs = tool.versionArgs or [ "--version" ];
       }
     else
-      throw "${name}: site tools require an exact version and a module name";
+      throw "${name}: invalid site tool profile, version, module or executable";
 
   pins = map toolPin licensed;
   profiles = lib.unique (map (tool: tool.profile) pins);
@@ -58,7 +74,7 @@ let
     else
       throw "${name}: site tools for one stage must use the same installation profile";
   setup = lib.optionalString (pins != [ ]) ''
-    source /etc/coreref/eda/${profile}/setup.sh
+    source ${lib.escapeShellArg "/etc/coreref/eda/${profile}/setup.sh"}
     module load ${lib.escapeShellArgs (map (tool: tool.module) pins)}
   '';
   attrs = {

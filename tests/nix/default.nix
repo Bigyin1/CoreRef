@@ -47,15 +47,22 @@ let
   };
   producerDrv = builtins.unsafeDiscardStringContext producer.package.drvPath;
   fails = value: !(builtins.tryEval (builtins.deepSeq value true)).success;
-
+  stageWithOutput =
+    path:
+    stage {
+      name = "coreref-test-output-path";
+      transform = "coreref_test_stages:produce";
+      outputs.out = path;
+    };
 in
 assert fails (consume "coreref-test-invalid" "unbound-file").package.drvPath;
-assert fails
-  (stage {
-    name = "coreref-test-unsafe-path";
-    transform = "coreref_test_stages:produce";
-    outputs.out = "../data.txt";
-  }).package.drvPath;
+assert lib.all (path: fails (stageWithOutput path).package.drvPath) [
+  ""
+  "/data.txt"
+  "../data.txt"
+  "nested//data.txt"
+];
+assert lib.hasSuffix "/results dir/data.txt" (stageWithOutput "results dir/data.txt").artifacts.out;
 assert builtins.hasAttr producerDrv (builtins.getContext materialized.package.stagePlan);
 {
   stage-graph = pkgs.runCommand "coreref-stage-graph-test" { } ''
