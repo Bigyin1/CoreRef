@@ -1,7 +1,7 @@
 # Put the test functions on the same Python import path as the runner.
-{ pkgs, core }:
+{ pkgs, coreref }:
 pkgs.python3.withPackages (p: [
-  (core.pythonPackage p)
+  coreref
   (p.toPythonModule (
     pkgs.runCommand "coreref-test-stages" { } ''
       mkdir -p "$out/${p.python.sitePackages}"

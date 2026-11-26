@@ -42,9 +42,9 @@ class Project:
 
     def build(self, *targets: str, options: Sequence[str] = ()) -> tuple[Path, ...]:
         """Build the selected targets with the workspace inputs and return their store paths."""
-        if not targets or any(not target or "#" in target for target in targets):
+        if not targets:
             raise ValueError("Provide at least one flake target name")
-        installables = [f"{self._reference}#{target}" for target in targets]
+        installables = [self._installable(target) for target in targets]
         outputs = _run(
             "nix",
             "build",
@@ -54,6 +54,37 @@ class Project:
             *options,
         )
         return tuple(Path(path) for path in outputs.splitlines())
+
+    def targets(self) -> tuple[str, ...]:
+        """List buildable targets for the current system with workspace overrides applied."""
+        output = _run(
+            "nix",
+            "flake",
+            "show",
+            self._reference,
+            "--json",
+            "--quiet",
+            "--no-write-lock-file",
+            *workspace.arguments(self.editables()),
+        )
+        packages = json.loads(output).get("packages", {})
+        targets = {
+            name
+            for system_packages in packages.values()
+            for name, package in system_packages.items()
+            if package.get("type") == "derivation"
+        }
+        return tuple(sorted(targets))
+
+    def log(self, target: str) -> str:
+        """Read the build log for the target selected with the current workspace inputs."""
+        return _run(
+            "nix",
+            "log",
+            self._installable(target),
+            "--no-write-lock-file",
+            *workspace.arguments(self.editables()),
+        )
 
     def run(self, app: str, *arguments: str) -> str:
         """Run a named flake app with the workspace inputs and return its standard output."""
@@ -122,6 +153,11 @@ class Project:
         _check_directory(directory, flake=node.get("flake", True))
         workspace.update(project, name, directory)
         return directory
+
+    def _installable(self, target: str) -> str:
+        if not target or "#" in target:
+            raise ValueError("Provide at least one flake target name")
+        return f"{self._reference}#{target}"
 
     def _lock(self) -> FlakeLock:
         if self._directory is not None:

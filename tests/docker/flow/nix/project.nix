@@ -1,6 +1,5 @@
 # Select views and compose the routes of a hardware project.
 {
-  selectComponents,
   verilatorPkgs,
   edalize,
 }:
@@ -50,13 +49,7 @@ let
   tcl = tool "tcl" [ pkgs.tcl ];
 
   roots = dependencies system;
-  components = import ./components.nix {
-    inherit
-      lib
-      roots
-      selectComponents
-      ;
-  };
+  components = import ./components.nix { inherit lib roots; };
   inherit (components) macros;
   hasFile = file: file != null && (!builtins.isPath file || builtins.pathExists file);
   dftReady =

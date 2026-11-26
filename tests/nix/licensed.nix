@@ -1,9 +1,13 @@
 # An opt-in worker fixture. The site setup controls the version it reports.
-{ pkgs, core }:
+{
+  pkgs,
+  coreref,
+  mkStage,
+}:
 let
-  runtime = import ./runtime.nix { inherit pkgs core; };
+  runtime = import ./runtime.nix { inherit pkgs coreref; };
   stage =
-    core.mkStage
+    mkStage
       {
         inherit pkgs;
         python = _: runtime;

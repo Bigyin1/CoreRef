@@ -2,9 +2,9 @@
 {
   lib,
   roots,
-  selectComponents,
 }:
 let
+  selectComponents = import ./select-components.nix { inherit lib; };
   isMacro = component: component.kind == "macro";
   all =
     view:

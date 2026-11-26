@@ -87,3 +87,31 @@ def test_local_path_reference_uses_same_workspace(project: Project, tmp_path: Pa
         alternative.build("rtl")
         assert run.call_args.args[0][2] == f"{reference}#rtl"
         assert "flow/common" in run.call_args.args[0]
+
+
+def test_targets_and_log_use_current_workspace(project: Project, tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    project.add_editable("flow/common", source)
+    output = {
+        "packages": {
+            "aarch64-linux": {"gds": {"type": "derivation"}, "rtl": {"type": "derivation"}},
+            "aarch64-darwin": {"other": {}},
+        }
+    }
+    overrides = ("--override-input", "flow/common", f"path:{source.resolve()}")
+    with patch("coreref.project._run", side_effect=[json.dumps(output), "build output\n"]) as run:
+        assert project.targets() == ("gds", "rtl")
+        assert project.log("rtl") == "build output\n"
+    listing, log = (call.args for call in run.call_args_list)
+    assert listing == (
+        "nix",
+        "flake",
+        "show",
+        str(tmp_path.resolve()),
+        "--json",
+        "--quiet",
+        "--no-write-lock-file",
+        *overrides,
+    )
+    assert log == ("nix", "log", f"{tmp_path.resolve()}#rtl", "--no-write-lock-file", *overrides)

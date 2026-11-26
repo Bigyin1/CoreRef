@@ -1,4 +1,4 @@
-# Select reachable components in dependency order.
+# Select reachable hardware components in dependency order for this flow.
 { lib }:
 {
   roots,

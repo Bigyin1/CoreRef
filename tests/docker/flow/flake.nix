@@ -23,6 +23,30 @@
       ...
     }:
     let
+      inherit (nixpkgs) lib;
+      inherit (lib) fileset;
+      forSystems = lib.genAttrs [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+      withoutBytecode = fileset.fileFilter (file: !file.hasExt "pyc");
+      stageSource = fileset.toSource {
+        root = ./src/coreref_flow;
+        fileset = fileset.unions [
+          ./src/coreref_flow/__init__.py
+          (withoutBytecode ./src/coreref_flow/stages)
+        ];
+      };
+      cliSource = fileset.toSource {
+        root = ./.;
+        fileset = fileset.unions [
+          ./pyproject.toml
+          ./README.md
+          (withoutBytecode ./src)
+        ];
+      };
+      metadata = (builtins.fromTOML (builtins.readFile ./pyproject.toml)).project;
       edalize =
         p:
         p.buildPythonPackage {
@@ -40,15 +64,71 @@
             "edalize.flows.sim"
           ];
         };
+      bySystem = forSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          corerefPackage = coreref.packages.${system}.default;
+          stageModules = pkgs.python3Packages.toPythonModule (
+            pkgs.runCommand "coreref-flow-stages" { } ''
+              mkdir -p "$out/${pkgs.python3.sitePackages}/coreref_flow"
+              cp -R ${stageSource}/. "$out/${pkgs.python3.sitePackages}/coreref_flow/"
+            ''
+          );
+          python =
+            extra:
+            pkgs.python3.withPackages (
+              p:
+              [
+                corerefPackage
+                stageModules
+              ]
+              ++ extra p
+            );
+          cli = pkgs.python3Packages.buildPythonPackage {
+            pname = metadata.name;
+            inherit (metadata) version;
+            pyproject = true;
+            src = cliSource;
+            build-system = [ pkgs.python3Packages.hatchling ];
+            dependencies = [
+              corerefPackage
+              pkgs.python3Packages.typer
+            ];
+            pythonImportsCheck = [ "coreref_flow.cli" ];
+          };
+        in
+        {
+          inherit cli;
+          project = import ./nix/project.nix { inherit verilatorPkgs edalize; } {
+            inherit pkgs system;
+            mkStage = coreref.lib.mkStage { inherit pkgs python; };
+          };
+          shell = pkgs.mkShell {
+            packages = [ (pkgs.python3.withPackages (_: [ cli ])) ];
+          };
+        }
+      );
+      apps = lib.mapAttrs (_: flow: {
+        flow = {
+          type = "app";
+          program = "${flow.cli}/bin/coreref-flow";
+        };
+      }) bySystem;
+      devShells = lib.mapAttrs (_: flow: { default = flow.shell; }) bySystem;
     in
-    coreref.lib.mkFlow {
-      inherit nixpkgs;
-      source = ./.;
-      project = import ./nix/project.nix {
-        inherit verilatorPkgs edalize;
-        inherit (coreref.lib) selectComponents;
-      };
-      cli = "coreref-flow";
-      pythonDependencies = p: [ p.typer ];
+    {
+      inherit apps devShells;
+      packages = lib.mapAttrs (_: flow: { default = flow.cli; }) bySystem;
+      lib.mkProject =
+        config:
+        let
+          projects = lib.mapAttrs (_: flow: flow.project config) bySystem;
+        in
+        {
+          inherit apps devShells;
+          packages = lib.mapAttrs (_: project: project.packages) projects;
+          lib.componentFor = system: projects.${system}.component;
+        };
     };
 }

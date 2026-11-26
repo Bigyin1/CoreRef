@@ -76,8 +76,9 @@ Liberty, LEF и GDS для каждой геометрии. Верхний си�
 `counter.lib.variants.plus-1` увеличивает счётчик на 1, а
 `counter.lib.variants.plus-3` увеличивает его на 3. SoC подключает один
 из них в `dependencies` через `counterVariant.lib.componentFor system`.
-Для каждой конфигурации Nix отдельно предоставляет цели, например
-`nix build .#plus-3-netlist .#plus-3-gds` из проекта `counter`.
+Каждая конфигурация предоставляет свои цели. В окружении проекта
+`counter` команда `coreref-flow targets` покажет их, а
+`coreref-flow plus-3-gds` соберёт GDS выбранного варианта.
 
 Ревизию зависимости выбирает `flake.lock`. Пока SoC использует старый lock,
 новый коммит в репозитории макроблока не меняет сборку. После обновления lock
@@ -106,5 +107,5 @@ rtl = if dftReady then dftRoute.artifact else rtlRoute.forSynth.artifacts.out;
 ~~~
 
 При `dft.enabled = false` или отсутствии скрипта синтез получает обычный RTL с теми же правилами выбора
-макроблоков. Ошибка выполнения Tcl завершает сборку DFT, её вывод доступен
-через `nix log .#dft`.
+макроблоков. Ошибка выполнения Tcl завершает сборку DFT.
+Её вывод доступен через `coreref-flow log dft`.

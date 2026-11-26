@@ -137,6 +137,8 @@ let
 in
 {
   check =
+    assert import ./component-selection.nix { inherit lib; };
+    assert builtins.attrNames core.lib == [ "mkStage" ];
     assert builtins.attrNames soc.apps.${system} == [ "flow" ];
     assert lib.isDerivation soc.devShells.${system}.default;
     assert lib.hasSuffix "-soc-dft/hdl" synth;

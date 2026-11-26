@@ -10,37 +10,29 @@
         "aarch64-linux"
         "x86_64-linux"
       ];
-      forSystems = nixpkgs.lib.genAttrs systems;
-      core = rec {
-        mkStage = import ./nix/mk-stage.nix;
-        selectComponents = import ./nix/dependencies.nix { inherit (nixpkgs) lib; };
-        pythonPackage = import ./nix/python.nix {
-          source = ./.;
-          imports = [ "coreref" ];
-        };
-        mkFlow = import ./nix/flow.nix { inherit systems mkStage pythonPackage; };
-      };
+      mkStage = import ./nix/mk-stage.nix;
+      forSystems =
+        f:
+        nixpkgs.lib.genAttrs systems (
+          system:
+          let
+            pkgs = nixpkgs.legacyPackages.${system};
+          in
+          f {
+            inherit pkgs mkStage;
+            coreref = import ./nix/python.nix { inherit pkgs; };
+          }
+        );
     in
     {
-      lib = core;
+      lib = { inherit mkStage; };
       packages = forSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
+        { pkgs, coreref, ... }@args:
         {
-          default = core.pythonPackage pkgs.python3Packages;
+          default = coreref;
         }
-        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
-          import ./tests/nix/licensed.nix { inherit pkgs core; }
-        )
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (import ./tests/nix/licensed.nix args)
       );
-      checks = forSystems (
-        system:
-        import ./tests/nix {
-          inherit core;
-          pkgs = nixpkgs.legacyPackages.${system};
-        }
-      );
+      checks = forSystems (import ./tests/nix);
     };
 }

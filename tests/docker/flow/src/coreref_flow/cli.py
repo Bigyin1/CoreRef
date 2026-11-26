@@ -21,7 +21,7 @@ workspace = typer.Typer(help="Manage local input overrides.", no_args_is_help=Tr
 app.add_typer(workspace, name="workspace")
 
 ProjectOption = Annotated[str, typer.Option(help="Project flake reference.")]
-_COMMANDS = {"build", "deps", "lock", "workspace"}
+_COMMANDS = {"build", "targets", "log", "deps", "lock", "workspace"}
 
 
 @app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
@@ -38,6 +38,19 @@ def build(
         project = "."
     for path in Project(project).build(target, options=options):
         typer.echo(path)
+
+
+@app.command()
+def targets(project: ProjectOption = ".") -> None:
+    """List all build targets available for this project."""
+    for target in Project(project).targets():
+        typer.echo(target)
+
+
+@app.command()
+def log(target: str, project: ProjectOption = ".") -> None:
+    """Show the build log for a target."""
+    typer.echo(Project(project).log(target), nl=False)
 
 
 @app.command()

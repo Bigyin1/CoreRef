@@ -54,3 +54,27 @@ def test_cli_preserves_nix_exit_code() -> None:
         with pytest.raises(SystemExit) as exit_status:
             main(["build", "rtl"])
     assert exit_status.value.code == 42
+
+
+@pytest.mark.parametrize(
+    ("arguments", "value", "stdout"),
+    [
+        (["targets"], ("gds", "rtl"), "gds\nrtl\n"),
+        (["log", "rtl"], "building RTL\n", "building RTL\n"),
+    ],
+)
+def test_inspection_commands(
+    arguments: list[str],
+    value: tuple[str, ...] | str,
+    stdout: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with patch("coreref_flow.cli.Project") as sdk:
+        method = getattr(sdk.return_value, arguments[0])
+        method.return_value = value
+        with pytest.raises(SystemExit) as exit_status:
+            main([*arguments, "--project", "path:/project"])
+        sdk.assert_called_once_with("path:/project")
+        method.assert_called_once_with(*arguments[1:])
+    assert exit_status.value.code == 0
+    assert capsys.readouterr().out == stdout

@@ -1,34 +1,22 @@
-# Package a Python distribution from the pinned source of its flake.
-{
-  source,
-  dependencies ? (_: [ ]),
-  imports ? [ ],
-}:
-pythonPackages:
+# Package CoreRef for Nix stage runtimes and Python applications.
+{ pkgs }:
 let
-  inherit (pythonPackages) buildPythonPackage hatchling;
-  inherit (pythonPackages.pkgs.lib.fileset)
-    unions
-    toSource
-    fileFilter
-    maybeMissing
-    ;
-  projectFile = source + "/pyproject.toml";
-  project = (builtins.fromTOML (builtins.readFile projectFile)).project;
+  inherit (pkgs.python3Packages) buildPythonPackage hatchling;
+  inherit (pkgs.lib) fileset;
+  project = (builtins.fromTOML (builtins.readFile ../pyproject.toml)).project;
 in
 buildPythonPackage {
   pname = project.name;
   inherit (project) version;
   pyproject = true;
-  src = toSource {
-    root = source;
-    fileset = unions [
-      projectFile
-      (maybeMissing (source + "/README.md"))
-      (fileFilter (file: file.hasExt "py" || file.name == "py.typed") (source + "/src"))
+  src = fileset.toSource {
+    root = ../.;
+    fileset = fileset.unions [
+      ../pyproject.toml
+      ../README.md
+      (fileset.fileFilter (file: file.hasExt "py" || file.name == "py.typed") ../src)
     ];
   };
   build-system = [ hatchling ];
-  dependencies = dependencies pythonPackages;
-  pythonImportsCheck = imports;
+  pythonImportsCheck = [ "coreref" ];
 }

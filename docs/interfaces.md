@@ -2,9 +2,10 @@
 
 ## Для CLI на Python
 
-`Project` работает с локальной директорией или flake URL. `build()` возвращает
-пути выбранных результатов в Nix store, `dependencies()` показывает прямые
-входы проекта и закреплённые ревизии.
+`Project` работает с локальной директорией или flake URL. `targets()` перечисляет
+цели текущей платформы, `build()` возвращает пути выбранных результатов в Nix store,
+а `log()` читает лог цели. Эти методы учитывают локальные подстановки.
+`dependencies()` показывает прямые входы проекта и закреплённые ревизии.
 
 ~~~python
 from pathlib import Path
@@ -33,35 +34,15 @@ print(netlist / "netlist.v")
 
 ## Для автора маршрута
 
-Флейк Flow вызывает `coreref.lib.mkFlow` с `nixpkgs`, `source` и функцией
-`project`. В корне `source` находятся `pyproject.toml` для Hatchling и каталог
-`src`. `pythonDependencies` добавляет зависимости Python-пакета Flow. Имя
-скрипта из `project.scripts`, переданное в `cli`, выставляет приложение
-`nix run .#flow`. В каталоге проекта `nix develop` даёт Python, CoreRef и
-Flow с зависимостями из закреплённого nixpkgs.
+Флейк объявляет `packages`, `checks`, `apps` и `devShells` обычными средствами Nix.
+CoreRef предоставляет `coreref.lib.mkStage` для запуска Python-функции в отдельной
+деривации. Автор маршрута определяет платформы, связи между стадиями и правила
+выбора представлений IP в своём флейке.
 
-Функция `project = { pkgs, system, mkStage }: config: ...` вызывается из
-`flow.lib.mkProject config` для каждой платформы. Она возвращает `packages` и
-`component`. Flow определяет форму `config` и выбирает готовый маршрут.
-Например, экспериментальный Flow принимает `profile`, `name`, `source`,
-настройки стадий `rtl`, `dft`, `backend` и `memory`, параметры проекта
-и функцию `dependencies` от платформы.
-
-`lib.componentFor system` даёт доступ к компоненту с полями `name`, `id`,
-`kind`, `views`, `parameters` и `dependencies`. Библиотечная функция
-`selectComponents { roots, stopAt, filter }` возвращает достижимые компоненты
-в порядке зависимостей. Предикат `stopAt` обрезает ветвь после выбранного узла,
-а `filter` отбирает компоненты из результатов обхода. Общая зависимость
-включается один раз, если она достижима хотя бы по одному пути. Две ревизии
-одного компонента или разные наборы его зависимостей в области обхода
-считаются конфликтом. Фильтр применяется к уже упорядоченному списку. Для сравнения представлений
-передайте `viewKey = component: component.views.rtl` или другую функцию выбора.
-При повторном имени сравниваются ID и выбранные входы, включая порядок файлов.
-Несовместимые представления вызывают ошибку с обоими путями к компоненту.
-
-Для параметризуемых зависимостей Flow или сам проект могут экспортировать
-обычную Nix-функцию. Например, нужное представление SRAM доступно через
-`(sram.lib.mkSram { depth = 5; width = 3; }).lib.componentFor system`.
+Экспериментальный flow экспортирует собственные `lib.mkProject config` и
+`lib.componentFor system`. Параметризуемую зависимость можно объявить обычной
+Nix-функцией. Например, проект SRAM экспортирует `lib.mkSram { depth = 5; width = 3; }`.
+Потребитель получает через `lib.componentFor system` представления выбранной конфигурации.
 
 ### Стадии
 
@@ -87,9 +68,31 @@ Flow с зависимостями из закреплённого nixpkgs.
   Вызовы `stage.inline.<output>` из прежних Flow заменяются на
   `stage.artifacts.<output>`.
 
-При прямом вызове используйте `coreref.lib.mkStage { inherit pkgs python; } spec`.
-`python` принимает функцию выбора пакетов и возвращает интерпретатор
-с CoreRef, модулем преобразования и выбранными пакетами.
+Для вызова передайте выбранный набор Nix-пакетов и функцию создания
+Python-окружения. Пакет CoreRef доступен как `coreref.packages.${system}.default`.
+Если используете его в окружении из `pkgs`, настройте во флейке
+`inputs.coreref.inputs.nixpkgs.follows = "nixpkgs"`, чтобы Python-пакеты
+использовали один nixpkgs.
+
+~~~nix
+let
+  python = extra: pkgs.python3.withPackages (p:
+    [ coreref.packages.${system}.default flowStages ] ++ extra p);
+  stage = coreref.lib.mkStage { inherit pkgs python; };
+in
+stage {
+  name = "synth";
+  transform = "example_flow.synth:run";
+  inputs.rtl = rtl.artifacts.out;
+  nativeBuildInputs = [ pkgs.yosys ];
+  outputs.out = "netlist.v";
+}
+~~~
+
+В примере `flowStages` содержит Python-модуль `example_flow.synth`, а `rtl`
+является предыдущей стадией маршрута. В экспериментальном flow код стадий
+упакован отдельно от CLI. Изменение CLI или его зависимостей сохраняет ключи
+сборки стадий.
 
 Функция Python получает `work: Path`, `log: Path` и
 `configuration: Mapping[str, object]`. Runner раскладывает объявленные входы
